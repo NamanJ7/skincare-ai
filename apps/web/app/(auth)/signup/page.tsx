@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Field } from "@/components/auth/Field";
 import { Button } from "@/components/ui/Button";
-import { GoogleIcon, CheckIcon } from "@/components/ui/icons";
+import { GoogleIcon, CheckIcon, CameraIcon } from "@/components/ui/icons";
 import { MEDICAL_DISCLAIMER } from "@/lib/nav";
 
 const SKIN_GOALS = [
@@ -32,7 +32,8 @@ export default function SignupPage() {
       <div className="rounded-[28px] border border-hairline bg-surface p-7 shadow-[var(--shadow-lift)] sm:p-9">
         <h1 className="font-display text-2xl text-ink">Create your account</h1>
         <p className="mt-1.5 text-sm text-ink-muted">
-          Start building a skincare routine that actually makes sense.
+          Start with a guided face photo, then build a skincare routine that
+          actually makes sense.
         </p>
 
         <form
@@ -85,6 +86,19 @@ export default function SignupPage() {
                   </button>
                 );
               })}
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-[#e4dcf3] bg-accent-soft px-4 py-3">
+            <div className="flex items-start gap-3">
+              <span className="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-xl bg-accent text-accent-ink">
+                <CameraIcon size={16} />
+              </span>
+              <p className="text-sm leading-relaxed text-accent-ink">
+                After signup, Pore will ask you to take a clear picture of your
+                face so recommendations can start from what is visible, not just
+                selected goals.
+              </p>
             </div>
           </div>
 

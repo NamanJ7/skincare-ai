@@ -4,7 +4,7 @@ import { WaitlistButton } from "../ui/WaitlistButton";
 import { Reveal } from "../ui/Reveal";
 import { Glow } from "../ui/Glow";
 import { DashboardMock } from "../mockups/DashboardMock";
-import { CheckIcon, SparkleIcon, ChartIcon } from "../ui/icons";
+import { CheckIcon, SparkleIcon, ChartIcon, CameraIcon } from "../ui/icons";
 
 export function Hero() {
   return (
@@ -24,7 +24,7 @@ export function Hero() {
           <div>
             <Reveal>
               <p className="text-xs font-semibold uppercase tracking-[0.2em] text-primary">
-                Your personalized skincare companion
+                Face photo guidance
               </p>
             </Reveal>
             <Reveal delay={60}>
@@ -42,8 +42,8 @@ export function Hero() {
             <Reveal delay={120}>
               <p className="mt-5 max-w-xl text-lg leading-relaxed text-ink-muted">
                 Pore helps you build, track, and improve your skincare routine
-                with personalized guidance based on your skin, products, goals,
-                and progress.
+                by starting with a guided photo of your face, then pairing what
+                it sees with your products, goals, and progress.
               </p>
             </Reveal>
             <Reveal delay={180}>
@@ -59,7 +59,7 @@ export function Hero() {
                 <span className="grid h-5 w-5 place-items-center rounded-full bg-primary/10 text-primary">
                   <CheckIcon size={12} />
                 </span>
-                Personalized routines. Smarter product choices. Clearer progress.
+                Face photo first. Smarter product choices. Clearer progress.
               </p>
             </Reveal>
           </div>
@@ -72,10 +72,10 @@ export function Hero() {
               {/* floating callouts */}
               <FloatCard
                 className="absolute -left-4 top-16 hidden sm:flex"
-                icon={<CheckIcon size={14} />}
+                icon={<CameraIcon size={14} />}
                 tone="primary"
-                title="Ingredient check"
-                sub="Safe to layer"
+                title="Face photo scan"
+                sub="Visible cues mapped"
               />
               <FloatCard
                 className="absolute -right-3 bottom-20 hidden sm:flex"

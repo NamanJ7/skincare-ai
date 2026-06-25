@@ -5,6 +5,7 @@ import { DashboardMock } from "../mockups/DashboardMock";
 import { CheckIcon } from "../ui/icons";
 
 const BENEFITS = [
+  "Start with a guided picture of your face",
   "Build a routine you can actually stick to",
   "Understand ingredients before combining them",
   "Track what your skin responds to over time",

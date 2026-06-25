@@ -7,8 +7,9 @@ import { ProgressMock } from "../mockups/ProgressMock";
 import { ProductCardMock } from "../mockups/ProductCardMock";
 import { DashboardMock } from "../mockups/DashboardMock";
 import { PhoneFrame } from "../mockups/PhoneFrame";
-import { CheckIcon } from "../ui/icons";
+import { CameraIcon, CheckIcon } from "../ui/icons";
 import { Badge } from "../ui/Badge";
+import { FaceScanMock } from "../mockups/FaceScanMock";
 
 type Tab = {
   id: string;
@@ -22,13 +23,25 @@ type Tab = {
 
 const TABS: Tab[] = [
   {
+    id: "face-photo",
+    label: "Face photo",
+    title: "Take a picture of your face first.",
+    body: "Pore starts with a guided face photo so the routine is grounded in visible skin cues, not just a quiz about goals.",
+    points: [
+      "Camera-led skin check before the routine",
+      "Visible cues paired with goals and preferences",
+      "A clearer reason behind every recommendation",
+    ],
+    visual: <FaceScanMock />,
+  },
+  {
     id: "routines",
     label: "Personalized routines",
-    title: "A routine built around your skin.",
-    body: "Answer a few questions about your skin, goals, and current products, and Pore shapes a simple AM and PM routine you can actually keep.",
+    title: "A routine built around your face photo.",
+    body: "After your face photo and a few short questions, Pore shapes a simple AM and PM routine you can actually keep.",
     points: [
       "Simple AM / PM steps, in the right order",
-      "Built from your goals and preferences",
+      "Built from your photo, goals, and preferences",
       "A clear reason behind every step",
     ],
     visual: <RoutineChecklistMock />,
@@ -37,7 +50,7 @@ const TABS: Tab[] = [
     id: "shelf",
     label: "Product shelf",
     title: "Your products, organized and understood.",
-    body: "Add what you already own so Pore builds around your real shelf — helping you simplify instead of constantly buying more.",
+    body: "Add what you already own so Pore builds around your real shelf - helping you simplify instead of constantly buying more.",
     points: [
       "Catalog what you already use",
       "See ingredient highlights at a glance",
@@ -73,7 +86,7 @@ const TABS: Tab[] = [
     id: "guidance",
     label: "AI guidance",
     title: "Guidance designed around your routine.",
-    body: "Pore offers personalized, plain-language guidance as your skin changes — focused on routine support and ingredient education, not trends.",
+    body: "Pore offers personalized, plain-language guidance as your skin changes - focused on routine support and ingredient education, not trends.",
     points: [
       "Personalized tips as your skin shifts",
       "Education-first, never medical claims",
@@ -150,7 +163,11 @@ export function FeatureTabs() {
             {tab.points.map((p) => (
               <li key={p} className="flex items-start gap-2.5 text-sm text-ink">
                 <span className="mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full bg-primary/10 text-primary">
-                  <CheckIcon size={12} />
+                  {tab.id === "face-photo" ? (
+                    <CameraIcon size={12} />
+                  ) : (
+                    <CheckIcon size={12} />
+                  )}
                 </span>
                 {p}
               </li>

@@ -6,21 +6,52 @@ import { WaitlistButton } from "@/components/ui/WaitlistButton";
 import { Button } from "@/components/ui/Button";
 import { FeatureTabs } from "@/components/features/FeatureTabs";
 import { FinalCTA } from "@/components/sections/FinalCTA";
-import { DropIcon, LeafIcon, CheckIcon, ChartIcon, SparkleIcon, CameraIcon } from "@/components/ui/icons";
+import {
+  CameraIcon,
+  DropIcon,
+  LeafIcon,
+  CheckIcon,
+  ChartIcon,
+  SparkleIcon,
+} from "@/components/ui/icons";
 
 export const metadata: Metadata = {
   title: "Features",
   description:
-    "Personalized routines, a product shelf you understand, ingredient compatibility, progress tracking, and AI guidance — explore everything Pore does.",
+    "Guided face photos, personalized routines, a product shelf you understand, ingredient compatibility, progress tracking, and AI guidance - explore everything Pore does.",
 };
 
 const HIGHLIGHTS = [
-  { icon: <DropIcon size={20} />, title: "Personalized routines", body: "Simple AM / PM routines shaped by your skin, goals, and products." },
-  { icon: <LeafIcon size={20} />, title: "Product shelf", body: "Catalog what you own so Pore builds around your real routine." },
-  { icon: <CheckIcon size={20} />, title: "Ingredient compatibility", body: "Avoid irritating combinations with gentle, plain-language checks." },
-  { icon: <ChartIcon size={20} />, title: "Progress tracking", body: "Track consistency, notes, and visible changes over time." },
-  { icon: <SparkleIcon size={20} />, title: "AI guidance", body: "Personalized guidance as your skin changes — education, not diagnosis." },
-  { icon: <CameraIcon size={20} />, title: "Future mobile access", body: "Start on the web; mobile access is coming soon." },
+  {
+    icon: <CameraIcon size={20} />,
+    title: "Guided face photo",
+    body: "Start by taking a clear picture of your face so Pore can read visible skin cues.",
+  },
+  {
+    icon: <DropIcon size={20} />,
+    title: "Personalized routines",
+    body: "Simple AM / PM routines shaped by your face photo, goals, and products.",
+  },
+  {
+    icon: <LeafIcon size={20} />,
+    title: "Product shelf",
+    body: "Catalog what you own so Pore builds around your real routine.",
+  },
+  {
+    icon: <CheckIcon size={20} />,
+    title: "Ingredient compatibility",
+    body: "Avoid irritating combinations with gentle, plain-language checks.",
+  },
+  {
+    icon: <ChartIcon size={20} />,
+    title: "Progress tracking",
+    body: "Track consistency, notes, and visible changes over time.",
+  },
+  {
+    icon: <SparkleIcon size={20} />,
+    title: "AI guidance",
+    body: "Personalized guidance as your skin changes - education, not diagnosis.",
+  },
 ];
 
 export default function FeaturesPage() {
@@ -29,7 +60,7 @@ export default function FeaturesPage() {
       <PageHero
         eyebrow="Features"
         title={<>Everything you need for a routine that makes sense.</>}
-        lede="Pore brings your skin, products, goals, and progress into one place — with a clear reason behind every step."
+        lede="Pore starts with a guided picture of your face, then brings your products, goals, and progress into one place - with a clear reason behind every step."
       >
         <div className="flex flex-col justify-center gap-3 sm:flex-row">
           <WaitlistButton size="lg" />
@@ -48,7 +79,9 @@ export default function FeaturesPage() {
                 <span className="grid h-11 w-11 place-items-center rounded-xl bg-primary/10 text-primary">
                   {h.icon}
                 </span>
-                <h3 className="mt-4 font-display text-lg text-ink">{h.title}</h3>
+                <h3 className="mt-4 font-display text-lg text-ink">
+                  {h.title}
+                </h3>
                 <p className="mt-2 text-sm leading-relaxed text-ink-muted">
                   {h.body}
                 </p>

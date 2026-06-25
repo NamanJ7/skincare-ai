@@ -2,10 +2,10 @@ import { type ReactNode } from "react";
 import { Section, SectionHeading } from "../ui/Section";
 import { Reveal } from "../ui/Reveal";
 import { Badge } from "../ui/Badge";
-import { RoutineChecklistMock } from "../mockups/RoutineChecklistMock";
 import { CompatibilityMock } from "../mockups/CompatibilityMock";
 import { ProgressMock } from "../mockups/ProgressMock";
 import { ProductCardMock } from "../mockups/ProductCardMock";
+import { FaceScanMock } from "../mockups/FaceScanMock";
 
 type Tone = "cream" | "lavender" | "muted" | "surface";
 
@@ -19,11 +19,11 @@ const FEATURES: {
 }[] = [
   {
     index: "01",
-    eyebrow: "Personalized Routine Builder",
-    title: "A routine built around your skin.",
-    body: "Pore helps you build simple AM and PM routines based on your skin concerns, goals, current products, and preferences — no 12-step guesswork.",
+    eyebrow: "Guided Face Photo",
+    title: "Start with a picture of your face.",
+    body: "Pore begins with a clear face photo, then uses visible skin cues alongside your concerns, products, and preferences to build a routine that fits.",
     tone: "surface",
-    visual: <RoutineChecklistMock />,
+    visual: <FaceScanMock />,
   },
   {
     index: "02",
@@ -37,7 +37,7 @@ const FEATURES: {
     index: "03",
     eyebrow: "Track Your Progress",
     title: "See what is actually helping.",
-    body: "Log your routine, track skin changes over time, and understand which products are worth keeping — with notes and photo comparisons.",
+    body: "Log your routine, track skin changes over time, and understand which products are worth keeping - with notes and photo comparisons.",
     tone: "cream",
     visual: <ProgressMock />,
   },
@@ -45,7 +45,7 @@ const FEATURES: {
     index: "04",
     eyebrow: "Smarter Product Guidance",
     title: "Stop buying products that don't fit.",
-    body: "Pore helps you understand what products may support your goals before adding more to your shelf — with a clear routine-fit signal.",
+    body: "Pore helps you understand what products may support your goals before adding more to your shelf - with a clear routine-fit signal.",
     tone: "muted",
     visual: <ProductCardMock />,
   },
@@ -56,8 +56,8 @@ export function FeatureCards() {
     <Section id="features" tone="canvas">
       <Reveal>
         <SectionHeading
-          eyebrow="What does Pore include?"
-          title="Everything your skincare routine has been missing."
+          eyebrow="Inside Pore"
+          title="Start with a face photo. Build from there."
         />
       </Reveal>
 

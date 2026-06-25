@@ -17,14 +17,14 @@ export const PRODUCT_UPDATES: ProductUpdate[] = [
     date: "June 2026",
     status: "live",
     title: "Pore Waitlist Is Open",
-    body: "Be among the first to experience personalized skincare guidance built around your skin, products, and goals.",
+    body: "Be among the first to experience skincare guidance that starts with a guided photo of your face, then builds around your products and goals.",
   },
   {
     id: "compatibility-engine",
     date: "Coming soon",
     status: "soon",
     title: "Routine Compatibility Engine",
-    body: "A clearer way to understand whether your skincare products work well together — before you layer them.",
+    body: "A clearer way to understand whether your skincare products work well together - before you layer them.",
   },
   {
     id: "progress-tracking",

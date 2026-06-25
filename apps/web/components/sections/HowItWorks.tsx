@@ -1,13 +1,13 @@
 import { Section, SectionHeading } from "../ui/Section";
 import { Reveal } from "../ui/Reveal";
-import { DropIcon, LeafIcon, ChartIcon } from "../ui/icons";
+import { CameraIcon, LeafIcon, ChartIcon } from "../ui/icons";
 
 const STEPS = [
   {
     n: "1",
-    icon: <DropIcon size={22} />,
-    title: "Tell Pore about your skin",
-    body: "Share your skin goals, concerns, preferences, and current routine.",
+    icon: <CameraIcon size={22} />,
+    title: "Take a picture of your face",
+    body: "Start with a guided face photo so Pore can understand visible skin cues before it asks about goals, preferences, and routine.",
   },
   {
     n: "2",
@@ -29,7 +29,7 @@ export function HowItWorks() {
       <Reveal>
         <SectionHeading
           eyebrow="How it works"
-          title="A better skincare routine in three simple steps."
+          title="A better skincare routine starts with your face photo."
         />
       </Reveal>
 

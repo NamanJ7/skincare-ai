@@ -21,15 +21,15 @@ const inter = Inter({
 export const metadata: Metadata = {
   metadataBase: new URL("https://pore.skin"),
   title: {
-    default: "Pore — Skincare that understands your skin",
-    template: "%s — Pore",
+    default: "Pore - Skincare that understands your skin",
+    template: "%s - Pore",
   },
   description:
-    "Pore helps you build, track, and improve your skincare routine with personalized guidance based on your skin, products, goals, and progress.",
+    "Pore helps you build, track, and improve your skincare routine with personalized guidance that starts from a guided photo of your face.",
   openGraph: {
-    title: "Pore — Skincare that understands your skin",
+    title: "Pore - Skincare that understands your skin",
     description:
-      "Personalized routines. Smarter product choices. Clearer progress.",
+      "Start with a face photo. Get smarter routines, product choices, and progress tracking.",
     type: "website",
   },
   icons: {
@@ -55,7 +55,7 @@ export default function RootLayout({
     >
       <body className="min-h-full flex flex-col bg-canvas text-ink">
         {children}
-        {/* Tally popup widget — drives every "Join the Waitlist" CTA (form LZVOM2). */}
+        {/* Tally popup widget - drives every "Join the Waitlist" CTA (form LZVOM2). */}
         <Script
           src="https://tally.so/widgets/embed.js"
           strategy="afterInteractive"
