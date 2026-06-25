@@ -21,10 +21,10 @@ export default function ContactPage() {
           <p className="text-base leading-relaxed text-ink-muted">
             Reach the Pore team any time at{" "}
             <a
-              href="mailto:hello@pore.skin"
+              href="mailto:reachporeai@gmail.com"
               className="font-semibold text-primary hover:underline"
             >
-              hello@pore.skin
+              reachporeai@gmail.com
             </a>
             .
           </p>
