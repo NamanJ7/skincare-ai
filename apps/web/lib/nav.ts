@@ -26,6 +26,7 @@ export const LEGAL_LINKS: NavLink[] = [
 export const SOCIAL_LINKS: NavLink[] = [
   { label: "Instagram", href: "https://www.instagram.com/getpore.ai/" },
   { label: "TikTok", href: "https://www.tiktok.com/@pore.ai" },
+  { label: "LinkedIn", href: "https://www.linkedin.com/company/poreai/" },
 ];
 
 export const MEDICAL_DISCLAIMER =
