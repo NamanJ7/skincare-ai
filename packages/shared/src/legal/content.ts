@@ -1,11 +1,21 @@
 /**
  * Pore's legal copy — the single source of truth for both clients.
  *
- * IMPORTANT: the wording below is reproduced verbatim from the pre-launch
+ * IMPORTANT: the original wording is reproduced verbatim from the pre-launch
  * pages it replaced (apps/web/app/(site)/privacy and /terms). The redesign
- * regrouped the existing sentences under headings so the documents can be
- * scanned; it did not add, remove, soften, or reinterpret a single word.
- * Treat every string here as legal text — restructure freely, reword never.
+ * regrouped the existing sentences under headings; it did not add, remove,
+ * soften, or reinterpret a single word of them.
+ *
+ * Sentences marked "Disclosure" below were added later. Each states a fact
+ * about how the deployed site behaves, verified against the code — never a
+ * promise, a retention period, or a commitment. Anything not determinable
+ * from the code is left to the "Not yet covered" note instead of guessed at.
+ *
+ * If the site's data flow changes, these sentences must change with it. In
+ * particular: adding analytics, adding a second form provider, or wiring
+ * app/api/waitlist/route.ts up to a client would each make the current text
+ * wrong. Treat every string here as legal text — restructure freely, reword
+ * never.
  */
 import type { LegalDocument } from "./types";
 
@@ -63,6 +73,18 @@ export const PRIVACY_POLICY: LegalDocument = {
         {
           kind: "paragraph",
           text: "Waitlist signups are handled through our form provider.",
+        },
+        {
+          // Disclosure. TALLY_FORM_ID in apps/web/lib/tally.ts; the widget
+          // script is loaded site-wide in apps/web/app/layout.tsx.
+          kind: "paragraph",
+          text: "That provider is Tally. When you open or submit the waitlist form, the answers you give are sent to Tally, which holds them on our behalf.",
+        },
+        {
+          // Disclosure. Verified in a browser: tally.so is the only
+          // third-party host the site contacts on load.
+          kind: "paragraph",
+          text: "Tally's form script loads on every page of this site. Apart from that, this site does not load analytics or advertising trackers.",
         },
       ],
     },
