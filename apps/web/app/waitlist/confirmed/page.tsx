@@ -4,7 +4,7 @@ import { Logo } from "@/components/layout/Logo";
 import { Button } from "@/components/ui/Button";
 import { Glow } from "@/components/ui/Glow";
 import { CheckIcon, SunIcon, SparkleIcon } from "@/components/ui/icons";
-import { SOCIAL_LINKS } from "@/lib/nav";
+import { LEGAL_LINKS, SOCIAL_LINKS } from "@/lib/nav";
 
 export const metadata: Metadata = {
   title: "You're on the list",
@@ -85,7 +85,24 @@ export default function WaitlistConfirmedPage() {
       </main>
 
       <footer className="relative px-5 pb-8 text-center">
-        <Link href="/" className="text-xs text-ink-muted hover:text-ink">
+        <nav
+          aria-label="Legal"
+          className="flex flex-wrap items-center justify-center gap-x-5 gap-y-2"
+        >
+          {LEGAL_LINKS.map((link) => (
+            <Link
+              key={link.href}
+              href={link.href}
+              className="text-xs text-ink-muted underline underline-offset-4 transition-colors hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-2 focus-visible:ring-offset-canvas"
+            >
+              {link.label}
+            </Link>
+          ))}
+        </nav>
+        <Link
+          href="/"
+          className="mt-4 inline-block text-xs text-ink-muted hover:text-ink"
+        >
           © {new Date().getFullYear()} Pore
         </Link>
       </footer>

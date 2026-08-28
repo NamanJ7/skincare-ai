@@ -1,6 +1,6 @@
 import { router } from "expo-router";
 import { useState } from "react";
-import { ActivityIndicator, View } from "react-native";
+import { ActivityIndicator, Pressable, View } from "react-native";
 
 import { fetchPlan } from "@/lib/api";
 import { buildIntake } from "@/lib/intake";
@@ -74,9 +74,23 @@ export default function PhotoCapture() {
         <PrimaryButton label="Analyze my skin" onPress={analyze} />
       )}
 
-      <AppText variant="caption" color={colors.inkMuted} style={{ textAlign: "center" }}>
-        Your photos are private and you can delete them anytime.
-      </AppText>
+      {/* Existing privacy line, now a route into the full Privacy Policy. */}
+      <Pressable
+        onPress={() => router.push("/legal/privacy")}
+        accessibilityRole="link"
+        accessibilityLabel="Your photos are private and you can delete them anytime. Read the Privacy Policy."
+        style={({ pressed }) => [
+          { minHeight: 44, justifyContent: "center" },
+          pressed && { opacity: 0.6 },
+        ]}
+      >
+        <AppText variant="caption" color={colors.inkMuted} style={{ textAlign: "center" }}>
+          Your photos are private and you can delete them anytime.
+        </AppText>
+        <AppText variant="caption" color={colors.primary} style={{ textAlign: "center" }}>
+          Read the Privacy Policy
+        </AppText>
+      </Pressable>
     </Screen>
   );
 }

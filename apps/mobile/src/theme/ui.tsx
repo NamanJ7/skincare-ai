@@ -4,7 +4,7 @@
  * marketing site stay consistent. Headlines use the Fraunces serif; body + UI
  * use Inter (loaded in the root layout, resolved per-weight in ./fonts).
  */
-import type { ReactNode } from "react";
+import type { ReactNode, RefObject } from "react";
 import {
   Pressable,
   ScrollView,
@@ -53,15 +53,19 @@ export function Screen({
   children,
   scroll = true,
   contentStyle,
+  scrollRef,
 }: {
   children: ReactNode;
   scroll?: boolean;
   contentStyle?: StyleProp<ViewStyle>;
+  /** Opt-in handle on the internal ScrollView, for jump-to-section links. */
+  scrollRef?: RefObject<ScrollView | null>;
 }) {
   return (
     <SafeAreaView style={styles.safe} edges={["top", "bottom"]}>
       {scroll ? (
         <ScrollView
+          ref={scrollRef}
           contentContainerStyle={[styles.content, contentStyle]}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"

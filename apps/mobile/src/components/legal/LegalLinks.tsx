@@ -1,0 +1,52 @@
+/**
+ * Row of links to the legal documents.
+ *
+ * Navigation only — deliberately carries no "by continuing you agree…"
+ * statement, because that would be new legal wording rather than a redesign of
+ * the existing text. A real acceptance flow is a legal-review item.
+ */
+import { router } from "expo-router";
+import { Pressable, StyleSheet, View } from "react-native";
+
+import { AppText, colors, spacing } from "@/theme";
+
+const LINKS = [
+  { label: "Privacy Policy", href: "/legal/privacy" },
+  { label: "Terms of Use", href: "/legal/terms" },
+] as const;
+
+export function LegalLinks({ align = "center" }: { align?: "center" | "left" }) {
+  return (
+    <View style={[styles.row, align === "center" && styles.center]}>
+      {LINKS.map((link, i) => (
+        <View key={link.href} style={styles.item}>
+          {i > 0 ? (
+            <AppText variant="caption" color={colors.hairline} accessible={false}>
+              ·
+            </AppText>
+          ) : null}
+          <Pressable
+            onPress={() => router.push(link.href)}
+            accessibilityRole="link"
+            accessibilityLabel={link.label}
+            hitSlop={8}
+            style={({ pressed }) => [styles.tap, pressed && styles.pressed]}
+          >
+            <AppText variant="caption" color={colors.primary}>
+              {link.label}
+            </AppText>
+          </Pressable>
+        </View>
+      ))}
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  row: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: spacing.xs },
+  center: { justifyContent: "center" },
+  item: { flexDirection: "row", alignItems: "center", gap: spacing.xs },
+  // Keeps the visible caption small while the tappable area stays comfortable.
+  tap: { minHeight: 44, justifyContent: "center" },
+  pressed: { opacity: 0.6 },
+});
