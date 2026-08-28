@@ -9,7 +9,8 @@
     ".": "./src/index.ts",
     "./design": "./src/design/index.ts",
     "./safety": "./src/safety/index.ts",
-    "./types": "./src/types/index.ts"
+    "./types": "./src/types/index.ts",
+    "./legal": "./src/legal/index.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

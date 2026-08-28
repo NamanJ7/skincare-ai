@@ -1,6 +1,6 @@
 import { router } from "expo-router";
 import { useState } from "react";
-import { StyleSheet, TextInput } from "react-native";
+import { Pressable, StyleSheet, TextInput } from "react-native";
 
 import { useOnboarding } from "@/state/onboarding";
 import { AppText, Card, PrimaryButton, Screen, colors, radius, spacing } from "@/theme";
@@ -44,6 +44,16 @@ export default function ParentalConsent() {
           We only use this email to confirm consent. Pore never trains on or sells anyone&apos;s data, and
           photos can be deleted anytime.
         </AppText>
+        <Pressable
+          onPress={() => router.push("/legal/privacy")}
+          accessibilityRole="link"
+          accessibilityLabel="Read the Privacy Policy"
+          style={({ pressed }) => [styles.link, pressed && styles.pressed]}
+        >
+          <AppText variant="caption" color={colors.primary}>
+            Read the Privacy Policy
+          </AppText>
+        </Pressable>
       </Card>
 
       <PrimaryButton label="Send approval request" onPress={onContinue} disabled={!valid} />
@@ -52,6 +62,8 @@ export default function ParentalConsent() {
 }
 
 const styles = StyleSheet.create({
+  link: { minHeight: 44, justifyContent: "center" },
+  pressed: { opacity: 0.6 },
   input: {
     backgroundColor: colors.surface,
     borderWidth: 1,

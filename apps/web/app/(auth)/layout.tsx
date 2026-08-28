@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { Logo } from "@/components/layout/Logo";
-import { MEDICAL_DISCLAIMER } from "@/lib/nav";
+import { LEGAL_LINKS, MEDICAL_DISCLAIMER } from "@/lib/nav";
 
 /** Minimal chrome for login / sign-up: just the logo and a quiet disclaimer. */
 export default function AuthLayout({
@@ -23,6 +23,20 @@ export default function AuthLayout({
             Back to home
           </Link>
         </p>
+        <nav
+          aria-label="Legal"
+          className="mt-4 flex flex-wrap items-center justify-center gap-x-5 gap-y-2"
+        >
+          {LEGAL_LINKS.map((link) => (
+            <Link
+              key={link.href}
+              href={link.href}
+              className="text-xs text-ink-muted underline underline-offset-4 transition-colors hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-2 focus-visible:ring-offset-canvas"
+            >
+              {link.label}
+            </Link>
+          ))}
+        </nav>
       </footer>
     </div>
   );

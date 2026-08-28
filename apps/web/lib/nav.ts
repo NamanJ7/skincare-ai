@@ -29,5 +29,8 @@ export const SOCIAL_LINKS: NavLink[] = [
   { label: "LinkedIn", href: "https://www.linkedin.com/company/poreai/" },
 ];
 
-export const MEDICAL_DISCLAIMER =
-  "Pore provides skincare education and routine guidance and is not a substitute for professional medical advice.";
+/**
+ * The disclaimer now lives in @pore/shared so the mobile app can use the exact
+ * same string. Re-exported here so existing import sites keep working.
+ */
+export { MEDICAL_DISCLAIMER } from "@pore/shared";

@@ -1,5 +1,6 @@
+import { router } from "expo-router";
 import { useMemo } from "react";
-import { View } from "react-native";
+import { Pressable, View } from "react-native";
 
 import {
   ACTIVES,
@@ -142,6 +143,19 @@ export default function Today() {
           Pore offers cosmetic skincare guidance, not medical advice. If something looks painful, is bleeding,
           spreading quickly, or isn&apos;t improving, please check in with a pharmacist or doctor.
         </AppText>
+        <Pressable
+          onPress={() => router.push("/legal/terms")}
+          accessibilityRole="link"
+          accessibilityLabel="Read the Terms of Use"
+          style={({ pressed }) => [
+            { minHeight: 44, justifyContent: "center" },
+            pressed && { opacity: 0.6 },
+          ]}
+        >
+          <AppText variant="caption" color={colors.primary}>
+            Read the Terms of Use
+          </AppText>
+        </Pressable>
       </Card>
     </Screen>
   );
