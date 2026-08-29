@@ -24,8 +24,8 @@ export default function ParentalConsent() {
     <Screen contentStyle={{ paddingTop: spacing.section }}>
       <AppText variant="title">A parent needs to approve</AppText>
       <AppText variant="body" color={colors.inkMuted}>
-        Since you&apos;re under 18, we&apos;ll ask a parent or guardian to approve before Pore looks at any
-        photos. Enter their email and we&apos;ll send a quick approval request.
+        Since you&apos;re under 18, a parent or guardian needs to approve before Pore looks at any
+        photos. Add their email so we can reach them for approval.
       </AppText>
 
       <TextInput
@@ -41,8 +41,8 @@ export default function ParentalConsent() {
 
       <Card>
         <AppText variant="caption" color={colors.inkMuted}>
-          We only use this email to confirm consent. Pore never trains on or sells anyone&apos;s data, and
-          photos can be deleted anytime.
+          We only use this email to confirm consent. Pore never trains on or sells anyone&apos;s data,
+          and Pore doesn&apos;t store your photos.
         </AppText>
         <Pressable
           onPress={() => router.push("/legal/privacy")}
@@ -56,7 +56,7 @@ export default function ParentalConsent() {
         </Pressable>
       </Card>
 
-      <PrimaryButton label="Send approval request" onPress={onContinue} disabled={!valid} />
+      <PrimaryButton label="Continue" onPress={onContinue} disabled={!valid} />
     </Screen>
   );
 }

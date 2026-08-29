@@ -78,14 +78,14 @@ export default function PhotoCapture() {
       <Pressable
         onPress={() => router.push("/legal/privacy")}
         accessibilityRole="link"
-        accessibilityLabel="Your photos are private and you can delete them anytime. Read the Privacy Policy."
+        accessibilityLabel="Pore doesn't store your photos. Read the Privacy Policy."
         style={({ pressed }) => [
           { minHeight: 44, justifyContent: "center" },
           pressed && { opacity: 0.6 },
         ]}
       >
         <AppText variant="caption" color={colors.inkMuted} style={{ textAlign: "center" }}>
-          Your photos are private and you can delete them anytime.
+          Pore doesn&apos;t store your photos — they&apos;re used for this analysis only.
         </AppText>
         <AppText variant="caption" color={colors.primary} style={{ textAlign: "center" }}>
           Read the Privacy Policy

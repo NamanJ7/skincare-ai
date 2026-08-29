@@ -2,7 +2,7 @@ import { router } from "expo-router";
 import { useState } from "react";
 import { Pressable, View } from "react-native";
 
-import { LegalLinks } from "@/components/legal/LegalLinks";
+import { LegalAgreement } from "@/components/legal/LegalLinks";
 import { AppText, GhostButton, PrimaryButton, Screen, TextField, colors, spacing } from "@/theme";
 
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -64,7 +64,7 @@ export default function SignUp() {
         </AppText>
       </Pressable>
 
-      <LegalLinks />
+      <LegalAgreement />
     </Screen>
   );
 }
