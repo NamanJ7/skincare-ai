@@ -105,6 +105,27 @@ export default function SignupPage() {
           <Button type="submit" size="lg" className="w-full">
             Create account
           </Button>
+
+          {/* Acceptance at the point of account creation. Nothing records it
+              yet -- there is no auth backend -- so this is notice, not an
+              auditable consent record. */}
+          <p className="text-center text-xs leading-relaxed text-ink-muted">
+            By creating an account you agree to our{" "}
+            <Link
+              href="/terms"
+              className="font-semibold text-primary underline underline-offset-2"
+            >
+              Terms of Use
+            </Link>{" "}
+            and{" "}
+            <Link
+              href="/privacy"
+              className="font-semibold text-primary underline underline-offset-2"
+            >
+              Privacy Policy
+            </Link>
+            .
+          </p>
         </form>
 
         <div className="my-5 flex items-center gap-3 text-xs text-ink-muted">

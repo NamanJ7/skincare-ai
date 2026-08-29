@@ -48,5 +48,39 @@ const styles = StyleSheet.create({
   item: { flexDirection: "row", alignItems: "center", gap: spacing.xs },
   // Keeps the visible caption small while the tappable area stays comfortable.
   tap: { minHeight: 44, justifyContent: "center" },
+  agreement: { textAlign: "center", paddingHorizontal: spacing.md },
   pressed: { opacity: 0.6 },
 });
+
+/**
+ * Acceptance line shown at the point of account creation.
+ *
+ * Wording is the standard passive form. Note that nothing records this
+ * acceptance yet — there is no auth backend — so this establishes the notice,
+ * not an auditable consent record.
+ */
+export function LegalAgreement({ action = "creating an account" }: { action?: string }) {
+  return (
+    <AppText variant="caption" color={colors.inkMuted} style={styles.agreement}>
+      By {action} you agree to our{" "}
+      <AppText
+        variant="caption"
+        color={colors.primary}
+        accessibilityRole="link"
+        onPress={() => router.push("/legal/terms")}
+      >
+        Terms of Use
+      </AppText>{" "}
+      and{" "}
+      <AppText
+        variant="caption"
+        color={colors.primary}
+        accessibilityRole="link"
+        onPress={() => router.push("/legal/privacy")}
+      >
+        Privacy Policy
+      </AppText>
+      .
+    </AppText>
+  );
+}

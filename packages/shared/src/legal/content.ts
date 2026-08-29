@@ -54,6 +54,41 @@ export const PRIVACY_POLICY: LegalDocument = {
           kind: "paragraph",
           text: "Pore collects only the information needed to operate the waitlist and, in the future, to provide personalized skincare guidance.",
         },
+        {
+          // Disclosure. Fields come from the onboarding screens in
+          // apps/mobile/src/app/onboarding and types/intake.ts.
+          kind: "paragraph",
+          text: "In the Pore app you tell us your age, your skin goals and concerns, how sensitive your skin is, any ingredient allergies, and whether you are pregnant or breastfeeding. If you are 17 or younger we also ask for a parent or guardian's email address.",
+        },
+        {
+          // Disclosure. state/onboarding.tsx holds this in a plain useState
+          // with no persistence layer, and there is no account backend.
+          kind: "paragraph",
+          text: "Your answers are held on your device for the length of the session. Pore has no accounts yet, so nothing is saved to a profile.",
+        },
+      ],
+    },
+    {
+      id: "photos-and-ai",
+      title: "Photos and AI analysis",
+      blocks: [
+        {
+          // Disclosure. apps/web/lib/pipeline.ts sends up to 3 images
+          // (input.images.slice(0, 3)) to the Anthropic SDK.
+          kind: "paragraph",
+          text: "To build your routine, the app sends your answers and up to three photos to Pore's server, which passes them to Anthropic, the company behind the Claude AI models, for a cosmetic read of what is visible.",
+        },
+        {
+          // Disclosure. Neither app/api/plan/route.ts nor lib/pipeline.ts
+          // writes images to disk or logs them, and there is no database.
+          kind: "paragraph",
+          text: "Pore does not store your photos. They are used to produce your assessment and are not written to any Pore database.",
+        },
+        {
+          kind: "note",
+          title: "One thing we can't speak for",
+          text: "How Anthropic handles the data it receives is governed by Anthropic's own terms, not this notice.",
+        },
       ],
     },
     {
@@ -85,6 +120,24 @@ export const PRIVACY_POLICY: LegalDocument = {
           // third-party host the site contacts on load.
           kind: "paragraph",
           text: "Tally's form script loads on every page of this site. Apart from that, this site does not load analytics or advertising trackers.",
+        },
+        {
+          // Disclosure. @anthropic-ai/sdk in apps/web/lib/pipeline.ts. Named
+          // by company, not model id, because model ids change.
+          kind: "paragraph",
+          text: "The app's skin analysis is performed by Anthropic. Those are the only two outside companies that receive information you give Pore.",
+        },
+      ],
+    },
+    {
+      id: "age-requirements",
+      title: "Age requirements",
+      blocks: [
+        {
+          // Disclosure. apps/mobile/src/app/onboarding/age.tsx blocks under
+          // 16 and routes 16-17 to the parental consent screen.
+          kind: "paragraph",
+          text: "Pore is for ages 16 and up. If you are 17 or younger, Pore asks for a parent or guardian's email address so they can approve your use of the app.",
         },
       ],
     },
@@ -133,6 +186,18 @@ export const TERMS_OF_USE: LegalDocument = {
         {
           kind: "paragraph",
           text: "Pore provides personalized skincare education and routine guidance.",
+        },
+      ],
+    },
+    {
+      id: "eligibility",
+      title: "Eligibility",
+      blocks: [
+        {
+          // Disclosure. Mirrors the gate in onboarding/age.tsx: under 16 is
+          // blocked outright, 16-17 is routed to parental consent.
+          kind: "paragraph",
+          text: "Pore is for ages 16 and up. If you are 17 or younger, you need a parent or guardian's approval to use the app.",
         },
       ],
     },

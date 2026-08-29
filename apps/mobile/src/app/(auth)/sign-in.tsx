@@ -1,3 +1,4 @@
+import { LegalLinks } from "@/components/legal/LegalLinks";
 import { router } from "expo-router";
 import { useState } from "react";
 import { Pressable, View } from "react-native";
@@ -62,6 +63,8 @@ export default function SignIn() {
           </AppText>
         </AppText>
       </Pressable>
+
+      <LegalLinks />
     </Screen>
   );
 }
