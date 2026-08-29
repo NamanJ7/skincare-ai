@@ -10,6 +10,9 @@ export interface PlanResult {
 export interface PlanInput {
   images: { data: string; mediaType?: string }[];
   intake: IntakeResponse;
+  /** Required by the server when intake.age is under 18 -- see the
+   *  parental-consent gate in apps/web/lib/consent.ts. */
+  parentalConsent?: { id: string; parentEmail: string };
 }
 
 // Set EXPO_PUBLIC_API_URL (e.g. http://192.168.1.20:3000, your dev machine's LAN

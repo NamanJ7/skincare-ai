@@ -5,6 +5,10 @@ import type { PlanResult } from "@/lib/api";
 
 export type OnboardingData = Partial<IntakeResponse> & {
   parentEmail?: string;
+  /** Set once a parental-consent request has been created; approval is
+   *  verified server-side against this id + parentEmail before /api/plan
+   *  will run for an under-18 intake. */
+  parentalConsentId?: string;
   /** The generated plan (assessment + safety-clamped routine), once available. */
   plan?: PlanResult;
 };

@@ -21,7 +21,14 @@ export default function PhotoCapture() {
     setAnalyzing(true);
     // Real camera capture lands here next; for now we send the intake and let
     // the server (or the local fallback) produce the plan.
-    const plan = await fetchPlan({ images: [], intake: buildIntake(data) });
+    const plan = await fetchPlan({
+      images: [],
+      intake: buildIntake(data),
+      parentalConsent:
+        data.parentalConsentId && data.parentEmail
+          ? { id: data.parentalConsentId, parentEmail: data.parentEmail }
+          : undefined,
+    });
     if (plan) update({ plan });
     router.replace("/today");
   }

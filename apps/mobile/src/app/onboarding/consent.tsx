@@ -2,22 +2,32 @@ import { router } from "expo-router";
 import { useState } from "react";
 import { Pressable, StyleSheet, TextInput } from "react-native";
 
+import { requestConsent } from "@/lib/consent";
 import { useOnboarding } from "@/state/onboarding";
 import { AppText, Card, PrimaryButton, Screen, colors, radius, spacing } from "@/theme";
 
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export default function ParentalConsent() {
-  const { update } = useOnboarding();
+  const { data, update } = useOnboarding();
   const [email, setEmail] = useState("");
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState(false);
   const valid = EMAIL.test(email.trim());
 
-  function onContinue() {
-    if (!valid) return;
-    update({ parentEmail: email.trim() });
-    // Real build: send a verifiable consent request to the parent before any
-    // photo capture, and record approval. For now we proceed to intake.
-    router.push("/onboarding/intake");
+  async function onContinue() {
+    if (!valid || sending) return;
+    const parentEmail = email.trim();
+    setSending(true);
+    setError(false);
+    const consentId = await requestConsent(parentEmail, data.age ?? 16);
+    setSending(false);
+    if (!consentId) {
+      setError(true);
+      return;
+    }
+    update({ parentEmail, parentalConsentId: consentId });
+    router.push("/onboarding/consent-wait");
   }
 
   return (
@@ -56,7 +66,17 @@ export default function ParentalConsent() {
         </Pressable>
       </Card>
 
-      <PrimaryButton label="Continue" onPress={onContinue} disabled={!valid} />
+      {error ? (
+        <AppText variant="caption" color={colors.escalate}>
+          Couldn&apos;t send the approval request. Check your connection and try again.
+        </AppText>
+      ) : null}
+
+      <PrimaryButton
+        label={sending ? "Sending…" : "Send for approval"}
+        onPress={onContinue}
+        disabled={!valid || sending}
+      />
     </Screen>
   );
 }
