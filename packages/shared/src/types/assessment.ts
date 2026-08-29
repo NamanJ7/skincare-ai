@@ -4,6 +4,8 @@
  * must return.
  */
 
+import type { PhotoQualityFlag } from "../vision/quality";
+
 export type ConcernKey =
   | "acne_like_breakouts"
   | "oiliness"
@@ -37,6 +39,27 @@ export interface EscalationResult {
   reasons: string[];
 }
 
+/** Which guided angle a photo was taken from. */
+export type CaptureAngle = "front" | "left" | "right";
+
+/**
+ * What the on-device capture gate measured for one photo. Client-supplied and
+ * attached to the assessment after parsing — the model is told about it so it
+ * can lower its own confidence, but it is never asked to invent it.
+ */
+export interface PhotoQuality {
+  angle: CaptureAngle;
+  /** 0..1 composite from the capture gate. */
+  score: number;
+  flags: PhotoQualityFlag[];
+  /**
+   * Whether the shot was lit by the app's screen flash (a known, repeatable
+   * illuminant) or whatever light the room happened to have. Only screen-flash
+   * captures are comparable to each other across sessions.
+   */
+  illuminant: "screen_flash" | "ambient";
+}
+
 export interface Assessment {
   findings: ConcernFinding[];
   escalation: EscalationResult;
@@ -44,4 +67,14 @@ export interface Assessment {
   summary: string;
   /** Standard non-diagnostic disclaimer shown with every assessment. */
   disclaimer: string;
+  /** What the capture gate measured, echoed back so the UI can explain itself. */
+  photoQuality: PhotoQuality[];
+  /** 0..1. Must fall when photos are flagged, rather than answering confidently anyway. */
+  overallConfidence: number;
+  /**
+   * Plain-language list of what could NOT be assessed and why — a region out of
+   * frame, an angle that came out soft. Saying so is more credible than a
+   * confident number with nothing behind it.
+   */
+  limitations: string[];
 }

@@ -1,5 +1,7 @@
-import type { IntakeResponse } from "@pore/shared";
+import type { IntakeResponse, SkinTone } from "@pore/shared";
 import type { OnboardingData } from "@/state/onboarding";
+
+const DARK_MARK_PRONE_TONES: SkinTone[] = ["olive", "brown", "deep"];
 
 /** Build a full IntakeResponse from onboarding answers, filling sensible defaults. */
 export function buildIntake(data: OnboardingData): IntakeResponse {
@@ -13,8 +15,11 @@ export function buildIntake(data: OnboardingData): IntakeResponse {
     budget: "medium",
     fragrancePreference: "no_preference",
     pregnancyOrBreastfeeding: data.pregnancyOrBreastfeeding ?? false,
-    skinTone: "medium",
-    darkMarkProne: true,
+    // Asked during capture, where it also calibrates the exposure floor.
+    skinTone: data.skinTone ?? "medium",
+    // Deeper tones mark more readily after breakouts; default accordingly
+    // rather than assuming it of everyone.
+    darkMarkProne: data.darkMarkProne ?? DARK_MARK_PRONE_TONES.includes(data.skinTone ?? "medium"),
     climate: "temperate",
   };
 }

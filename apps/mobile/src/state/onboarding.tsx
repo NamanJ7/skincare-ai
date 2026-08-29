@@ -2,9 +2,15 @@
 import { createContext, useContext, useMemo, useState, type ReactNode } from "react";
 import type { IntakeResponse } from "@pore/shared";
 import type { PlanResult } from "@/lib/api";
+import type { CapturedPhoto } from "@/lib/photos";
 
 export type OnboardingData = Partial<IntakeResponse> & {
   parentEmail?: string;
+  /**
+   * Guided-capture photos. Base64 is held in memory only for the /api/plan
+   * request; the JPEGs live in the app's document directory until deleted.
+   */
+  photos?: CapturedPhoto[];
   /** The generated plan (assessment + safety-clamped routine), once available. */
   plan?: PlanResult;
 };

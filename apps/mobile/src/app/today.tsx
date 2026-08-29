@@ -1,6 +1,6 @@
 import { router } from "expo-router";
-import { useMemo } from "react";
-import { Pressable, View } from "react-native";
+import { useMemo, useState } from "react";
+import { Alert, Pressable, View } from "react-native";
 
 import {
   ACTIVES,
@@ -11,8 +11,9 @@ import {
   type RoutineStep,
 } from "@pore/shared";
 import { buildIntake } from "@/lib/intake";
+import { deleteStoredPhotos, storedPhotoCount } from "@/lib/photos";
 import { useOnboarding } from "@/state/onboarding";
-import { AppText, Card, Chip, Divider, Screen, colors, spacing } from "@/theme";
+import { AppText, Card, Chip, Divider, GhostButton, Screen, colors, spacing } from "@/theme";
 
 const CATEGORY_LABELS: Record<ProductCategory, string> = {
   cleanser: "Cleanser",
@@ -61,8 +62,39 @@ function draftRoutine(): Routine {
   };
 }
 
+/** Plain-language band for a 0..1 confidence, so the number is not the whole story. */
+function confidenceLabel(c: number): string {
+  if (c >= 0.75) return "High confidence";
+  if (c >= 0.5) return "Moderate confidence";
+  return "Low confidence";
+}
+
 export default function Today() {
-  const { data } = useOnboarding();
+  const { data, update } = useOnboarding();
+  const [photoCount, setPhotoCount] = useState(() => storedPhotoCount());
+
+  function confirmDeletePhotos() {
+    Alert.alert(
+      "Delete your photos?",
+      "This removes the photos stored on this phone. Your routine stays.",
+      [
+        { text: "Keep them", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: () => {
+            try {
+              deleteStoredPhotos();
+              update({ photos: [] });
+              setPhotoCount(0);
+            } catch {
+              Alert.alert("Couldn't delete", "Something went wrong removing the photos. Try again.");
+            }
+          },
+        },
+      ],
+    );
+  }
 
   // Prefer the server-generated plan; otherwise run the engine locally so the
   // screen still demonstrates the full flow offline.
@@ -75,6 +107,9 @@ export default function Today() {
           .map((f) => `${CONCERN_LABELS[f.concern]} · ${f.appearanceLevel}`),
         summary: a.summary,
         escalate: a.escalation.recommendProfessional,
+        confidence: a.overallConfidence,
+        limitations: a.limitations,
+        photoQuality: a.photoQuality,
         routine: data.plan.routine,
         adjustments: data.plan.adjustments,
       };
@@ -84,6 +119,9 @@ export default function Today() {
       concerns: ["Acne-like breakouts · moderate", "Dark-spot appearance · mild", "Oiliness · noticeable"],
       summary: "A simple routine built around your skin — with only the steps you actually need.",
       escalate: false,
+      confidence: null,
+      limitations: [],
+      photoQuality: [],
       routine,
       adjustments,
     };
@@ -109,7 +147,31 @@ export default function Today() {
         <AppText variant="caption" color={colors.inkMuted}>
           Cosmetic, non-diagnostic appearance only.
         </AppText>
+        {view.confidence !== null ? (
+          <AppText variant="caption" color={colors.primary}>
+            {confidenceLabel(view.confidence)}
+            {view.photoQuality.length > 0
+              ? ` · ${view.photoQuality.filter((p) => p.flags.length === 0).length} of ${view.photoQuality.length} photos passed the quality check`
+              : ""}
+          </AppText>
+        ) : null}
       </Card>
+
+      {view.limitations.length > 0 && (
+        <Card>
+          <AppText variant="heading">What we couldn&apos;t see clearly</AppText>
+          <AppText variant="caption" color={colors.inkMuted}>
+            Saying so is more useful than a confident guess.
+          </AppText>
+          <View style={{ gap: spacing.xs, marginTop: spacing.xs }}>
+            {view.limitations.map((l, i) => (
+              <AppText key={i} variant="caption" color={colors.ink}>
+                • {l}
+              </AppText>
+            ))}
+          </View>
+        </Card>
+      )}
 
       {view.escalate && (
         <Card>
@@ -135,6 +197,17 @@ export default function Today() {
               </AppText>
             ))}
           </View>
+        </Card>
+      )}
+
+      {photoCount > 0 && (
+        <Card>
+          <AppText variant="heading">Your photos</AppText>
+          <AppText variant="caption" color={colors.inkMuted}>
+            {photoCount} {photoCount === 1 ? "photo is" : "photos are"} saved on this phone, inside
+            the app. They were never uploaded to photo storage and are not on our servers.
+          </AppText>
+          <GhostButton label="Delete my photos" onPress={confirmDeletePhotos} />
         </Card>
       )}
 
