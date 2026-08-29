@@ -1,56 +1,59 @@
-# Welcome to your Expo app 👋
+# Pore — mobile app
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+Expo (SDK 56) / React Native app using Expo Router. Styling is plain
+`StyleSheet` driven by the shared design tokens in `@pore/shared` — there is no
+NativeWind here, so `className` does nothing on RN components.
 
-## Get started
+> Expo changes fast. Check the versioned docs at
+> https://docs.expo.dev/versions/v56.0.0/ before writing Expo code rather than
+> relying on memory. See `AGENTS.md`.
 
-1. Install dependencies
-
-   ```bash
-   npm install
-   ```
-
-2. Start the app
-
-   ```bash
-   npx expo start
-   ```
-
-In the output, you'll find options to open the app in a
-
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
-
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
-
-## Get a fresh project
-
-When you're ready, run:
+## Develop
 
 ```bash
-npm run reset-project
+pnpm --filter @pore/mobile start      # expo start
+pnpm --filter @pore/mobile ios        # or android / web
+pnpm --filter @pore/mobile typecheck
 ```
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+Set `EXPO_PUBLIC_API_URL` (e.g. your dev machine's LAN IP, `http://192.168.1.20:3000`)
+to hit the real `/api/plan` pipeline. When it is unset or unreachable, the app
+falls back to a local safety-engine demo so the flow always works.
 
-### Other setup steps
+## Over-the-air updates
 
-- To set up ESLint for linting, run `npx expo lint`, or follow our guide on ["Using ESLint and Prettier"](https://docs.expo.dev/guides/using-eslint/)
-- If you'd like to set up unit testing, follow our guide on ["Unit Testing with Jest"](https://docs.expo.dev/develop/unit-testing/)
-- Learn more about the TypeScript setup in this template in our guide on ["Using TypeScript"](https://docs.expo.dev/guides/typescript/)
+`expo-updates` is installed and configured in `app.json`, so JavaScript and
+asset changes can reach installed apps without a store review.
 
-## Learn more
+**One setup step remains, and it needs your Expo account.** The update URL
+embeds an EAS project id that only Expo can mint:
 
-To learn more about developing your project with Expo, look at the following resources:
+```bash
+cd apps/mobile
+npx eas-cli@latest login
+npx eas-cli@latest init              # writes extra.eas.projectId
+npx eas-cli@latest update:configure  # writes updates.url
+```
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+After that:
 
-## Join the community
+```bash
+npx eas-cli@latest build --profile production --platform all
+npx eas-cli@latest update --branch production -m "what changed"
+```
 
-Join our community of developers creating universal apps.
+### What OTA can and cannot ship
 
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+Updates carry **JS and assets only**. Anything that changes native code needs a
+new build submitted to the stores:
+
+- adding a native dependency (`expo-camera`, `expo-image-picker`, …)
+- changing permission strings or anything else in `app.json` native config
+- upgrading the Expo SDK
+
+`runtimeVersion` uses the `fingerprint` policy, which hashes the native
+dependency set. An update built against different native code is simply not
+delivered to an incompatible binary, rather than shipping and crashing.
+
+Update channels map to build profiles in `eas.json`: `development`, `preview`,
+`production`.
