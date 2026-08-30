@@ -34,14 +34,17 @@ preview so the user matches distance and angle before shooting. This is what
 makes week-over-week comparison meaningful, and it is why capture was built as an
 instrument rather than a photo picker.
 
-The foundation is already in place: `apps/mobile/src/lib/photos.ts` stores the
-three JPEGs plus a `manifest.json` carrying each shot's angle, timestamp, quality
-score and illuminant estimate. Do not change that schema without accounting for
-this.
+The foundation is already in place: `apps/mobile/src/lib/photos.ts` stores each
+session's three JPEGs under its own `<sessionId>/` folder, alongside a
+per-session `manifest.json` carrying each shot's angle, timestamp, quality score
+and illuminant estimate, plus a top-level `sessions.json` index (`listSessions`)
+so past sessions survive a new capture instead of being overwritten. Do not
+change that schema without accounting for this.
 
-Still needed: session history (the store currently keeps one session, keyed by
-angle), a comparison view, and a privacy story for keeping more than the latest
-set on the device.
+Still needed: a comparison view, and a privacy story for keeping more than the
+latest set on the device (`storedPhotoCount`/`deleteStoredPhotos` still treat
+every session as one pool — there's no per-session delete or retention limit
+yet).
 
 ## Housekeeping
 

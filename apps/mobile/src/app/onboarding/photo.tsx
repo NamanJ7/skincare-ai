@@ -22,6 +22,7 @@ import { CaptureFrame } from "@/components/CaptureFrame";
 import {
   CAPTURE_STEPS,
   isRejected,
+  newSessionId,
   processCapture,
   writeManifest,
   type CapturedPhoto,
@@ -79,6 +80,8 @@ export default function PhotoCapture() {
 
   const [stage, setStage] = useState<Stage>("intro");
   const [tone, setTone] = useState<SkinTone | null>(data.skinTone ?? null);
+  /** One id for this whole visit, so retakes land in the same session folder. */
+  const [sessionId] = useState(() => newSessionId());
   const [photos, setPhotos] = useState<CapturedPhoto[]>([]);
   const [stepIndex, setStepIndex] = useState(0);
   const [ready, setReady] = useState(false);
@@ -149,6 +152,7 @@ export default function PhotoCapture() {
         step.angle,
         tone,
         USE_NATIVE_SCREEN_FLASH ? "screen_flash" : "ambient",
+        sessionId,
         force,
       );
 
@@ -184,7 +188,7 @@ export default function PhotoCapture() {
    * so generation waits for them rather than running on defaults.
    */
   function done() {
-    writeManifest(photos);
+    writeManifest(photos, sessionId);
     update({ photos });
     router.push("/onboarding/intake");
   }
