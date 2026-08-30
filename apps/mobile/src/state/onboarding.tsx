@@ -6,6 +6,10 @@ import type { CapturedPhoto } from "@/lib/photos";
 
 export type OnboardingData = Partial<IntakeResponse> & {
   parentEmail?: string;
+  /** Set once a parental-consent request has been created; approval is
+   *  verified server-side against this id + parentEmail before /api/plan
+   *  will run for an under-18 intake. */
+  parentalConsentId?: string;
   /**
    * Guided-capture photos. Base64 is held in memory only for the /api/plan
    * request; the JPEGs live in the app's document directory until deleted.
