@@ -55,8 +55,8 @@ export default function Compare() {
       </View>
 
       <View style={{ flexDirection: "row", gap: spacing.sm }}>
-        <PhotoColumn label={formatDate(older.capturedAt)} uri={sessionPhotoUri(older.id, angle)} />
-        <PhotoColumn label={formatDate(newer.capturedAt)} uri={sessionPhotoUri(newer.id, angle)} />
+        <PhotoColumn eyebrow="BEFORE" date={formatDate(older.capturedAt)} angle={angle} uri={sessionPhotoUri(older.id, angle)} />
+        <PhotoColumn eyebrow="AFTER" date={formatDate(newer.capturedAt)} angle={angle} uri={sessionPhotoUri(newer.id, angle)} />
       </View>
 
       <Card>
@@ -69,21 +69,52 @@ export default function Compare() {
   );
 }
 
-function PhotoColumn({ label, uri }: { label: string; uri?: string }) {
+function PhotoColumn({
+  eyebrow,
+  date,
+  angle,
+  uri,
+}: {
+  eyebrow: string;
+  date: string;
+  angle: CaptureAngle;
+  uri?: string;
+}) {
   return (
     <View style={{ flex: 1, gap: spacing.xxs }}>
-      <Image
-        source={uri ? { uri } : undefined}
-        style={{
-          width: "100%",
-          aspectRatio: 3 / 4,
-          borderRadius: radius.md,
-          backgroundColor: colors.surface,
-        }}
-        contentFit="cover"
-      />
+      <AppText variant="label" color={colors.primary} style={{ textAlign: "center" }}>
+        {eyebrow}
+      </AppText>
+      {uri ? (
+        <Image
+          source={{ uri }}
+          accessibilityLabel={`${angle} photo from ${date}`}
+          style={{
+            width: "100%",
+            aspectRatio: 3 / 4,
+            borderRadius: radius.md,
+            backgroundColor: colors.surface,
+          }}
+          contentFit="cover"
+        />
+      ) : (
+        <View
+          style={{
+            width: "100%",
+            aspectRatio: 3 / 4,
+            borderRadius: radius.md,
+            backgroundColor: colors.surface,
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          <AppText variant="caption" color={colors.inkMuted} style={{ textAlign: "center" }}>
+            No photo saved
+          </AppText>
+        </View>
+      )}
       <AppText variant="caption" color={colors.inkMuted} style={{ textAlign: "center" }}>
-        {label}
+        {date}
       </AppText>
     </View>
   );
