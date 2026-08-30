@@ -31,7 +31,7 @@ export default function ConsentWait() {
       setStatus(result ?? "unreachable");
       if (result === "approved") {
         if (pollRef.current) clearInterval(pollRef.current);
-        router.replace("/onboarding/intake");
+        router.replace("/onboarding/photo");
       }
     }
 

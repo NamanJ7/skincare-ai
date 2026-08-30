@@ -51,8 +51,8 @@ export default function ParentalConsent() {
 
       <Card>
         <AppText variant="caption" color={colors.inkMuted}>
-          We only use this email to confirm consent. Pore never trains on or sells anyone&apos;s data,
-          and Pore doesn&apos;t store your photos.
+          We only use this email to confirm consent. Pore never trains on or sells anyone&apos;s data.
+          Photos stay on your phone and are never saved on our servers.
         </AppText>
         <Pressable
           onPress={() => router.push("/legal/privacy")}

@@ -13,7 +13,14 @@
  */
 import Anthropic from "@anthropic-ai/sdk";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
-import { applySafetyRules, type Assessment, type IntakeResponse, type Routine, type SafetyAdjustment } from "@pore/shared";
+import {
+  applySafetyRules,
+  type Assessment,
+  type IntakeResponse,
+  type PhotoQuality,
+  type Routine,
+  type SafetyAdjustment,
+} from "@pore/shared";
 import { AssessmentSchema, RoutineDraftSchema, normalizeDraft } from "./schemas";
 import { ASSESSMENT_SYSTEM, ROUTINE_SYSTEM } from "./prompts";
 import { draftRoutine, mockAssessment } from "./mock";
@@ -24,6 +31,12 @@ export interface PlanImage {
   /** base64-encoded image bytes (no data: prefix). */
   data: string;
   mediaType?: ImageMediaType;
+  /**
+   * What the on-device capture gate measured for this shot. Optional so older
+   * clients keep working, but when present it is put in front of the image so
+   * the model can weight what it is looking at.
+   */
+  quality?: PhotoQuality;
 }
 
 export interface PlanInput {
@@ -43,8 +56,13 @@ const MODEL = "claude-opus-4-8";
 export async function generatePlan(input: PlanInput): Promise<PlanResult> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
 
+  const photoQuality = input.images
+    .slice(0, 3)
+    .map((img) => img.quality)
+    .filter((q): q is PhotoQuality => q !== undefined);
+
   if (!apiKey) {
-    const assessment = mockAssessment(input.intake);
+    const assessment = mockAssessment(input.intake, photoQuality);
     const { routine, adjustments } = applySafetyRules(draftRoutine(input.intake), input.intake);
     return { assessment, routine, adjustments, mode: "mock" };
   }
@@ -52,14 +70,31 @@ export async function generatePlan(input: PlanInput): Promise<PlanResult> {
   const client = new Anthropic({ apiKey });
 
   // 1. Vision assessment — structured, cosmetic-only.
-  const imageBlocks = input.images.slice(0, 3).map((img) => ({
-    type: "image" as const,
-    source: {
-      type: "base64" as const,
-      media_type: img.mediaType ?? "image/jpeg",
-      data: img.data,
-    },
-  }));
+  //
+  // Each image is preceded by a text block naming its angle, illuminant and
+  // measured quality. Handing the model three anonymous photos and hoping it
+  // infers which is which is how a finding ends up attached to the wrong side
+  // of a face.
+  const photos = input.images.slice(0, 3);
+  const imageBlocks = photos.flatMap((img, i) => {
+    const q = img.quality;
+    const light = q?.illuminant === "screen_flash" ? "screen flash (controlled light)" : "ambient light";
+    const label = q
+      ? `Photo ${i + 1} of ${photos.length} — ${q.angle}, ${light}, capture quality ${q.score.toFixed(2)}` +
+        (q.flags.length ? `, flagged: ${q.flags.join(", ")}` : "")
+      : `Photo ${i + 1} of ${photos.length} — angle not recorded`;
+    return [
+      { type: "text" as const, text: label },
+      {
+        type: "image" as const,
+        source: {
+          type: "base64" as const,
+          media_type: img.mediaType ?? "image/jpeg",
+          data: img.data,
+        },
+      },
+    ];
+  });
 
   const assessmentResp = await client.messages.parse({
     model: MODEL,
@@ -76,8 +111,11 @@ export async function generatePlan(input: PlanInput): Promise<PlanResult> {
       },
     ],
   });
-  const assessment = assessmentResp.parsed_output;
-  if (!assessment) throw new Error("Assessment did not return structured output");
+  const parsed = assessmentResp.parsed_output;
+  if (!parsed) throw new Error("Assessment did not return structured output");
+  // photoQuality is measured on the device, not by the model — attach it here
+  // rather than asking Claude to echo our own numbers back to us.
+  const assessment: Assessment = { ...parsed, photoQuality };
 
   // 2. Routine draft from assessment + intake.
   const routineResp = await client.messages.parse({

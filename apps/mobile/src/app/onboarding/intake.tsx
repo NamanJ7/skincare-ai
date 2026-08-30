@@ -1,8 +1,11 @@
 import { router } from "expo-router";
 import { useState, type ReactNode } from "react";
-import { View } from "react-native";
+import { ActivityIndicator, View } from "react-native";
 
 import type { Sensitivity, SkinGoal, SkinType } from "@pore/shared";
+import { fetchPlan } from "@/lib/api";
+import { buildIntake } from "@/lib/intake";
+import { CAPTURE_STEPS, type CapturedPhoto } from "@/lib/photos";
 import { useOnboarding } from "@/state/onboarding";
 import { AppText, Chip, GhostButton, PrimaryButton, ProgressDots, Screen, colors, spacing } from "@/theme";
 
@@ -33,8 +36,9 @@ const SENSITIVITY: { key: Sensitivity; label: string; hint: string }[] = [
 const STEP_COUNT = 4;
 
 export default function Intake() {
-  const { update } = useOnboarding();
+  const { data, update } = useOnboarding();
   const [step, setStep] = useState(0);
+  const [analyzing, setAnalyzing] = useState(false);
   const [goals, setGoals] = useState<SkinGoal[]>([]);
   const [skinType, setSkinType] = useState<SkinType | null>(null);
   const [sensitivity, setSensitivity] = useState<Sensitivity | null>(null);
@@ -50,19 +54,38 @@ export default function Intake() {
     setGoals((prev) => (prev.includes(key) ? prev.filter((g) => g !== key) : [...prev, key]));
   }
 
-  function next() {
+  async function next() {
     if (!canAdvance) return;
     if (step < STEP_COUNT - 1) {
       setStep((s) => s + 1);
       return;
     }
-    update({
+
+    const answers = {
       goals,
       skinType: skinType ?? "combination",
       sensitivity: sensitivity ?? "medium",
       pregnancyOrBreastfeeding: pregnant ?? false,
+    } as const;
+    update(answers);
+
+    // The photos were taken first, but the assessment needs these answers, so
+    // generation happens here rather than running on questionnaire defaults.
+    setAnalyzing(true);
+    const photos = data.photos ?? [];
+    const ordered = CAPTURE_STEPS.map((s) => photos.find((p) => p.angle === s.angle)).filter(
+      (p): p is CapturedPhoto => p !== undefined,
+    );
+    const plan = await fetchPlan({
+      images: ordered.map((p) => ({ data: p.data, mediaType: "image/jpeg", quality: p.quality })),
+      intake: buildIntake({ ...data, ...answers }),
+      parentalConsent:
+        data.parentalConsentId && data.parentEmail
+          ? { id: data.parentalConsentId, parentEmail: data.parentEmail }
+          : undefined,
     });
-    router.push("/onboarding/photo");
+    if (plan) update({ plan });
+    router.replace("/today");
   }
 
   function back() {
@@ -113,10 +136,23 @@ export default function Intake() {
         </Question>
       )}
 
-      <View style={{ gap: spacing.sm, marginTop: spacing.lg }}>
-        <PrimaryButton label={step < STEP_COUNT - 1 ? "Next" : "Continue to photo"} onPress={next} disabled={!canAdvance} />
-        <GhostButton label="Back" onPress={back} />
-      </View>
+      {analyzing ? (
+        <View style={{ alignItems: "center", gap: spacing.sm, marginTop: spacing.lg }}>
+          <ActivityIndicator color={colors.primary} />
+          <AppText variant="caption" color={colors.inkMuted}>
+            Reading your skin and building a routine…
+          </AppText>
+        </View>
+      ) : (
+        <View style={{ gap: spacing.sm, marginTop: spacing.lg }}>
+          <PrimaryButton
+            label={step < STEP_COUNT - 1 ? "Next" : "Build my routine"}
+            onPress={next}
+            disabled={!canAdvance}
+          />
+          <GhostButton label="Back" onPress={back} />
+        </View>
+      )}
     </Screen>
   );
 }
