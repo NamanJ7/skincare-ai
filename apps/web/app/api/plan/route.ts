@@ -1,5 +1,5 @@
 import { generatePlan, type ImageMediaType, type PlanImage, type PlanInput } from "@/lib/pipeline";
-import { PhotoQualitySchema } from "@/lib/schemas";
+import { IntakeResponseSchema, PhotoQualitySchema } from "@/lib/schemas";
 
 // The Anthropic SDK needs the Node runtime (not edge); two Opus calls can take
 // a while, so give the function room.
@@ -74,6 +74,11 @@ export async function POST(req: Request) {
     return Response.json({ error: "Missing `intake`" }, { status: 400 });
   }
 
+  const intakeParsed = IntakeResponseSchema.safeParse(body.intake);
+  if (!intakeParsed.success) {
+    return Response.json({ error: "`intake` is malformed" }, { status: 400 });
+  }
+
   const validated = validateImages(body.images);
   if ("error" in validated) {
     return Response.json({ error: validated.error }, { status: 400 });
@@ -82,7 +87,7 @@ export async function POST(req: Request) {
   try {
     const result = await generatePlan({
       images: validated.images,
-      intake: body.intake,
+      intake: intakeParsed.data,
     });
     return Response.json(result);
   } catch (err) {

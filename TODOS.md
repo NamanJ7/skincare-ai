@@ -13,18 +13,44 @@ not match the paper. The regression test in `quality.test.ts` locks in the
 behaviour that matters (a correctly exposed deep-skin capture must not be called
 "too dark"); the numbers around it are still provisional.
 
+The mechanism to pull real numbers now exists: `apps/mobile/src/lib/photos.ts`
+persists the raw `scoreFrame()` metrics and illuminant estimate into each
+session's `manifest.json` (version 2) instead of discarding them, and the
+capture-review screen shows the same numbers in a `__DEV__`-only caption. Still
+needed: actually capturing on real devices across the tone range and adjusting
+the constants — this is data plumbing, not calibration.
+
 ### Verify `flash="screen"` on device
 `apps/mobile/src/app/onboarding/photo.tsx` sets `USE_NATIVE_SCREEN_FLASH = true`.
 `'screen'` is a documented SDK 56 `FlashMode`, but the docs do not describe its
 front-camera behaviour, and it has not been confirmed on hardware. Check on both
 platforms. If it is a no-op, flip the flag to `false`: the app then paints its
-own white overlay for `FLASH_MS` around the shutter and records the photo as
-`ambient` rather than claiming a controlled illuminant it did not have.
+own white overlay for a tone-aware duration around the shutter and records the
+photo as `ambient` rather than claiming a controlled illuminant it did not have.
+
+The verification procedure is now documented next to `USE_NATIVE_SCREEN_FLASH`:
+capture a dim-room session with the flag on, another with it off, and compare
+`metrics.meanLuma` between them (now persisted per Stream 3.1 above). Still
+needed: someone with a physical device actually running that comparison — this
+sandbox has none.
 
 ### Screen-flash intensity per tone
 A flash level that exposes fair skin correctly will clip its highlights and
-underexpose deep skin. Intensity should follow the declared tone. Currently the
-tone only moves the measurement thresholds, not the light itself.
+underexpose deep skin. Intensity should follow the declared tone.
+
+Built: `packages/shared/src/vision/flash.ts` exports `flashIntensityForTone`,
+applied to the JS white-overlay fallback's duration (`apps/mobile/src/app/onboarding/photo.tsx`,
+replacing the old fixed `FLASH_MS`). Numbers are provisional — seeded from the
+same reasoning as `CAPTURE_TUNING`'s tone profile, not measured. See
+`flash.test.ts` for the mechanism tests (monotonic by tone, bounds-checked).
+
+Confirmed via the SDK 56 source (`Camera.types.ts`), not assumed: the native
+`flash="screen"` mode is a discrete `'off' | 'on' | 'auto' | 'screen'` enum with
+no numeric intensity control, so the native path cannot honor tone-aware
+intensity today — it stays at its current unconditional near-max behaviour.
+Open product decision: deprioritize the native path in favor of the
+always-controllable JS overlay, or leave native flash intensity unaddressed
+until Expo exposes a level control.
 
 ## Next milestone
 
@@ -50,12 +76,20 @@ photos" card on Today once 2+ sessions exist) shows the newest session against
 the one before it, one angle at a time via a chip row — no session picker, the
 two most recent is the whole feature.
 
-Still needed: a privacy story for keeping more than the latest set on the
-device (`storedPhotoCount`/`deleteStoredPhotos` still treat every session as
-one pool — there's no per-session delete or retention limit yet). The ghost
-overlay itself is unverified on hardware — same caveat as `flash="screen"`
-above: confirm the oval-clipped ghost image actually reads as "line up with
-your last photo" on a real front camera before calling this done-done.
+Done: per-session delete. `apps/mobile/src/lib/photos.ts` exports
+`deleteSession(id)`/`photoCountForSession(id)`; the "Your photos" card on
+Today lists each session (once 2+ exist) with a delete action, confirmed the
+same way as the existing "Delete my photos" button.
+
+Still open, and deliberately not decided here: a retention-cap policy (auto-
+prune sessions older than N days, or beyond the last N) — no cap number was
+specified anywhere, so none was invented. A product call, not an engineering
+one.
+
+The ghost overlay itself is unverified on hardware — same caveat as
+`flash="screen"` above: confirm the oval-clipped ghost image actually reads as
+"line up with your last photo" on a real front camera before calling this
+done-done.
 
 ## Housekeeping
 
@@ -65,6 +99,10 @@ and `FeatureCards.tsx`. Check no other marketing copy still describes an order
 the app no longer uses.
 
 ### `apps/web` has no tests
-`packages/shared` is the only package with a test suite. The `/api/plan` input
-validation in `apps/web/app/api/plan/route.ts` is a trust boundary in front of a
-paid endpoint and is currently only covered by manual probes.
+Done. `apps/web` now has vitest (`apps/web/vitest.config.ts`, `pnpm --filter web
+test`) and `apps/web/app/api/plan/route.test.ts` covers the full validation
+chain plus two mock-mode success cases. While writing it, found and fixed a
+real gap it was meant to guard against: `intake` had no structural validation
+(only a truthiness check), so a malformed request 500'd instead of 400ing on a
+paid endpoint — `IntakeResponseSchema` in `apps/web/lib/schemas.ts` (mirroring
+the existing `PhotoQualitySchema` pattern) closes it.

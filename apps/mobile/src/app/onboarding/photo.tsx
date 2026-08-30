@@ -17,7 +17,7 @@ import { router } from "expo-router";
 import { useCallback, useRef, useState } from "react";
 import { ActivityIndicator, Linking, Pressable, StyleSheet, View } from "react-native";
 
-import type { SkinTone } from "@pore/shared";
+import { flashIntensityForTone, type SkinTone } from "@pore/shared";
 import { CaptureFrame } from "@/components/CaptureFrame";
 import {
   CAPTURE_STEPS,
@@ -48,12 +48,17 @@ import {
  * `'screen'` is a documented SDK 56 FlashMode, but the docs do not describe its
  * front-camera behaviour, so this must be confirmed on a real device. If it
  * turns out to be a no-op, flip this to false: the app then paints its own
- * white overlay for FLASH_MS around the shot and records the photo as
- * ambient-lit, which is honest rather than a silently broken claim.
+ * white overlay for a tone-aware duration around the shot and records the
+ * photo as ambient-lit, which is honest rather than a silently broken claim.
+ *
+ * How to verify (needs a physical device — see TODOS.md): capture a session
+ * in a dim room with this flag `true`, pull that session's manifest.json (or
+ * read the __DEV__ caption under each reviewed photo), and compare
+ * `metrics.meanLuma` against a second session captured with the flag flipped
+ * to `false` under the same room light. If native "screen" flash shows no
+ * meaningful luma lift over the ambient baseline, flip this to `false`.
  */
 const USE_NATIVE_SCREEN_FLASH = true;
-/** How long the fallback white overlay stays up before the shutter fires. */
-const FLASH_MS = 260;
 
 /**
  * Tone bands, asked here rather than in the questionnaire.
@@ -132,7 +137,7 @@ export default function PhotoCapture() {
     try {
       if (!USE_NATIVE_SCREEN_FLASH) {
         setFlashing(true);
-        await new Promise((r) => setTimeout(r, FLASH_MS));
+        await new Promise((r) => setTimeout(r, flashIntensityForTone(tone).durationMs));
       }
       picture = await camera.current.takePictureAsync({ quality: 0.9, exif: true });
     } catch {
@@ -368,6 +373,17 @@ export default function PhotoCapture() {
                   {s.angle}
                   {photo?.quality.flags.length ? " · flagged" : ""}
                 </AppText>
+                {/*
+                 * Dev-only readout of the raw scoreFrame() measurements, so a
+                 * real-device capture session can be eyeballed without pulling
+                 * manifest.json off the phone. __DEV__ is false in release
+                 * builds, so this never reaches a real user. See TODOS.md.
+                 */}
+                {__DEV__ && photo ? (
+                  <AppText variant="caption" color={colors.inkMuted} style={{ textAlign: "center" }}>
+                    {`luma ${photo.metrics.meanLuma.toFixed(0)} · sharp ${photo.metrics.sharpness.toFixed(0)} · skin ${(photo.metrics.skinCoverage * 100).toFixed(0)}% · cast ${photo.metrics.chromaDistance.toFixed(1)} · rgb ${photo.illuminantEstimate.r.toFixed(0)}/${photo.illuminantEstimate.g.toFixed(0)}/${photo.illuminantEstimate.b.toFixed(0)}`}
+                  </AppText>
+                ) : null}
               </Pressable>
             );
           })}
