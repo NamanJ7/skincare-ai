@@ -45,13 +45,17 @@ illuminant estimate, plus a top-level `sessions.json` index (`listSessions`) so
 past sessions survive a new capture instead of being overwritten. Do not change
 that schema without accounting for this.
 
-Still needed: a comparison view, and a privacy story for keeping more than the
-latest set on the device (`storedPhotoCount`/`deleteStoredPhotos` still treat
-every session as one pool — there's no per-session delete or retention limit
-yet). The overlay itself is unverified on hardware — same caveat as
-`flash="screen"` above: confirm the oval-clipped ghost image actually reads as
-"line up with your last photo" on a real front camera before calling this
-done-done.
+Done: `apps/mobile/src/app/compare.tsx` (`/compare`, linked from the "Your
+photos" card on Today once 2+ sessions exist) shows the newest session against
+the one before it, one angle at a time via a chip row — no session picker, the
+two most recent is the whole feature.
+
+Still needed: a privacy story for keeping more than the latest set on the
+device (`storedPhotoCount`/`deleteStoredPhotos` still treat every session as
+one pool — there's no per-session delete or retention limit yet). The ghost
+overlay itself is unverified on hardware — same caveat as `flash="screen"`
+above: confirm the oval-clipped ghost image actually reads as "line up with
+your last photo" on a real front camera before calling this done-done.
 
 ## Housekeeping
 
