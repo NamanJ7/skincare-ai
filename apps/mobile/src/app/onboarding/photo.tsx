@@ -22,7 +22,10 @@ import { CaptureFrame } from "@/components/CaptureFrame";
 import {
   CAPTURE_STEPS,
   isRejected,
+  listSessions,
+  newSessionId,
   processCapture,
+  sessionPhotoUri,
   writeManifest,
   type CapturedPhoto,
 } from "@/lib/photos";
@@ -79,6 +82,10 @@ export default function PhotoCapture() {
 
   const [stage, setStage] = useState<Stage>("intro");
   const [tone, setTone] = useState<SkinTone | null>(data.skinTone ?? null);
+  /** One id for this whole visit, so retakes land in the same session folder. */
+  const [sessionId] = useState(() => newSessionId());
+  /** Last visit's session, if any — source for the ghost-alignment overlay. */
+  const [previousSessionId] = useState(() => listSessions()[0]?.id);
   const [photos, setPhotos] = useState<CapturedPhoto[]>([]);
   const [stepIndex, setStepIndex] = useState(0);
   const [ready, setReady] = useState(false);
@@ -149,6 +156,7 @@ export default function PhotoCapture() {
         step.angle,
         tone,
         USE_NATIVE_SCREEN_FLASH ? "screen_flash" : "ambient",
+        sessionId,
         force,
       );
 
@@ -184,7 +192,7 @@ export default function PhotoCapture() {
    * so generation waits for them rather than running on defaults.
    */
   function done() {
-    writeManifest(photos);
+    writeManifest(photos, sessionId);
     update({ photos });
     router.push("/onboarding/intake");
   }
@@ -270,6 +278,8 @@ export default function PhotoCapture() {
       );
     }
 
+    const ghostUri = previousSessionId ? sessionPhotoUri(previousSessionId, step.angle) : undefined;
+
     return (
       <View style={styles.cameraRoot}>
         <CameraView
@@ -283,6 +293,21 @@ export default function PhotoCapture() {
           onCameraReady={() => setReady(true)}
           onMountError={(e) => setMountError(e.message)}
         />
+
+        {/*
+         * Last visit's photo, faint, so the user can match distance and
+         * angle before shooting. CaptureFrame's scrim renders on top of this
+         * and already masks everything outside the oval, so this needs no
+         * clipping of its own — just sit behind it.
+         */}
+        {ghostUri ? (
+          <Image
+            source={{ uri: ghostUri }}
+            style={[StyleSheet.absoluteFill, { opacity: 0.3 }]}
+            contentFit="cover"
+            pointerEvents="none"
+          />
+        ) : null}
 
         {/* Fallback illuminant: paint the display white around the shutter. */}
         {flashing ? <View style={styles.flash} /> : null}

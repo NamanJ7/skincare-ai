@@ -32,16 +32,30 @@ tone only moves the measurement thresholds, not the light itself.
 On a return visit, render the previous photo at low opacity over the live camera
 preview so the user matches distance and angle before shooting. This is what
 makes week-over-week comparison meaningful, and it is why capture was built as an
-instrument rather than a photo picker.
+instrument rather than a photo picker. Done: `apps/mobile/src/app/onboarding/photo.tsx`
+renders the last session's photo for the current angle (via `sessionPhotoUri`) at
+0.3 opacity behind `CaptureFrame`'s scrim, so it's automatically clipped to the
+oval with no separate mask. No toggle, no copy — it just appears when a prior
+session exists for that angle.
 
-The foundation is already in place: `apps/mobile/src/lib/photos.ts` stores the
-three JPEGs plus a `manifest.json` carrying each shot's angle, timestamp, quality
-score and illuminant estimate. Do not change that schema without accounting for
-this.
+The storage foundation: `apps/mobile/src/lib/photos.ts` stores each session's
+three JPEGs under its own `<sessionId>/` folder, alongside a per-session
+`manifest.json` carrying each shot's angle, timestamp, quality score and
+illuminant estimate, plus a top-level `sessions.json` index (`listSessions`) so
+past sessions survive a new capture instead of being overwritten. Do not change
+that schema without accounting for this.
 
-Still needed: session history (the store currently keeps one session, keyed by
-angle), a comparison view, and a privacy story for keeping more than the latest
-set on the device.
+Done: `apps/mobile/src/app/compare.tsx` (`/compare`, linked from the "Your
+photos" card on Today once 2+ sessions exist) shows the newest session against
+the one before it, one angle at a time via a chip row — no session picker, the
+two most recent is the whole feature.
+
+Still needed: a privacy story for keeping more than the latest set on the
+device (`storedPhotoCount`/`deleteStoredPhotos` still treat every session as
+one pool — there's no per-session delete or retention limit yet). The ghost
+overlay itself is unverified on hardware — same caveat as `flash="screen"`
+above: confirm the oval-clipped ghost image actually reads as "line up with
+your last photo" on a real front camera before calling this done-done.
 
 ## Housekeeping
 

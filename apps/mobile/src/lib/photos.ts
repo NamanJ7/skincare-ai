@@ -60,6 +60,15 @@ function photosDir(): Directory {
   return new Directory(Paths.document, DIR_NAME);
 }
 
+function sessionDir(sessionId: string): Directory {
+  return new Directory(photosDir(), sessionId);
+}
+
+/** A filesystem-safe id for a new capture session, ordered by capture time. */
+export function newSessionId(): string {
+  return new Date().toISOString().replace(/[:.]/g, "-");
+}
+
 /**
  * Measure a raw camera frame, and if it passes, compress and store it.
  *
@@ -73,6 +82,8 @@ export async function processCapture(
   angle: CaptureAngle,
   tone: SkinTone,
   illuminant: PhotoQuality["illuminant"],
+  /** Which capture session this photo belongs to — see `newSessionId`. */
+  sessionId: string,
   /**
    * Deliver the photo even if the gate rejected it. Used by the escape hatch
    * after two failed attempts on the same angle — the flags still travel with
@@ -105,7 +116,7 @@ export async function processCapture(
 
   return {
     angle,
-    uri: await persist(delivered.uri, angle),
+    uri: await persist(delivered.uri, angle, sessionId),
     data: delivered.base64,
     quality,
     capturedAt: new Date().toISOString(),
@@ -113,15 +124,19 @@ export async function processCapture(
 }
 
 /**
- * Copy a rendered photo into the app's document directory.
+ * Copy a rendered photo into this session's own folder.
+ *
+ * Each session keeps its own `<sessionId>/` folder rather than sharing one flat
+ * directory, so an earlier visit's photos survive a later one instead of being
+ * overwritten — that history is what a future comparison view needs.
  *
  * Storage failures are not fatal: the capture still works, the photo is still
  * analysed, it just is not kept for later. Returning the source uri means the
  * review thumbnails keep rendering either way.
  */
-async function persist(sourceUri: string, angle: CaptureAngle): Promise<string> {
+async function persist(sourceUri: string, angle: CaptureAngle, sessionId: string): Promise<string> {
   try {
-    const dir = photosDir();
+    const dir = sessionDir(sessionId);
     if (!dir.exists) dir.create({ intermediates: true });
 
     const dest = new File(dir, `${angle}.jpg`);
@@ -133,10 +148,58 @@ async function persist(sourceUri: string, angle: CaptureAngle): Promise<string> 
   }
 }
 
-/** Record what was captured and under what conditions, for later comparison. */
-export function writeManifest(photos: CapturedPhoto[]): void {
+/** One completed capture session, as recorded in the top-level session index. */
+export interface StoredSession {
+  id: string;
+  capturedAt: string;
+}
+
+const SESSIONS_INDEX = "sessions.json";
+
+function readSessionIndex(): StoredSession[] {
+  try {
+    const file = new File(photosDir(), SESSIONS_INDEX);
+    if (!file.exists) return [];
+    const parsed = JSON.parse(file.textSync()) as { sessions?: StoredSession[] };
+    return parsed.sessions ?? [];
+  } catch {
+    return [];
+  }
+}
+
+/** Every capture session stored on this device, most recent first. */
+export function listSessions(): StoredSession[] {
+  return [...readSessionIndex()].reverse();
+}
+
+/** URI of one angle's photo from a past session, or undefined if it isn't there. */
+export function sessionPhotoUri(sessionId: string, angle: CaptureAngle): string | undefined {
+  const file = new File(sessionDir(sessionId), `${angle}.jpg`);
+  return file.exists ? file.uri : undefined;
+}
+
+function appendToSessionIndex(session: StoredSession): void {
   try {
     const dir = photosDir();
+    if (!dir.exists) dir.create({ intermediates: true });
+    const sessions = [...readSessionIndex(), session];
+    const file = new File(dir, SESSIONS_INDEX);
+    if (file.exists) file.delete();
+    file.create();
+    file.write(JSON.stringify({ version: 1, sessions }));
+  } catch {
+    // The index is a convenience for a future session, never a blocker now.
+  }
+}
+
+/**
+ * Record what was captured and under what conditions, for later comparison,
+ * and register the session in the top-level index so it can be listed later.
+ */
+export function writeManifest(photos: CapturedPhoto[], sessionId: string): void {
+  const capturedAt = photos[0]?.capturedAt ?? new Date().toISOString();
+  try {
+    const dir = sessionDir(sessionId);
     if (!dir.exists) dir.create({ intermediates: true });
     const file = new File(dir, MANIFEST);
     if (file.exists) file.delete();
@@ -144,6 +207,8 @@ export function writeManifest(photos: CapturedPhoto[]): void {
     file.write(
       JSON.stringify({
         version: 1,
+        id: sessionId,
+        capturedAt,
         photos: photos.map((p) => ({
           angle: p.angle,
           capturedAt: p.capturedAt,
@@ -154,20 +219,24 @@ export function writeManifest(photos: CapturedPhoto[]): void {
   } catch {
     // The manifest is a convenience for a future session, never a blocker now.
   }
+  appendToSessionIndex({ id: sessionId, capturedAt });
 }
 
-/** How many photos are on this device right now. Drives the "Your photos" row. */
+/** How many photos are on this device right now, across every session. Drives the "Your photos" row. */
 export function storedPhotoCount(): number {
   try {
     const dir = photosDir();
     if (!dir.exists) return 0;
-    return dir.list().filter((e) => e.name.endsWith(".jpg")).length;
+    return dir
+      .list()
+      .filter((e): e is Directory => e instanceof Directory)
+      .reduce((total, session) => total + session.list().filter((f) => f.name.endsWith(".jpg")).length, 0);
   } catch {
     return 0;
   }
 }
 
-/** Remove every photo this app has stored. The user's copy of "forget me". */
+/** Remove every photo this app has stored, across every session. The user's copy of "forget me". */
 export function deleteStoredPhotos(): void {
   const dir = photosDir();
   if (dir.exists) dir.delete();

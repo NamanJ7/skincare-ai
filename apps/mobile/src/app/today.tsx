@@ -11,7 +11,7 @@ import {
   type RoutineStep,
 } from "@pore/shared";
 import { buildIntake } from "@/lib/intake";
-import { deleteStoredPhotos, storedPhotoCount } from "@/lib/photos";
+import { deleteStoredPhotos, listSessions, storedPhotoCount } from "@/lib/photos";
 import { useOnboarding } from "@/state/onboarding";
 import { AppText, Card, Chip, Divider, GhostButton, Screen, colors, spacing } from "@/theme";
 
@@ -72,6 +72,7 @@ function confidenceLabel(c: number): string {
 export default function Today() {
   const { data, update } = useOnboarding();
   const [photoCount, setPhotoCount] = useState(() => storedPhotoCount());
+  const [sessionCount] = useState(() => listSessions().length);
 
   function confirmDeletePhotos() {
     Alert.alert(
@@ -207,6 +208,9 @@ export default function Today() {
             {photoCount} {photoCount === 1 ? "photo is" : "photos are"} saved on this phone, inside
             the app. They were never uploaded to photo storage and are not on our servers.
           </AppText>
+          {sessionCount >= 2 && (
+            <GhostButton label="Compare progress" onPress={() => router.push("/compare")} />
+          )}
           <GhostButton label="Delete my photos" onPress={confirmDeletePhotos} />
         </Card>
       )}
