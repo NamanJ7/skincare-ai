@@ -172,6 +172,12 @@ export function listSessions(): StoredSession[] {
   return [...readSessionIndex()].reverse();
 }
 
+/** URI of one angle's photo from a past session, or undefined if it isn't there. */
+export function sessionPhotoUri(sessionId: string, angle: CaptureAngle): string | undefined {
+  const file = new File(sessionDir(sessionId), `${angle}.jpg`);
+  return file.exists ? file.uri : undefined;
+}
+
 function appendToSessionIndex(session: StoredSession): void {
   try {
     const dir = photosDir();
