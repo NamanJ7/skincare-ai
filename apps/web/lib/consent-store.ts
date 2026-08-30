@@ -20,7 +20,6 @@ export interface ConsentRecord {
 // and never see the other's writes. globalThis is the one thing guaranteed
 // to be the same object across every bundle in the process.
 declare global {
-  // eslint-disable-next-line no-var
   var __poreConsentMemoryStore: Map<string, ConsentRecord> | undefined;
 }
 const memoryStore = globalThis.__poreConsentMemoryStore ?? new Map<string, ConsentRecord>();
