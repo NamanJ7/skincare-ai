@@ -48,6 +48,35 @@ const category = z.enum([
 
 const risk = z.enum(["low", "medium", "high"]);
 
+/**
+ * Angles the guided capture takes, in order. Also the labels the pipeline puts
+ * in front of each image block so the model knows what it is looking at.
+ */
+export const CAPTURE_ANGLES = ["front", "left", "right"] as const;
+
+const captureAngle = z.enum(CAPTURE_ANGLES);
+
+const photoQualityFlag = z.enum([
+  "dark",
+  "bright",
+  "blurry",
+  "uneven_light",
+  "color_cast",
+  "too_far",
+]);
+
+/**
+ * Client-measured capture quality. Validated on the way IN (it arrives from the
+ * app, which is a trust boundary) and attached to the assessment afterwards —
+ * the model is told about it but never asked to produce it.
+ */
+export const PhotoQualitySchema = z.object({
+  angle: captureAngle,
+  score: z.number().min(0).max(1),
+  flags: z.array(photoQualityFlag),
+  illuminant: z.enum(["screen_flash", "ambient"]),
+});
+
 export const AssessmentSchema = z.object({
   findings: z.array(
     z.object({
@@ -65,6 +94,13 @@ export const AssessmentSchema = z.object({
   }),
   summary: z.string(),
   disclaimer: z.string(),
+  /**
+   * Must fall when photos are flagged. A confident number over a blurry photo
+   * is the exact failure mode this product exists to not repeat.
+   */
+  overallConfidence: z.number(),
+  /** What could not be assessed, and why. Empty only when nothing was obscured. */
+  limitations: z.array(z.string()),
 });
 
 const RoutineStepSchema = z.object({

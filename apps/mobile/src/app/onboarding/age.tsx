@@ -15,8 +15,10 @@ export default function AgeGate() {
   function onContinue() {
     if (!valid || blocked) return;
     update({ age });
+    // Capture comes before the questionnaire, but the parental-consent gate
+    // still comes before the camera.
     if (age <= 17) router.push("/onboarding/consent");
-    else router.push("/onboarding/intake");
+    else router.push("/onboarding/photo");
   }
 
   return (

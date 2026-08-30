@@ -43,6 +43,13 @@
             "imageWidth": 96
           }
         }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Pore uses the camera to take the three guided skin photos. Nothing is captured until you press the shutter, and your photos stay on your phone.",
+          "recordAudioAndroid": false
+        }
       ]
     ],
     "experiments": {

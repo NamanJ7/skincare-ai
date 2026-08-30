@@ -16,8 +16,8 @@ export default function ParentalConsent() {
     if (!valid) return;
     update({ parentEmail: email.trim() });
     // Real build: send a verifiable consent request to the parent before any
-    // photo capture, and record approval. For now we proceed to intake.
-    router.push("/onboarding/intake");
+    // photo capture, and record approval. For now we proceed to capture.
+    router.push("/onboarding/photo");
   }
 
   return (
@@ -41,8 +41,8 @@ export default function ParentalConsent() {
 
       <Card>
         <AppText variant="caption" color={colors.inkMuted}>
-          We only use this email to confirm consent. Pore never trains on or sells anyone&apos;s data,
-          and Pore doesn&apos;t store your photos.
+          We only use this email to confirm consent. Pore never trains on or sells anyone&apos;s data.
+          Photos stay on your phone and are never saved on our servers.
         </AppText>
         <Pressable
           onPress={() => router.push("/legal/privacy")}

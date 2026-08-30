@@ -4,12 +4,30 @@
  * over-loaded (two acids at night, a daily retinoid, no SPF) so the real safety
  * engine has visible work to do.
  */
-import type { Assessment, IntakeResponse, Routine } from "@pore/shared";
+import type { Assessment, CaptureAngle, IntakeResponse, PhotoQuality, Routine } from "@pore/shared";
 
 const DISCLAIMER =
   "Pore offers cosmetic skincare guidance, not a medical diagnosis. If something looks painful, is bleeding, spreading quickly, or isn't improving, please check in with a pharmacist or doctor.";
 
-export function mockAssessment(intake: IntakeResponse): Assessment {
+const ANGLES: CaptureAngle[] = ["front", "left", "right"];
+
+export function mockAssessment(
+  intake: IntakeResponse,
+  photoQuality: PhotoQuality[] = [],
+): Assessment {
+  // The mock mirrors the real pipeline's honesty rules rather than always
+  // returning a confident answer: a missing angle or a flagged shot costs
+  // confidence here too, so the no-key path demonstrates the actual behaviour.
+  const flagged = photoQuality.filter((p) => p.flags.length > 0);
+  const missing = ANGLES.filter((a) => !photoQuality.some((p) => p.angle === a));
+  const limitations = [
+    ...missing.map((a) => `No ${a} photo was provided, so that side could not be assessed.`),
+    ...flagged.map(
+      (p) =>
+        `The ${p.angle} photo came through as ${p.flags.join(" and ")}, so that read is less certain.`,
+    ),
+  ];
+
   return {
     findings: [
       {
@@ -38,6 +56,9 @@ export function mockAssessment(intake: IntakeResponse): Assessment {
       },
     ],
     escalation: { recommendProfessional: false, reasons: [] },
+    photoQuality,
+    overallConfidence: Math.max(0.2, 0.85 - 0.15 * missing.length - 0.1 * flagged.length),
+    limitations,
     summary:
       "Your skin looks like it's dealing with some everyday breakouts and a little leftover marking — both very common and very workable. A simple, consistent routine will go a long way here.",
     disclaimer: DISCLAIMER,

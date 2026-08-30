@@ -82,7 +82,14 @@ export const PRIVACY_POLICY: LegalDocument = {
           // Disclosure. Neither app/api/plan/route.ts nor lib/pipeline.ts
           // writes images to disk or logs them, and there is no database.
           kind: "paragraph",
-          text: "Pore does not store your photos. They are used to produce your assessment and are not written to any Pore database.",
+          text: "Pore's servers do not store your photos. They are used to produce your assessment and are not written to any Pore database.",
+        },
+        {
+          // Disclosure. apps/mobile/src/lib/photos.ts writes the three JPEGs
+          // and a manifest to the app's own document directory, and
+          // deleteStoredPhotos() removes them.
+          kind: "paragraph",
+          text: "The photos themselves are saved on your own phone, inside the app, so you can see what was captured. They are never uploaded to any photo storage. You can delete all of them at any time from your plan screen, and removing the app deletes them with it.",
         },
         {
           kind: "note",
