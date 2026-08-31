@@ -77,6 +77,41 @@ export const PhotoQualitySchema = z.object({
   illuminant: z.enum(["screen_flash", "ambient"]),
 });
 
+/**
+ * The questionnaire answers, validated on the way IN for the same reason as
+ * `PhotoQualitySchema` — `/api/plan` is a trust boundary in front of a paid
+ * endpoint, and a structurally malformed `intake` should be a clean 400, not a
+ * 500 from deep inside the pipeline. Keep the enum members in sync with
+ * `packages/shared/src/types/intake.ts`.
+ */
+export const IntakeResponseSchema = z.object({
+  age: z.number(),
+  goals: z.array(
+    z.enum([
+      "acne",
+      "post_acne_marks",
+      "hyperpigmentation",
+      "oiliness",
+      "dryness",
+      "texture",
+      "redness",
+      "fine_lines",
+      "general_health",
+    ]),
+  ),
+  skinType: z.enum(["oily", "dry", "combination", "normal"]),
+  sensitivity: z.enum(["low", "medium", "high"]),
+  currentProducts: z.array(z.string()),
+  allergies: z.array(z.string()),
+  budget: z.enum(["low", "medium", "high"]),
+  fragrancePreference: z.enum(["fragrance_free", "no_preference"]),
+  pregnancyOrBreastfeeding: z.boolean(),
+  skinTone: z.enum(["very_fair", "fair", "medium", "olive", "brown", "deep"]),
+  darkMarkProne: z.boolean(),
+  climate: z.enum(["dry", "humid", "temperate", "cold"]),
+  location: z.string().optional(),
+});
+
 export const AssessmentSchema = z.object({
   findings: z.array(
     z.object({

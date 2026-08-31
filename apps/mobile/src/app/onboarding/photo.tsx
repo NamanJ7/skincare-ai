@@ -11,13 +11,14 @@
  * count, and rejects it inline with one fixable instruction rather than letting
  * a blurry backlit photo become a confident wrong answer.
  */
+import * as Brightness from "expo-brightness";
 import { CameraView, useCameraPermissions, type CameraCapturedPicture } from "expo-camera";
 import { Image } from "expo-image";
 import { router } from "expo-router";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Linking, Pressable, StyleSheet, View } from "react-native";
 
-import type { SkinTone } from "@pore/shared";
+import { flashIntensityForTone, type SkinTone } from "@pore/shared";
 import { CaptureFrame } from "@/components/CaptureFrame";
 import {
   CAPTURE_STEPS,
@@ -48,12 +49,17 @@ import {
  * `'screen'` is a documented SDK 56 FlashMode, but the docs do not describe its
  * front-camera behaviour, so this must be confirmed on a real device. If it
  * turns out to be a no-op, flip this to false: the app then paints its own
- * white overlay for FLASH_MS around the shot and records the photo as
- * ambient-lit, which is honest rather than a silently broken claim.
+ * white overlay for a tone-aware duration around the shot and records the
+ * photo as ambient-lit, which is honest rather than a silently broken claim.
+ *
+ * How to verify (needs a physical device — see TODOS.md): capture a session
+ * in a dim room with this flag `true`, pull that session's manifest.json (or
+ * read the __DEV__ caption under each reviewed photo), and compare
+ * `metrics.meanLuma` against a second session captured with the flag flipped
+ * to `false` under the same room light. If native "screen" flash shows no
+ * meaningful luma lift over the ambient baseline, flip this to `false`.
  */
 const USE_NATIVE_SCREEN_FLASH = true;
-/** How long the fallback white overlay stays up before the shutter fires. */
-const FLASH_MS = 260;
 
 /**
  * Tone bands, asked here rather than in the questionnaire.
@@ -72,6 +78,27 @@ const TONES: { key: SkinTone; label: string }[] = [
   { key: "brown", label: "Brown" },
   { key: "deep", label: "Deep" },
 ];
+
+/**
+ * Screen brightness is the real physical lever behind both flash paths — the
+ * native "screen" mode and the JS white overlay are the same mechanism (flood
+ * the display, let the front camera catch the reflection) at different points
+ * in the stack, so raising brightness raises the actual light output either
+ * way. Confirmed against the expo-brightness SDK 56 source: `setBrightnessAsync`
+ * needs no permission and is app-scoped on Android (exactly the current
+ * activity, not a system-wide change). Its effect on the native `flash="screen"`
+ * path specifically is unconfirmed until tested on a device — see TODOS.md.
+ * Failures are non-fatal, same convention as every other platform call here: a
+ * capture that can't adjust brightness still works, just at whatever level the
+ * device already has.
+ */
+async function setBrightnessSafe(value: number): Promise<void> {
+  try {
+    await Brightness.setBrightnessAsync(value);
+  } catch {
+    // Non-fatal.
+  }
+}
 
 type Stage = "intro" | "capturing" | "reviewing";
 
@@ -95,6 +122,18 @@ export default function PhotoCapture() {
   const [mountError, setMountError] = useState<string | null>(null);
   /** Consecutive rejections on the current angle — two, and we offer a way past. */
   const [strikes, setStrikes] = useState(0);
+  /** Brightness before capture began, so every shot restores it afterward. */
+  const baselineBrightness = useRef<number | null>(null);
+
+  useEffect(() => {
+    Brightness.getBrightnessAsync()
+      .then((b) => {
+        baselineBrightness.current = b;
+      })
+      .catch(() => {
+        // Non-fatal — the intensity lever just won't have a baseline to restore to.
+      });
+  }, []);
 
   const step = CAPTURE_STEPS[stepIndex]!;
 
@@ -128,11 +167,15 @@ export default function PhotoCapture() {
     setBusy(true);
     setError(null);
 
+    const intensity = flashIntensityForTone(tone);
     let picture: CameraCapturedPicture | undefined;
     try {
+      // Raise the display to this tone's target brightness before either flash
+      // path fires — both read off the same physical screen.
+      await setBrightnessSafe(intensity.level);
       if (!USE_NATIVE_SCREEN_FLASH) {
         setFlashing(true);
-        await new Promise((r) => setTimeout(r, FLASH_MS));
+        await new Promise((r) => setTimeout(r, intensity.durationMs));
       }
       picture = await camera.current.takePictureAsync({ quality: 0.9, exif: true });
     } catch {
@@ -142,6 +185,7 @@ export default function PhotoCapture() {
       return;
     } finally {
       setFlashing(false);
+      if (baselineBrightness.current !== null) await setBrightnessSafe(baselineBrightness.current);
     }
 
     if (!picture) {
@@ -192,7 +236,9 @@ export default function PhotoCapture() {
    * so generation waits for them rather than running on defaults.
    */
   function done() {
-    writeManifest(photos, sessionId);
+    // tone is required to leave the intro stage, so it's set by the time
+    // capture finishes — same non-null pattern as `step` above.
+    writeManifest(photos, sessionId, tone!);
     update({ photos });
     router.push("/onboarding/intake");
   }
@@ -368,6 +414,17 @@ export default function PhotoCapture() {
                   {s.angle}
                   {photo?.quality.flags.length ? " · flagged" : ""}
                 </AppText>
+                {/*
+                 * Dev-only readout of the raw scoreFrame() measurements, so a
+                 * real-device capture session can be eyeballed without pulling
+                 * manifest.json off the phone. __DEV__ is false in release
+                 * builds, so this never reaches a real user. See TODOS.md.
+                 */}
+                {__DEV__ && photo ? (
+                  <AppText variant="caption" color={colors.inkMuted} style={{ textAlign: "center" }}>
+                    {`luma ${photo.metrics.meanLuma.toFixed(0)} · sharp ${photo.metrics.sharpness.toFixed(0)} · skin ${(photo.metrics.skinCoverage * 100).toFixed(0)}% · cast ${photo.metrics.chromaDistance.toFixed(1)} · rgb ${photo.illuminantEstimate.r.toFixed(0)}/${photo.illuminantEstimate.g.toFixed(0)}/${photo.illuminantEstimate.b.toFixed(0)}`}
+                  </AppText>
+                ) : null}
               </Pressable>
             );
           })}

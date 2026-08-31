@@ -11,7 +11,8 @@
     "dev": "turbo run dev",
     "lint": "turbo run lint",
     "typecheck": "turbo run typecheck",
-    "test": "turbo run test"
+    "test": "turbo run test",
+    "calibrate:capture": "node scripts/calibrate-capture-tuning.mjs"
   },
   "devDependencies": {
     "playwright": "^1.61.0",

@@ -11,7 +11,14 @@ import {
   type RoutineStep,
 } from "@pore/shared";
 import { buildIntake } from "@/lib/intake";
-import { deleteStoredPhotos, listSessions, storedPhotoCount } from "@/lib/photos";
+import {
+  deleteSession,
+  deleteStoredPhotos,
+  listSessions,
+  photoCountForSession,
+  storedPhotoCount,
+  type StoredSession,
+} from "@/lib/photos";
 import { useOnboarding } from "@/state/onboarding";
 import { AppText, Card, Chip, Divider, GhostButton, Screen, colors, spacing } from "@/theme";
 
@@ -72,7 +79,7 @@ function confidenceLabel(c: number): string {
 export default function Today() {
   const { data, update } = useOnboarding();
   const [photoCount, setPhotoCount] = useState(() => storedPhotoCount());
-  const [sessionCount] = useState(() => listSessions().length);
+  const [sessions, setSessions] = useState<StoredSession[]>(() => listSessions());
 
   function confirmDeletePhotos() {
     Alert.alert(
@@ -88,8 +95,33 @@ export default function Today() {
               deleteStoredPhotos();
               update({ photos: [] });
               setPhotoCount(0);
+              setSessions([]);
             } catch {
               Alert.alert("Couldn't delete", "Something went wrong removing the photos. Try again.");
+            }
+          },
+        },
+      ],
+    );
+  }
+
+  function confirmDeleteSession(session: StoredSession) {
+    const date = new Date(session.capturedAt).toLocaleDateString();
+    Alert.alert(
+      "Delete this session?",
+      `This removes the ${date} photos stored on this phone. Your other sessions stay.`,
+      [
+        { text: "Keep it", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: () => {
+            try {
+              deleteSession(session.id);
+              setSessions((prev) => prev.filter((s) => s.id !== session.id));
+              setPhotoCount(storedPhotoCount());
+            } catch {
+              Alert.alert("Couldn't delete", "Something went wrong removing that session. Try again.");
             }
           },
         },
@@ -208,8 +240,40 @@ export default function Today() {
             {photoCount} {photoCount === 1 ? "photo is" : "photos are"} saved on this phone, inside
             the app. They were never uploaded to photo storage and are not on our servers.
           </AppText>
-          {sessionCount >= 2 && (
+          {sessions.length >= 2 && (
             <GhostButton label="Compare progress" onPress={() => router.push("/compare")} />
+          )}
+          {sessions.length >= 2 && (
+            <View style={{ gap: spacing.xs, marginTop: spacing.xs }}>
+              {sessions.map((session) => (
+                <View
+                  key={session.id}
+                  style={{
+                    flexDirection: "row",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                  }}
+                >
+                  <AppText variant="caption" color={colors.ink}>
+                    {new Date(session.capturedAt).toLocaleDateString()} ·{" "}
+                    {photoCountForSession(session.id)} photos
+                  </AppText>
+                  <Pressable
+                    onPress={() => confirmDeleteSession(session)}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Delete the ${new Date(session.capturedAt).toLocaleDateString()} session`}
+                    style={({ pressed }) => [
+                      { minHeight: 44, minWidth: 44, justifyContent: "center", alignItems: "flex-end" },
+                      pressed && { opacity: 0.6 },
+                    ]}
+                  >
+                    <AppText variant="caption" color={colors.escalate}>
+                      Delete
+                    </AppText>
+                  </Pressable>
+                </View>
+              ))}
+            </View>
           )}
           <GhostButton label="Delete my photos" onPress={confirmDeletePhotos} />
         </Card>

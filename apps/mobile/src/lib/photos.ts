@@ -11,6 +11,7 @@ import { ImageManipulator, SaveFormat } from "expo-image-manipulator";
 import {
   captureHint,
   type CaptureAngle,
+  type FrameScore,
   type PhotoQuality,
   type SkinTone,
 } from "@pore/shared";
@@ -41,6 +42,12 @@ export interface CapturedPhoto {
   data: string;
   quality: PhotoQuality;
   capturedAt: string;
+  /**
+   * Raw scoreFrame() measurements — never sent to /api/plan, kept on-device only
+   * so real-capture data exists to calibrate CAPTURE_TUNING later. See TODOS.md.
+   */
+  metrics: FrameScore["metrics"];
+  illuminantEstimate: FrameScore["illuminant"];
 }
 
 /** A frame the gate rejected, with the one instruction that fixes it. */
@@ -120,6 +127,8 @@ export async function processCapture(
     data: delivered.base64,
     quality,
     capturedAt: new Date().toISOString(),
+    metrics: score.metrics,
+    illuminantEstimate: score.illuminant,
   };
 }
 
@@ -195,8 +204,19 @@ function appendToSessionIndex(session: StoredSession): void {
 /**
  * Record what was captured and under what conditions, for later comparison,
  * and register the session in the top-level index so it can be listed later.
+ *
+ * `metrics`/`illuminantEstimate` (added in manifest version 2) are the raw
+ * scoreFrame() measurements the app already computes but otherwise discards —
+ * pulling this file off a real device is how CAPTURE_TUNING and the flash
+ * verification procedure in TODOS.md actually get real numbers to work from.
+ * `tone` (version 3) is the skin tone the user declared for this session —
+ * without it, a pulled manifest can't be grouped by tone band, which is the
+ * whole point of the per-tone thresholds it's meant to help calibrate. See
+ * `scripts/calibrate-capture-tuning.mjs`. Nothing in this app parses the
+ * manifest back in, so the version bumps are documentation only, no
+ * migration needed.
  */
-export function writeManifest(photos: CapturedPhoto[], sessionId: string): void {
+export function writeManifest(photos: CapturedPhoto[], sessionId: string, tone: SkinTone): void {
   const capturedAt = photos[0]?.capturedAt ?? new Date().toISOString();
   try {
     const dir = sessionDir(sessionId);
@@ -206,13 +226,16 @@ export function writeManifest(photos: CapturedPhoto[], sessionId: string): void 
     file.create();
     file.write(
       JSON.stringify({
-        version: 1,
+        version: 3,
         id: sessionId,
         capturedAt,
+        tone,
         photos: photos.map((p) => ({
           angle: p.angle,
           capturedAt: p.capturedAt,
           quality: p.quality,
+          metrics: p.metrics,
+          illuminantEstimate: p.illuminantEstimate,
         })),
       }),
     );
@@ -236,8 +259,43 @@ export function storedPhotoCount(): number {
   }
 }
 
+/** How many photos one session has stored, for a per-session delete row. */
+export function photoCountForSession(sessionId: string): number {
+  try {
+    return sessionDir(sessionId)
+      .list()
+      .filter((f) => f.name.endsWith(".jpg")).length;
+  } catch {
+    return 0;
+  }
+}
+
 /** Remove every photo this app has stored, across every session. The user's copy of "forget me". */
 export function deleteStoredPhotos(): void {
   const dir = photosDir();
   if (dir.exists) dir.delete();
+}
+
+/** The session index with one session removed — split out so it has a runnable check. */
+export function dropSession(sessions: StoredSession[], id: string): StoredSession[] {
+  return sessions.filter((s) => s.id !== id);
+}
+
+/** Remove one session's photos and manifest, and drop it from the top-level index. */
+export function deleteSession(sessionId: string): void {
+  try {
+    const dir = sessionDir(sessionId);
+    if (dir.exists) dir.delete();
+  } catch {
+    // Best effort, same as every other storage op in this file.
+  }
+  try {
+    const file = new File(photosDir(), SESSIONS_INDEX);
+    const sessions = dropSession(readSessionIndex(), sessionId);
+    if (file.exists) file.delete();
+    file.create();
+    file.write(JSON.stringify({ version: 1, sessions }));
+  } catch {
+    // The index is a convenience for a future session, never a blocker now.
+  }
 }

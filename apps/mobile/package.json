@@ -8,6 +8,7 @@
     "@expo/ui": "~56.0.18",
     "@pore/shared": "workspace:*",
     "expo": "~56.0.12",
+    "expo-brightness": "~56.0.5",
     "expo-camera": "~56.0.8",
     "expo-constants": "~56.0.18",
     "expo-device": "~56.0.4",
