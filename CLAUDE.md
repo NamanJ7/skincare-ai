@@ -99,8 +99,28 @@ not edge — with `maxDuration: 60` since it makes two model calls):
    changing the pipeline.
 
 The mobile app calls the same endpoint via `apps/mobile/src/lib/api.ts` (`fetchPlan`), pointed at
-`EXPO_PUBLIC_API_URL`; if that's unset or the request fails, it falls back to a local demo rather
-than erroring.
+`EXPO_PUBLIC_API_URL`. It returns a `PlanOutcome` that keeps "no server configured" and "the
+request failed" apart: the first falls back to the local safety-engine demo (labelled as one on
+`/today`), the second stops on the intake screen with a retry. Never collapse those two — showing
+someone an example routine as though it were a read of their face is the one failure this app
+must not have.
+
+## Persistence
+
+There is no backend and no user accounts. Everything the app remembers lives in its own document
+directory, written as versioned JSON with failures treated as non-fatal:
+
+- `apps/mobile/src/lib/photos.ts` — `skin-photos/<sessionId>/` (three JPEGs + `manifest.json`) and
+  a top-level `sessions.json` index.
+- `apps/mobile/src/lib/plan.ts` — `plan.json`, holding the generated plan and the `IntakeResponse`
+  behind it. `OnboardingProvider` restores it synchronously on mount, which is what lets
+  `app/index.tsx` route a returning user straight to `/today` on its first render.
+
+Two rules here are load-bearing. Photo base64 is never written to disk — it exists for the
+duration of one `/api/plan` request, and the privacy copy in `packages/shared/src/legal/content.ts`
+depends on that staying true. And `loadPlan` returns null on anything it cannot fully verify:
+it runs on the launch path, so a half-read plan would either crash every start or put the wrong
+findings in front of the user.
 
 ## Conventions
 
