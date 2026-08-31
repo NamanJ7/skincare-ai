@@ -5,7 +5,8 @@ import { ActivityIndicator, View } from "react-native";
 import type { Sensitivity, SkinGoal, SkinType } from "@pore/shared";
 import { fetchPlan } from "@/lib/api";
 import { buildIntake } from "@/lib/intake";
-import { CAPTURE_STEPS, type CapturedPhoto } from "@/lib/photos";
+import { recordAssessment } from "@/lib/journal";
+import { CAPTURE_STEPS, listSessions, type CapturedPhoto } from "@/lib/photos";
 import { useOnboarding } from "@/state/onboarding";
 import { AppText, Chip, GhostButton, PrimaryButton, ProgressDots, Screen, colors, spacing } from "@/theme";
 
@@ -80,7 +81,19 @@ export default function Intake() {
       images: ordered.map((p) => ({ data: p.data, mediaType: "image/jpeg", quality: p.quality })),
       intake: buildIntake({ ...data, ...answers }),
     });
-    if (plan) update({ plan });
+    if (plan) {
+      update({ plan });
+      // This first reading is the zero every later measurement subtracts from,
+      // so it is filed away the moment it exists. Without it there is nothing
+      // to compare a return visit against.
+      recordAssessment({
+        // The capture screen has already written its manifest, so the newest
+        // stored session is the set this assessment was made from.
+        sessionId: listSessions()[0]?.id ?? "baseline",
+        capturedAt: ordered[0]?.capturedAt ?? new Date().toISOString(),
+        assessment: plan.assessment,
+      });
+    }
     router.replace("/today");
   }
 

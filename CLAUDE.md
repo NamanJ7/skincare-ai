@@ -25,6 +25,10 @@ pnpm workspaces + Turborepo, TypeScript throughout.
     types).
   - `safety/` — `applySafetyRules`, the deterministic routine-safety engine (see below), and the
     `ACTIVES` ingredient metadata table it runs against.
+  - `schedule/` — `planDay`/`planWeek`, the deterministic cadence engine (see below) that turns a
+    safety-clamped routine's weekly frequencies into "here is what you do tonight".
+  - `progress/` — `compareAssessments`/`adaptRoutine`, the deterministic progress engine (see below)
+    that measures whether the routine is working and feeds the answer back into it.
 
 ## Commands
 
@@ -101,6 +105,78 @@ not edge — with `maxDuration: 60` since it makes two model calls):
 The mobile app calls the same endpoint via `apps/mobile/src/lib/api.ts` (`fetchPlan`), pointed at
 `EXPO_PUBLIC_API_URL`; if that's unset or the request fails, it falls back to a local demo rather
 than erroring.
+
+## Architecture: the cadence engine
+
+`packages/shared/src/schedule/engine.ts` is the second deterministic layer, and it runs *after*
+the safety engine. The safety engine decides what belongs in a routine and how often; this one
+decides **which of those steps happen on a given day**, which is the question the user actually
+faces. It is the difference between shipping a report and shipping a routine, and — like the
+safety engine — it is code, not a prompt:
+
+- Each step's weekly frequency is spread evenly over a 7-day cycle (`spreadDays`), so a 3x/week
+  active never lands on consecutive days.
+- **At most one strong active per calendar day.** The safety engine caps per *session*; AM acid
+  plus PM retinoid still passes that cap and still over-exfoliates. Conflicts are resolved by
+  walking the active to the next free day, or dropping it for the cycle if there is none.
+- Strong actives **ramp** from a single weekly use to their target frequency over `RAMP_WEEKS`
+  (6). Gentle steps and SPF run at full frequency from day one.
+- A week only advances the ramp if the user reported nothing worse than `calm` during it. A week
+  with no check-ins at all counts as calm — the product asks for feedback, it doesn't punish
+  silence.
+- A `stinging` report **deloads** the routine for 3 days (two `tight` reports inside 5 days for 2
+  days): strong actives are pulled, barrier steps stay.
+
+Every departure from the nominal plan is a `ScheduleNote` with user-facing copy, the same audit
+contract as `SafetyAdjustment` — so `/today` can always say *why* tonight looks like this. A
+session that renames itself (a "Recovery night") must always carry a note explaining it; a
+headline the user can't account for is worse than no headline. Extend
+`packages/shared/src/schedule/engine.test.ts` when changing any of this.
+
+State lives in `apps/mobile/src/lib/journal.ts` — an on-device JSON file holding the routine start
+date, per-session tick-offs, and the one-tap skin check-ins. It never leaves the phone, it is
+disclosed in the privacy content (`packages/shared/src/legal/content.ts`), and `/plan` must keep
+offering a way to erase it.
+
+`apps/mobile/src/app/today.tsx` is the primary surface and shows **only the current session**;
+`/plan` holds the full assessment and routine as a reference document. Keep it that way — the
+whole point is that the user makes no decisions except the single "how does your skin feel?" tap.
+
+## Architecture: the progress engine
+
+`packages/shared/src/progress/engine.ts` is the third deterministic layer, and it answers the
+question that decides retention: **is any of this working?**
+
+The load-bearing decision is what it does *not* do. **Never show a model the before and after and
+ask whether the skin improved.** A model handed a before-and-after will always find a story, and a
+skincare app that confabulates progress is worse than one that says nothing. Instead each capture
+session gets its own blind `Assessment` from the ordinary `/api/plan` call — which has no idea a
+previous session exists — and `compareAssessments` subtracts the two in code. Preserve that
+blindness; it is the whole credibility of the feature.
+
+- **Comparability gate.** A photo only counts if the capture gate passed it *and* it was shot under
+  `screen_flash`. Ambient light is not repeatable, so an ambient set can be displayed but never
+  subtracted. With no measurable angle in common the engine reports nothing and says why. The
+  refusal is the feature — this is why capture was built as an instrument.
+- `AppearanceLevel` is ordinal, so bands subtract. A concern either assessment was unsure about
+  (confidence < 0.6) is returned as `not_comparable`, never folded into the result.
+- `adaptRoutine` turns the measurement into a routine change, and **always returns through
+  `applySafetyRules`** (see `finish()` — every path goes through it). Adaptation proposes, the
+  safety engine disposes, exactly like the LLM. It cannot raise a frequency past a cap or survive
+  a pregnancy filter.
+- Ordering is the safety argument: **worsening acts first and only ever reduces**; escalation sits
+  behind two gates (`ESCALATE_AFTER_WEEKS`, and an adherence floor). "It isn't working" usually
+  means "it isn't being done", and answering that with a stronger acid is how people damage their
+  barrier. Improvement holds steady — adding more to a working routine is how progress gets undone.
+
+`adaptRoutine` is a *proposal against a routine*, so running it on its own output steps the same
+active up twice. It runs **once**, when a measurement lands (`runReassessment` in `compare.tsx`),
+and the result is persisted via `saveAdaptation`. Never call it during render.
+
+The baseline is recorded at signup (`onboarding/intake.tsx`) and never replaced — a moving zero
+would let slow drift vanish. `/compare` is the verdict surface and the one place the app uses a
+dark surface: measured concerns sit on the deep-green card, and anything the engine declined to
+call is listed separately below so a refusal can never be skimmed as a result.
 
 ## Conventions
 

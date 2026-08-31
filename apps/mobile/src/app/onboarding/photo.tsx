@@ -13,7 +13,7 @@
  */
 import { CameraView, useCameraPermissions, type CameraCapturedPicture } from "expo-camera";
 import { Image } from "expo-image";
-import { router } from "expo-router";
+import { router, useLocalSearchParams } from "expo-router";
 import { useCallback, useRef, useState } from "react";
 import { ActivityIndicator, Linking, Pressable, StyleSheet, View } from "react-native";
 
@@ -77,6 +77,8 @@ type Stage = "intro" | "capturing" | "reviewing";
 
 export default function PhotoCapture() {
   const { data, update } = useOnboarding();
+  /** "recheck" when this is a return visit rather than first-run onboarding. */
+  const { mode } = useLocalSearchParams<{ mode?: string }>();
   const [permission, requestPermission] = useCameraPermissions();
   const camera = useRef<CameraView>(null);
 
@@ -194,7 +196,10 @@ export default function PhotoCapture() {
   function done() {
     writeManifest(photos, sessionId);
     update({ photos });
-    router.push("/onboarding/intake");
+    // A return visit already answered the questionnaire. It goes straight to
+    // the verdict, which runs the blind re-assessment and measures the change.
+    if (mode === "recheck") router.replace("/compare?mode=recheck");
+    else router.push("/onboarding/intake");
   }
 
   // ---------------------------------------------------------------- intro --
