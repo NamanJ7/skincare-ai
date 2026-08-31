@@ -114,11 +114,12 @@ export default function Today() {
     }, []),
   );
 
-  // Prefer the server-generated routine; fall back to running the safety engine
-  // locally so the full cadence still works offline.
+  // Precedence: a routine the progress engine has already adapted beats the one
+  // generated at signup, which beats a locally clamped draft. Once a measured
+  // re-assessment has moved a frequency, that is the routine the user is on.
   const routine = useMemo(
-    () => data.plan?.routine ?? applySafetyRules(draftRoutine(), intake).routine,
-    [data.plan, intake],
+    () => journal.routine ?? data.plan?.routine ?? applySafetyRules(draftRoutine(), intake).routine,
+    [journal.routine, data.plan, intake],
   );
 
   const ctx = useMemo(

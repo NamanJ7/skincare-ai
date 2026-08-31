@@ -10,7 +10,15 @@
  * the worst case is the user re-taps a step.
  */
 import { Directory, File, Paths } from "expo-file-system";
-import { today, type RoutineTime, type SkinCheckIn, type SkinFeel } from "@pore/shared";
+import {
+  today,
+  type Assessment,
+  type ProgressAdjustment,
+  type Routine,
+  type RoutineTime,
+  type SkinCheckIn,
+  type SkinFeel,
+} from "@pore/shared";
 
 const DIR_NAME = "journal";
 const FILE_NAME = "journal.json";
@@ -24,6 +32,34 @@ interface Journal {
   /** `"YYYY-MM-DD:PM"` for sessions completed end to end. Drives the streak. */
   finished: string[];
   checkIns: SkinCheckIn[];
+  /**
+   * The first assessment, kept forever — it is the zero the whole product
+   * measures against. Nothing overwrites it but a full erase.
+   */
+  baseline?: StoredAssessment;
+  /** The most recent re-assessment. Two points is the whole comparison. */
+  latest?: StoredAssessment;
+  /**
+   * The routine as it stands after any progress adaptation. Absent until the
+   * first re-assessment, at which point it takes over from the plan the server
+   * generated at signup.
+   */
+  routine?: Routine;
+  /**
+   * What the progress engine changed at the last re-assessment, and why.
+   *
+   * Stored rather than recomputed on render: `adaptRoutine` is a proposal
+   * against a routine, so running it again on its own output would step the
+   * same active up a second time. It runs once, when a measurement lands.
+   */
+  lastAdaptation?: ProgressAdjustment[];
+}
+
+/** One capture session's blind assessment, tagged with when it was taken. */
+export interface StoredAssessment {
+  sessionId: string;
+  capturedAt: string;
+  assessment: Assessment;
 }
 
 function sessionKey(date: string, time: RoutineTime): string {
@@ -63,6 +99,10 @@ export function readJournal(): Journal {
       completed: parsed.completed ?? {},
       finished: parsed.finished ?? [],
       checkIns: parsed.checkIns ?? [],
+      baseline: parsed.baseline,
+      latest: parsed.latest,
+      routine: parsed.routine,
+      lastAdaptation: parsed.lastAdaptation,
     };
   } catch {
     return empty();
@@ -151,6 +191,57 @@ export function streakDays(journal: Journal, on: string = today()): number {
 function shiftDay(date: string, delta: number): string {
   const [y, m, d] = date.split("-").map(Number);
   return new Date(Date.UTC(y, m - 1, d + delta)).toISOString().slice(0, 10);
+}
+
+/**
+ * File away one session's blind assessment.
+ *
+ * The first one ever recorded becomes the baseline and is never replaced —
+ * comparing against a moving zero would let slow drift disappear. Everything
+ * after it lands in `latest`.
+ */
+export function recordAssessment(entry: StoredAssessment): Journal {
+  const journal = readJournal();
+  if (!journal.baseline) journal.baseline = entry;
+  else journal.latest = entry;
+  writeJournal(journal);
+  return journal;
+}
+
+/**
+ * Persist the outcome of one progress adaptation: the routine it produced and
+ * the reasons it gives the user. Written together because they describe the
+ * same event and must never drift apart.
+ */
+export function saveAdaptation(routine: Routine, adjustments: ProgressAdjustment[]): Journal {
+  const journal = readJournal();
+  journal.routine = routine;
+  journal.lastAdaptation = adjustments;
+  writeJournal(journal);
+  return journal;
+}
+
+/** Whole weeks since the routine started. */
+export function weeksOnRoutine(journal: Journal, on: string = today()): number {
+  return Math.max(0, Math.floor(daysSince(journal.startedOn, on) / 7));
+}
+
+/**
+ * Roughly what share of scheduled sessions actually got done, 0..1.
+ *
+ * Two sessions a day is the denominator. It is a blunt measure, and it is
+ * deliberately blunt: it only ever gates whether we are allowed to make a
+ * routine *stronger*, so erring toward "not enough evidence" is the safe
+ * direction to be wrong in.
+ */
+export function adherenceRate(journal: Journal, on: string = today()): number {
+  const days = Math.max(1, daysSince(journal.startedOn, on));
+  return Math.min(1, journal.finished.length / (days * 2));
+}
+
+function daysSince(from: string, to: string): number {
+  const day = (d: string) => Date.parse(`${d}T00:00:00Z`);
+  return Math.max(0, Math.round((day(to) - day(from)) / 86_400_000));
 }
 
 /**

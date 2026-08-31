@@ -27,6 +27,8 @@ pnpm workspaces + Turborepo, TypeScript throughout.
     `ACTIVES` ingredient metadata table it runs against.
   - `schedule/` — `planDay`/`planWeek`, the deterministic cadence engine (see below) that turns a
     safety-clamped routine's weekly frequencies into "here is what you do tonight".
+  - `progress/` — `compareAssessments`/`adaptRoutine`, the deterministic progress engine (see below)
+    that measures whether the routine is working and feeds the answer back into it.
 
 ## Commands
 
@@ -139,6 +141,42 @@ offering a way to erase it.
 `apps/mobile/src/app/today.tsx` is the primary surface and shows **only the current session**;
 `/plan` holds the full assessment and routine as a reference document. Keep it that way — the
 whole point is that the user makes no decisions except the single "how does your skin feel?" tap.
+
+## Architecture: the progress engine
+
+`packages/shared/src/progress/engine.ts` is the third deterministic layer, and it answers the
+question that decides retention: **is any of this working?**
+
+The load-bearing decision is what it does *not* do. **Never show a model the before and after and
+ask whether the skin improved.** A model handed a before-and-after will always find a story, and a
+skincare app that confabulates progress is worse than one that says nothing. Instead each capture
+session gets its own blind `Assessment` from the ordinary `/api/plan` call — which has no idea a
+previous session exists — and `compareAssessments` subtracts the two in code. Preserve that
+blindness; it is the whole credibility of the feature.
+
+- **Comparability gate.** A photo only counts if the capture gate passed it *and* it was shot under
+  `screen_flash`. Ambient light is not repeatable, so an ambient set can be displayed but never
+  subtracted. With no measurable angle in common the engine reports nothing and says why. The
+  refusal is the feature — this is why capture was built as an instrument.
+- `AppearanceLevel` is ordinal, so bands subtract. A concern either assessment was unsure about
+  (confidence < 0.6) is returned as `not_comparable`, never folded into the result.
+- `adaptRoutine` turns the measurement into a routine change, and **always returns through
+  `applySafetyRules`** (see `finish()` — every path goes through it). Adaptation proposes, the
+  safety engine disposes, exactly like the LLM. It cannot raise a frequency past a cap or survive
+  a pregnancy filter.
+- Ordering is the safety argument: **worsening acts first and only ever reduces**; escalation sits
+  behind two gates (`ESCALATE_AFTER_WEEKS`, and an adherence floor). "It isn't working" usually
+  means "it isn't being done", and answering that with a stronger acid is how people damage their
+  barrier. Improvement holds steady — adding more to a working routine is how progress gets undone.
+
+`adaptRoutine` is a *proposal against a routine*, so running it on its own output steps the same
+active up twice. It runs **once**, when a measurement lands (`runReassessment` in `compare.tsx`),
+and the result is persisted via `saveAdaptation`. Never call it during render.
+
+The baseline is recorded at signup (`onboarding/intake.tsx`) and never replaced — a moving zero
+would let slow drift vanish. `/compare` is the verdict surface and the one place the app uses a
+dark surface: measured concerns sit on the deep-green card, and anything the engine declined to
+call is listed separately below so a refusal can never be skimmed as a result.
 
 ## Conventions
 

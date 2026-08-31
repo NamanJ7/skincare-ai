@@ -86,6 +86,46 @@ target comfort on the step rows, whether the week strip reads at a glance, and
 whether the check-in card appearing after the last tick feels earned or nagging.
 Same caveat as the capture work below — confirm on hardware.
 
+## Progress engine follow-ups
+
+### `MIN_CONFIDENCE` and the escalation gates are judgement calls, not findings
+`packages/shared/src/progress/engine.ts` picks a 0.6 confidence floor, an 8-week
+wait before escalation, and a 70% adherence floor. All three are defensible and
+none is measured. They are named constants at the top of the module for exactly
+that reason. The adherence floor in particular is computed against a blunt
+denominator (`daysElapsed * 2` in `apps/mobile/src/lib/journal.ts`), which
+under-counts anyone who started mid-day — deliberately, since it only ever gates
+making a routine *stronger*, so erring toward "not enough evidence" is the safe
+direction. Revisit once there is real adherence data.
+
+### The two elapsed-time numbers can disagree
+The `/compare` headline says "measured across N weeks" from the gap between the
+two photo sessions; the adaptation copy says "you're N weeks in" from
+`journal.startedOn`. They normally track, but a user who starts the routine well
+before their first photo, or re-captures late, will see two different numbers on
+one screen. Pick one clock and derive both from it.
+
+### Only two assessments are ever kept
+`baseline` and `latest`, matching the two-photo-session model. That is the right
+scope for the feature, but it means the middle of a six-month journey is not
+recoverable and a trend line is impossible. Storing every assessment is cheap
+(they are small JSON); the reason not to is that it needs a retention and
+per-session delete story first, same gap the photos already have below.
+
+### Re-assessment burns a full plan generation
+`runReassessment` calls `fetchPlan`, which runs *both* model calls and throws the
+returned routine away — only `.assessment` is used. That is a deliberate trade:
+reusing the endpoint verbatim is what keeps the second reading blind and required
+zero backend change. If the cost matters, add an assessment-only mode to
+`/api/plan` rather than a second endpoint, and keep it ignorant of history.
+
+### The verdict screen is verified by static render only
+`/compare` bundles and renders through `expo export --platform web`, and all six
+adaptation paths are covered by the engine's unit tests and a scenario sim. What
+has not been checked on hardware: whether the dark verdict card reads as premium
+rather than heavy next to the cream, and whether "we couldn't measure this"
+lands as honesty or as the app looking broken. That second one is the whole bet.
+
 ## Housekeeping
 
 ### Marketing and app parity

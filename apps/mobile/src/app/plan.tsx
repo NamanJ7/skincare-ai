@@ -242,8 +242,12 @@ export default function Plan() {
             the app. They were never uploaded to photo storage and are not on our servers.
           </AppText>
           {sessionCount >= 2 && (
-            <GhostButton label="Compare progress" onPress={() => router.push("/compare")} />
+            <GhostButton label="See what changed" onPress={() => router.push("/compare")} />
           )}
+          <GhostButton
+            label="Take a new set"
+            onPress={() => router.push("/onboarding/photo?mode=recheck")}
+          />
           <GhostButton label="Delete my photos" onPress={confirmDeletePhotos} />
         </Card>
       )}
