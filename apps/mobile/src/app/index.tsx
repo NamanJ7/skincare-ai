@@ -1,18 +1,30 @@
 import { router } from "expo-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { View } from "react-native";
 
 import { BrandMark } from "@/components/BrandMark";
 import { HeroDemo } from "@/components/HeroDemo";
 import { SplashAnimation } from "@/components/SplashAnimation";
+import { useOnboarding } from "@/state/onboarding";
 import { AppText, GhostButton, PrimaryButton, Screen, colors, spacing } from "@/theme";
 
 export default function Landing() {
+  const { data } = useOnboarding();
   const [splashDone, setSplashDone] = useState(false);
+  // Restored synchronously by the provider, so this is already correct on the
+  // first render — someone with a routine never sees the pitch for it again.
+  const returning = data.plan !== undefined;
+
+  useEffect(() => {
+    if (splashDone && returning) router.replace("/today");
+  }, [splashDone, returning]);
 
   if (!splashDone) {
     return <SplashAnimation onDone={() => setSplashDone(true)} />;
   }
+
+  // Redirecting; rendering the landing would flash it behind the transition.
+  if (returning) return null;
 
   return (
     <Screen scroll={false} contentStyle={{ justifyContent: "space-between", paddingVertical: spacing.md }}>

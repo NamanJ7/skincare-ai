@@ -6,8 +6,9 @@ import type { Sensitivity, SkinGoal, SkinType } from "@pore/shared";
 import { fetchPlan } from "@/lib/api";
 import { buildIntake } from "@/lib/intake";
 import { CAPTURE_STEPS, type CapturedPhoto } from "@/lib/photos";
+import { savePlan } from "@/lib/plan";
 import { useOnboarding } from "@/state/onboarding";
-import { AppText, Chip, GhostButton, PrimaryButton, ProgressDots, Screen, colors, spacing } from "@/theme";
+import { AppText, Card, Chip, GhostButton, PrimaryButton, ProgressDots, Screen, colors, spacing } from "@/theme";
 
 const GOALS: { key: SkinGoal; label: string }[] = [
   { key: "acne", label: "Acne / breakouts" },
@@ -39,6 +40,7 @@ export default function Intake() {
   const { data, update } = useOnboarding();
   const [step, setStep] = useState(0);
   const [analyzing, setAnalyzing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [goals, setGoals] = useState<SkinGoal[]>([]);
   const [skinType, setSkinType] = useState<SkinType | null>(null);
   const [sensitivity, setSensitivity] = useState<Sensitivity | null>(null);
@@ -72,15 +74,28 @@ export default function Intake() {
     // The photos were taken first, but the assessment needs these answers, so
     // generation happens here rather than running on questionnaire defaults.
     setAnalyzing(true);
+    setError(null);
     const photos = data.photos ?? [];
     const ordered = CAPTURE_STEPS.map((s) => photos.find((p) => p.angle === s.angle)).filter(
       (p): p is CapturedPhoto => p !== undefined,
     );
-    const plan = await fetchPlan({
+    const intake = buildIntake({ ...data, ...answers });
+    const outcome = await fetchPlan({
       images: ordered.map((p) => ({ data: p.data, mediaType: "image/jpeg", quality: p.quality })),
-      intake: buildIntake({ ...data, ...answers }),
+      intake,
     });
-    if (plan) update({ plan });
+    setAnalyzing(false);
+
+    // A failed read stops here. Continuing would land the user on a routine
+    // that was never generated from their photos, presented as though it was.
+    if (outcome.status === "failed") {
+      setError(outcome.message);
+      return;
+    }
+    if (outcome.status === "ok") {
+      update({ plan: outcome.plan });
+      savePlan(intake, outcome.plan);
+    }
     router.replace("/today");
   }
 
@@ -141,8 +156,20 @@ export default function Intake() {
         </View>
       ) : (
         <View style={{ gap: spacing.sm, marginTop: spacing.lg }}>
+          {error ? (
+            <Card>
+              <AppText variant="bodyStrong" color={colors.escalate}>
+                We couldn&apos;t build your routine
+              </AppText>
+              <AppText variant="caption" color={colors.inkMuted}>
+                {error} Your photos are still saved on this phone — nothing was lost.
+              </AppText>
+            </Card>
+          ) : null}
           <PrimaryButton
-            label={step < STEP_COUNT - 1 ? "Next" : "Build my routine"}
+            label={
+              error ? "Try again" : step < STEP_COUNT - 1 ? "Next" : "Build my routine"
+            }
             onPress={next}
             disabled={!canAdvance}
           />

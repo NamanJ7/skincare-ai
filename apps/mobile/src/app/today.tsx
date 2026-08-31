@@ -37,7 +37,11 @@ const CONCERN_LABELS: Record<ConcernKey, string> = {
   irritation_signs: "Signs of irritation",
 };
 
-/** Local fallback draft (over-loaded on purpose so the safety engine acts). */
+/**
+ * The example routine shown when no plan was generated (no API URL configured).
+ * Over-loaded on purpose so the safety engine visibly acts on it. It is never
+ * presented as a read of anyone's skin — see the demo banner below.
+ */
 function draftRoutine(): Routine {
   const step = (
     order: number,
@@ -70,7 +74,7 @@ function confidenceLabel(c: number): string {
 }
 
 export default function Today() {
-  const { data, update } = useOnboarding();
+  const { data, update, reset } = useOnboarding();
   const [photoCount, setPhotoCount] = useState(() => storedPhotoCount());
   const [sessionCount] = useState(() => listSessions().length);
 
@@ -97,12 +101,31 @@ export default function Today() {
     );
   }
 
+  function confirmDeleteRoutine() {
+    Alert.alert(
+      "Delete your routine?",
+      "This removes the saved routine and the answers behind it from this phone. Your photos stay.",
+      [
+        { text: "Keep it", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: () => {
+            reset();
+            router.replace("/");
+          },
+        },
+      ],
+    );
+  }
+
   // Prefer the server-generated plan; otherwise run the engine locally so the
   // screen still demonstrates the full flow offline.
   const view = useMemo(() => {
     if (data.plan) {
       const a = data.plan.assessment;
       return {
+        demo: false,
         concerns: a.findings
           .filter((f) => f.present)
           .map((f) => `${CONCERN_LABELS[f.concern]} · ${f.appearanceLevel}`),
@@ -115,10 +138,14 @@ export default function Today() {
         adjustments: data.plan.adjustments,
       };
     }
+    // No plan: show what the safety engine does to an example routine. There
+    // are deliberately no findings here — inventing them would put words in the
+    // model's mouth about a face it never saw.
     const { routine, adjustments } = applySafetyRules(draftRoutine(), buildIntake(data));
     return {
-      concerns: ["Acne-like breakouts · moderate", "Dark-spot appearance · mild", "Oiliness · noticeable"],
-      summary: "A simple routine built around your skin — with only the steps you actually need.",
+      demo: true,
+      concerns: [],
+      summary: "An example of how Pore builds and corrects a routine.",
       escalate: false,
       confidence: null,
       limitations: [],
@@ -138,25 +165,35 @@ export default function Today() {
         {view.summary}
       </AppText>
 
-      <Card elevated>
-        <AppText variant="heading">What we noticed</AppText>
-        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: spacing.sm, marginTop: spacing.xs }}>
-          {view.concerns.map((c) => (
-            <Chip key={c} label={c} />
-          ))}
-        </View>
-        <AppText variant="caption" color={colors.inkMuted}>
-          Cosmetic, non-diagnostic appearance only.
-        </AppText>
-        {view.confidence !== null ? (
-          <AppText variant="caption" color={colors.primary}>
-            {confidenceLabel(view.confidence)}
-            {view.photoQuality.length > 0
-              ? ` · ${view.photoQuality.filter((p) => p.flags.length === 0).length} of ${view.photoQuality.length} photos passed the quality check`
-              : ""}
+      {view.demo ? (
+        <Card elevated>
+          <AppText variant="heading">Example routine</AppText>
+          <AppText variant="caption" color={colors.inkMuted}>
+            No skin analysis ran, so nothing here is based on your photos. This shows how the
+            routine and its safety corrections work.
           </AppText>
-        ) : null}
-      </Card>
+        </Card>
+      ) : (
+        <Card elevated>
+          <AppText variant="heading">What we noticed</AppText>
+          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: spacing.sm, marginTop: spacing.xs }}>
+            {view.concerns.map((c) => (
+              <Chip key={c} label={c} />
+            ))}
+          </View>
+          <AppText variant="caption" color={colors.inkMuted}>
+            Cosmetic, non-diagnostic appearance only.
+          </AppText>
+          {view.confidence !== null ? (
+            <AppText variant="caption" color={colors.primary}>
+              {confidenceLabel(view.confidence)}
+              {view.photoQuality.length > 0
+                ? ` · ${view.photoQuality.filter((p) => p.flags.length === 0).length} of ${view.photoQuality.length} photos passed the quality check`
+                : ""}
+            </AppText>
+          ) : null}
+        </Card>
+      )}
 
       {view.limitations.length > 0 && (
         <Card>
@@ -212,6 +249,17 @@ export default function Today() {
             <GhostButton label="Compare progress" onPress={() => router.push("/compare")} />
           )}
           <GhostButton label="Delete my photos" onPress={confirmDeletePhotos} />
+        </Card>
+      )}
+
+      {data.plan && (
+        <Card>
+          <AppText variant="heading">Your routine</AppText>
+          <AppText variant="caption" color={colors.inkMuted}>
+            Saved on this phone so it&apos;s here when you come back. It was never uploaded to
+            an account — there isn&apos;t one yet.
+          </AppText>
+          <GhostButton label="Delete my routine" onPress={confirmDeleteRoutine} />
         </Card>
       )}
 
