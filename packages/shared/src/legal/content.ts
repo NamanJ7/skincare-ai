@@ -66,6 +66,14 @@ export const PRIVACY_POLICY: LegalDocument = {
           kind: "paragraph",
           text: "Your answers are held on your device for the length of the session. Pore has no accounts yet, so nothing is saved to a profile.",
         },
+        {
+          // Disclosure. apps/mobile/src/lib/journal.ts writes journal.json to
+          // the app's own document directory: the routine start date, which
+          // steps were ticked off on which day, and the one-tap skin check-ins.
+          // It is what makes the schedule adapt, and deleteJournal() removes it.
+          kind: "paragraph",
+          text: "Once your routine starts, the app keeps a small record on your phone of which steps you ticked off each day and how you said your skin felt. That record is what lets the routine slow itself down when your skin reacts. It stays on your phone, is never uploaded, and you can erase it from your plan screen or by removing the app.",
+        },
       ],
     },
     {

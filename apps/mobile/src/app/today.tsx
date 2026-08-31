@@ -1,19 +1,56 @@
-import { router } from "expo-router";
-import { useMemo, useState } from "react";
-import { Alert, Pressable, View } from "react-native";
+/**
+ * Today — the one screen that answers one question: what do I do right now?
+ *
+ * Everything else in the product (the assessment, the frequencies, the safety
+ * adjustments) is a reference document; it lives on /plan. This screen shows
+ * only the three or four things standing between the user and a finished
+ * session, plus the single line explaining why tonight looks the way it does.
+ *
+ * The cadence comes from `planDay` in @pore/shared — the same deterministic
+ * treatment as the safety rules. Nothing on this screen asks the user to decide
+ * anything except the one question at the end, which is what keeps the plan
+ * honest week to week.
+ */
+import { router, useFocusEffect } from "expo-router";
+import { useCallback, useMemo, useState } from "react";
+import { Pressable, View } from "react-native";
 
 import {
   ACTIVES,
   applySafetyRules,
-  type ConcernKey,
+  currentSession,
+  planDay,
+  planWeek,
+  today as todayDate,
+  weekdayName,
   type ProductCategory,
   type Routine,
   type RoutineStep,
+  type RoutineTime,
+  type SkinFeel,
 } from "@pore/shared";
+import { CheckCircle } from "@/components/CheckCircle";
+import { WeekStrip } from "@/components/WeekStrip";
 import { buildIntake } from "@/lib/intake";
-import { deleteStoredPhotos, listSessions, storedPhotoCount } from "@/lib/photos";
+import {
+  checkInFor,
+  completedSteps,
+  readJournal,
+  recordCheckIn,
+  streakDays,
+  toggleStep,
+} from "@/lib/journal";
 import { useOnboarding } from "@/state/onboarding";
-import { AppText, Card, Chip, Divider, GhostButton, Screen, colors, spacing } from "@/theme";
+import {
+  AppText,
+  Card,
+  Divider,
+  GhostButton,
+  Screen,
+  colors,
+  radius,
+  spacing,
+} from "@/theme";
 
 const CATEGORY_LABELS: Record<ProductCategory, string> = {
   cleanser: "Cleanser",
@@ -25,19 +62,13 @@ const CATEGORY_LABELS: Record<ProductCategory, string> = {
   spot_treatment: "Spot treatment",
 };
 
-const CONCERN_LABELS: Record<ConcernKey, string> = {
-  acne_like_breakouts: "Acne-like breakouts",
-  oiliness: "Oiliness",
-  dryness_flaking: "Dryness / flaking",
-  texture_congestion: "Texture & congestion",
-  uneven_tone: "Uneven tone",
-  dark_spot_appearance: "Dark-spot appearance",
-  redness_appearance: "Redness appearance",
-  fine_line_appearance: "Fine-line appearance",
-  irritation_signs: "Signs of irritation",
-};
+const FEELS: { feel: SkinFeel; label: string }[] = [
+  { feel: "calm", label: "Calm" },
+  { feel: "tight", label: "Tight" },
+  { feel: "stinging", label: "Stinging" },
+];
 
-/** Local fallback draft (over-loaded on purpose so the safety engine acts). */
+/** Same over-loaded draft the plan screen uses, so the engine has work to do. */
 function draftRoutine(): Routine {
   const step = (
     order: number,
@@ -62,204 +93,189 @@ function draftRoutine(): Routine {
   };
 }
 
-/** Plain-language band for a 0..1 confidence, so the number is not the whole story. */
-function confidenceLabel(c: number): string {
-  if (c >= 0.75) return "High confidence";
-  if (c >= 0.5) return "Moderate confidence";
-  return "Low confidence";
+function stepLabel(step: RoutineStep): string {
+  return step.active ? ACTIVES[step.active].short : CATEGORY_LABELS[step.category];
 }
 
 export default function Today() {
-  const { data, update } = useOnboarding();
-  const [photoCount, setPhotoCount] = useState(() => storedPhotoCount());
-  const [sessionCount] = useState(() => listSessions().length);
+  const { data } = useOnboarding();
+  const [journal, setJournal] = useState(() => readJournal());
+  const [time, setTime] = useState<RoutineTime>(() => currentSession());
 
-  function confirmDeletePhotos() {
-    Alert.alert(
-      "Delete your photos?",
-      "This removes the photos stored on this phone. Your routine stays.",
-      [
-        { text: "Keep them", style: "cancel" },
-        {
-          text: "Delete",
-          style: "destructive",
-          onPress: () => {
-            try {
-              deleteStoredPhotos();
-              update({ photos: [] });
-              setPhotoCount(0);
-            } catch {
-              Alert.alert("Couldn't delete", "Something went wrong removing the photos. Try again.");
-            }
-          },
-        },
-      ],
-    );
-  }
+  const date = todayDate();
+  const intake = useMemo(() => buildIntake(data), [data]);
 
-  // Prefer the server-generated plan; otherwise run the engine locally so the
-  // screen still demonstrates the full flow offline.
-  const view = useMemo(() => {
-    if (data.plan) {
-      const a = data.plan.assessment;
-      return {
-        concerns: a.findings
-          .filter((f) => f.present)
-          .map((f) => `${CONCERN_LABELS[f.concern]} · ${f.appearanceLevel}`),
-        summary: a.summary,
-        escalate: a.escalation.recommendProfessional,
-        confidence: a.overallConfidence,
-        limitations: a.limitations,
-        photoQuality: a.photoQuality,
-        routine: data.plan.routine,
-        adjustments: data.plan.adjustments,
-      };
-    }
-    const { routine, adjustments } = applySafetyRules(draftRoutine(), buildIntake(data));
-    return {
-      concerns: ["Acne-like breakouts · moderate", "Dark-spot appearance · mild", "Oiliness · noticeable"],
-      summary: "A simple routine built around your skin — with only the steps you actually need.",
-      escalate: false,
-      confidence: null,
-      limitations: [],
-      photoQuality: [],
-      routine,
-      adjustments,
-    };
-  }, [data]);
+  // Re-read on focus: the record can be erased from /plan, and a session left
+  // open overnight should come back as the new day rather than yesterday's.
+  useFocusEffect(
+    useCallback(() => {
+      setJournal(readJournal());
+      setTime(currentSession());
+    }, []),
+  );
+
+  // Prefer the server-generated routine; fall back to running the safety engine
+  // locally so the full cadence still works offline.
+  const routine = useMemo(
+    () => data.plan?.routine ?? applySafetyRules(draftRoutine(), intake).routine,
+    [data.plan, intake],
+  );
+
+  const ctx = useMemo(
+    () => ({ startedOn: journal.startedOn, on: date, checkIns: journal.checkIns }),
+    [journal.startedOn, journal.checkIns, date],
+  );
+
+  const day = useMemo(() => planDay(routine, intake, ctx), [routine, intake, ctx]);
+  const week = useMemo(() => planWeek(routine, intake, ctx), [routine, intake, ctx]);
+
+  const session = time === "AM" ? day.am : day.pm;
+  const done = completedSteps(journal, date, time);
+  const allDone = session.steps.length > 0 && done.length >= session.steps.length;
+  const streak = streakDays(journal, date);
+  const feeling = checkInFor(journal, date);
+
+  const onToggle = useCallback(
+    (order: number) => setJournal(toggleStep(date, time, order, session.steps.length)),
+    [date, time, session.steps.length],
+  );
+
+  const onFeel = useCallback((feel: SkinFeel) => setJournal(recordCheckIn(date, feel)), [date]);
 
   return (
     <Screen contentStyle={{ paddingTop: spacing.lg }}>
-      <AppText variant="label" color={colors.primary}>
-        TODAY
-      </AppText>
-      <AppText variant="title">Here&apos;s your plan</AppText>
-      <AppText variant="body" color={colors.inkMuted}>
-        {view.summary}
-      </AppText>
+      <View style={{ gap: spacing.xxs }}>
+        <AppText variant="label" color={colors.primary}>
+          {`${weekdayName(date).toUpperCase()} · ${time === "AM" ? "MORNING" : "EVENING"}`}
+        </AppText>
+        <AppText variant="title">{session.headline}</AppText>
+        {streak >= 2 && (
+          <AppText variant="caption" color={colors.inkMuted}>
+            {`${streak} days in a row.`}
+          </AppText>
+        )}
+      </View>
 
       <Card elevated>
-        <AppText variant="heading">What we noticed</AppText>
-        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: spacing.sm, marginTop: spacing.xs }}>
-          {view.concerns.map((c) => (
-            <Chip key={c} label={c} />
-          ))}
-        </View>
-        <AppText variant="caption" color={colors.inkMuted}>
-          Cosmetic, non-diagnostic appearance only.
-        </AppText>
-        {view.confidence !== null ? (
-          <AppText variant="caption" color={colors.primary}>
-            {confidenceLabel(view.confidence)}
-            {view.photoQuality.length > 0
-              ? ` · ${view.photoQuality.filter((p) => p.flags.length === 0).length} of ${view.photoQuality.length} photos passed the quality check`
-              : ""}
+        <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "baseline" }}>
+          <AppText variant="heading">{allDone ? "Done for now" : "Do this now"}</AppText>
+          <AppText variant="caption" color={colors.inkMuted}>
+            {`${done.length} of ${session.steps.length}`}
           </AppText>
-        ) : null}
+        </View>
+
+        <View style={{ marginTop: spacing.xs }}>
+          {session.steps.map((step, i) => {
+            const checked = done.includes(step.order);
+            return (
+              <View key={`${step.category}-${step.order}`}>
+                {i > 0 && <Divider />}
+                <Pressable
+                  onPress={() => onToggle(step.order)}
+                  accessibilityRole="checkbox"
+                  accessibilityState={{ checked }}
+                  accessibilityLabel={`${stepLabel(step)}. ${step.rationale}`}
+                  style={({ pressed }) => [
+                    {
+                      flexDirection: "row",
+                      alignItems: "flex-start",
+                      gap: spacing.sm,
+                      minHeight: 56,
+                      paddingVertical: spacing.sm,
+                    },
+                    pressed && { opacity: 0.6 },
+                  ]}
+                >
+                  <View style={{ paddingTop: 2 }}>
+                    <CheckCircle checked={checked} />
+                  </View>
+                  <View style={{ flex: 1, gap: spacing.xxs }}>
+                    <AppText
+                      variant="bodyStrong"
+                      color={checked ? colors.inkMuted : colors.ink}
+                      style={checked ? { textDecorationLine: "line-through" } : undefined}
+                    >
+                      {stepLabel(step)}
+                    </AppText>
+                    <AppText variant="caption" color={colors.inkMuted}>
+                      {step.rationale}
+                    </AppText>
+                  </View>
+                </Pressable>
+              </View>
+            );
+          })}
+        </View>
       </Card>
 
-      {view.limitations.length > 0 && (
+      {session.notes.length > 0 && (
         <Card>
-          <AppText variant="heading">What we couldn&apos;t see clearly</AppText>
-          <AppText variant="caption" color={colors.inkMuted}>
-            Saying so is more useful than a confident guess.
-          </AppText>
-          <View style={{ gap: spacing.xs, marginTop: spacing.xs }}>
-            {view.limitations.map((l, i) => (
-              <AppText key={i} variant="caption" color={colors.ink}>
-                • {l}
+          <AppText variant="heading">Why tonight looks like this</AppText>
+          <View style={{ gap: spacing.xs, marginTop: spacing.xxs }}>
+            {session.notes.map((note, i) => (
+              <AppText key={`${note.id}-${i}`} variant="caption" color={colors.ink}>
+                • {note.detail}
               </AppText>
             ))}
           </View>
-        </Card>
-      )}
-
-      {view.escalate && (
-        <Card>
-          <AppText variant="bodyStrong" color={colors.escalate}>
-            Worth checking with a professional
-          </AppText>
-          <AppText variant="caption" color={colors.inkMuted}>
-            Some of what&apos;s visible may be better looked at by a pharmacist or doctor.
-          </AppText>
-        </Card>
-      )}
-
-      <RoutineCard title="Morning" steps={view.routine.am} />
-      <RoutineCard title="Evening" steps={view.routine.pm} />
-
-      {view.adjustments.length > 0 && (
-        <Card>
-          <AppText variant="heading">What Pore adjusted to keep you safe</AppText>
-          <View style={{ gap: spacing.xs, marginTop: spacing.xs }}>
-            {view.adjustments.map((a, i) => (
-              <AppText key={i} variant="caption" color={colors.ink}>
-                • {a.detail}
-              </AppText>
-            ))}
-          </View>
-        </Card>
-      )}
-
-      {photoCount > 0 && (
-        <Card>
-          <AppText variant="heading">Your photos</AppText>
-          <AppText variant="caption" color={colors.inkMuted}>
-            {photoCount} {photoCount === 1 ? "photo is" : "photos are"} saved on this phone, inside
-            the app. They were never uploaded to photo storage and are not on our servers.
-          </AppText>
-          {sessionCount >= 2 && (
-            <GhostButton label="Compare progress" onPress={() => router.push("/compare")} />
-          )}
-          <GhostButton label="Delete my photos" onPress={confirmDeletePhotos} />
         </Card>
       )}
 
       <Card>
-        <AppText variant="caption" color={colors.inkMuted}>
-          Pore offers cosmetic skincare guidance, not medical advice. If something looks painful, is bleeding,
-          spreading quickly, or isn&apos;t improving, please check in with a pharmacist or doctor.
-        </AppText>
-        <Pressable
-          onPress={() => router.push("/legal/terms")}
-          accessibilityRole="link"
-          accessibilityLabel="Read the Terms of Use"
-          style={({ pressed }) => [
-            { minHeight: 44, justifyContent: "center" },
-            pressed && { opacity: 0.6 },
-          ]}
-        >
-          <AppText variant="caption" color={colors.primary}>
-            Read the Terms of Use
-          </AppText>
-        </Pressable>
+        <WeekStrip week={week} today={date} />
       </Card>
-    </Screen>
-  );
-}
 
-function RoutineCard({ title, steps }: { title: string; steps: RoutineStep[] }) {
-  return (
-    <Card elevated>
-      <AppText variant="heading">{title}</AppText>
-      <View style={{ gap: spacing.sm, marginTop: spacing.xs }}>
-        {steps.map((s, i) => (
-          <View key={`${s.category}-${i}`} style={{ gap: spacing.xs }}>
-            {i > 0 && <Divider />}
-            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
-              <AppText variant="bodyStrong">
-                {s.order}. {s.active ? ACTIVES[s.active].label : CATEGORY_LABELS[s.category]}
-              </AppText>
-              <AppText variant="caption" color={colors.primary}>
-                {s.frequencyPerWeek >= 7 ? "Daily" : `${s.frequencyPerWeek}x / week`}
-              </AppText>
-            </View>
-            <AppText variant="caption" color={colors.inkMuted}>
-              {s.rationale}
-            </AppText>
+      {/* The single question the product asks. One tap, and it is what moves the
+          ramp forward or pulls it back — so the answer is never cosmetic. */}
+      {(allDone || feeling) && (
+        <Card elevated>
+          <AppText variant="heading">How does your skin feel?</AppText>
+          <AppText variant="caption" color={colors.inkMuted}>
+            {feeling
+              ? "Logged. This is what sets next week's pace — you don't have to adjust anything yourself."
+              : "One tap. It changes what we ask of your skin next."}
+          </AppText>
+          <View style={{ flexDirection: "row", gap: spacing.xs, marginTop: spacing.xxs }}>
+            {FEELS.map(({ feel, label }) => {
+              const selected = feeling === feel;
+              return (
+                <Pressable
+                  key={feel}
+                  onPress={() => onFeel(feel)}
+                  accessibilityRole="radio"
+                  accessibilityState={{ selected }}
+                  accessibilityLabel={`My skin feels ${label.toLowerCase()}`}
+                  style={({ pressed }) => [
+                    {
+                      flex: 1,
+                      minHeight: 48,
+                      alignItems: "center",
+                      justifyContent: "center",
+                      borderRadius: radius.pill,
+                      borderWidth: 1,
+                      borderColor: selected ? colors.primary : colors.hairline,
+                      backgroundColor: selected ? colors.primary : colors.surface,
+                    },
+                    pressed && { opacity: 0.7 },
+                  ]}
+                >
+                  <AppText variant="caption" color={selected ? colors.onPrimary : colors.ink}>
+                    {label}
+                  </AppText>
+                </Pressable>
+              );
+            })}
           </View>
-        ))}
+        </Card>
+      )}
+
+      <View style={{ gap: spacing.xs }}>
+        <GhostButton
+          label={time === "AM" ? "Show tonight instead" : "Show this morning instead"}
+          onPress={() => setTime(time === "AM" ? "PM" : "AM")}
+        />
+        <GhostButton label="Your full plan" onPress={() => router.push("/plan")} />
       </View>
-    </Card>
+    </Screen>
   );
 }

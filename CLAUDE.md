@@ -25,6 +25,8 @@ pnpm workspaces + Turborepo, TypeScript throughout.
     types).
   - `safety/` — `applySafetyRules`, the deterministic routine-safety engine (see below), and the
     `ACTIVES` ingredient metadata table it runs against.
+  - `schedule/` — `planDay`/`planWeek`, the deterministic cadence engine (see below) that turns a
+    safety-clamped routine's weekly frequencies into "here is what you do tonight".
 
 ## Commands
 
@@ -101,6 +103,42 @@ not edge — with `maxDuration: 60` since it makes two model calls):
 The mobile app calls the same endpoint via `apps/mobile/src/lib/api.ts` (`fetchPlan`), pointed at
 `EXPO_PUBLIC_API_URL`; if that's unset or the request fails, it falls back to a local demo rather
 than erroring.
+
+## Architecture: the cadence engine
+
+`packages/shared/src/schedule/engine.ts` is the second deterministic layer, and it runs *after*
+the safety engine. The safety engine decides what belongs in a routine and how often; this one
+decides **which of those steps happen on a given day**, which is the question the user actually
+faces. It is the difference between shipping a report and shipping a routine, and — like the
+safety engine — it is code, not a prompt:
+
+- Each step's weekly frequency is spread evenly over a 7-day cycle (`spreadDays`), so a 3x/week
+  active never lands on consecutive days.
+- **At most one strong active per calendar day.** The safety engine caps per *session*; AM acid
+  plus PM retinoid still passes that cap and still over-exfoliates. Conflicts are resolved by
+  walking the active to the next free day, or dropping it for the cycle if there is none.
+- Strong actives **ramp** from a single weekly use to their target frequency over `RAMP_WEEKS`
+  (6). Gentle steps and SPF run at full frequency from day one.
+- A week only advances the ramp if the user reported nothing worse than `calm` during it. A week
+  with no check-ins at all counts as calm — the product asks for feedback, it doesn't punish
+  silence.
+- A `stinging` report **deloads** the routine for 3 days (two `tight` reports inside 5 days for 2
+  days): strong actives are pulled, barrier steps stay.
+
+Every departure from the nominal plan is a `ScheduleNote` with user-facing copy, the same audit
+contract as `SafetyAdjustment` — so `/today` can always say *why* tonight looks like this. A
+session that renames itself (a "Recovery night") must always carry a note explaining it; a
+headline the user can't account for is worse than no headline. Extend
+`packages/shared/src/schedule/engine.test.ts` when changing any of this.
+
+State lives in `apps/mobile/src/lib/journal.ts` — an on-device JSON file holding the routine start
+date, per-session tick-offs, and the one-tap skin check-ins. It never leaves the phone, it is
+disclosed in the privacy content (`packages/shared/src/legal/content.ts`), and `/plan` must keep
+offering a way to erase it.
+
+`apps/mobile/src/app/today.tsx` is the primary surface and shows **only the current session**;
+`/plan` holds the full assessment and routine as a reference document. Keep it that way — the
+whole point is that the user makes no decisions except the single "how does your skin feel?" tap.
 
 ## Conventions
 
