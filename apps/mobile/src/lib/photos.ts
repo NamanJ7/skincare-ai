@@ -209,10 +209,14 @@ function appendToSessionIndex(session: StoredSession): void {
  * scoreFrame() measurements the app already computes but otherwise discards —
  * pulling this file off a real device is how CAPTURE_TUNING and the flash
  * verification procedure in TODOS.md actually get real numbers to work from.
- * Nothing in this app parses the manifest back in, so the version bump is
- * documentation only, no migration needed.
+ * `tone` (version 3) is the skin tone the user declared for this session —
+ * without it, a pulled manifest can't be grouped by tone band, which is the
+ * whole point of the per-tone thresholds it's meant to help calibrate. See
+ * `scripts/calibrate-capture-tuning.mjs`. Nothing in this app parses the
+ * manifest back in, so the version bumps are documentation only, no
+ * migration needed.
  */
-export function writeManifest(photos: CapturedPhoto[], sessionId: string): void {
+export function writeManifest(photos: CapturedPhoto[], sessionId: string, tone: SkinTone): void {
   const capturedAt = photos[0]?.capturedAt ?? new Date().toISOString();
   try {
     const dir = sessionDir(sessionId);
@@ -222,9 +226,10 @@ export function writeManifest(photos: CapturedPhoto[], sessionId: string): void 
     file.create();
     file.write(
       JSON.stringify({
-        version: 2,
+        version: 3,
         id: sessionId,
         capturedAt,
+        tone,
         photos: photos.map((p) => ({
           angle: p.angle,
           capturedAt: p.capturedAt,

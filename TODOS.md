@@ -15,10 +15,21 @@ behaviour that matters (a correctly exposed deep-skin capture must not be called
 
 The mechanism to pull real numbers now exists: `apps/mobile/src/lib/photos.ts`
 persists the raw `scoreFrame()` metrics and illuminant estimate into each
-session's `manifest.json` (version 2) instead of discarding them, and the
-capture-review screen shows the same numbers in a `__DEV__`-only caption. Still
-needed: actually capturing on real devices across the tone range and adjusting
-the constants — this is data plumbing, not calibration.
+session's `manifest.json` (version 3, which also now records the session's
+declared `tone` — needed to group captures by tone band at all) instead of
+discarding them, and the capture-review screen shows the same numbers in a
+`__DEV__`-only caption.
+
+`scripts/calibrate-capture-tuning.mjs` (`pnpm calibrate:capture -- <dir>`)
+turns a folder of pulled manifests into per-tone/per-illuminant statistics
+and a suggested `minMeanLuma` per tone, so the remaining step is arithmetic a
+script does, not arithmetic a person does by hand. Self-tests with
+`--self-test` (no device or fixture files needed to verify the aggregation
+logic itself).
+
+Still needed, and still genuinely un-automatable from here: actually
+capturing on real devices, by real people, across the full tone range. No
+amount of additional code substitutes for that data existing.
 
 ### Verify `flash="screen"` on device
 `apps/mobile/src/app/onboarding/photo.tsx` sets `USE_NATIVE_SCREEN_FLASH = true`.
@@ -30,27 +41,38 @@ photo as `ambient` rather than claiming a controlled illuminant it did not have.
 
 The verification procedure is now documented next to `USE_NATIVE_SCREEN_FLASH`:
 capture a dim-room session with the flag on, another with it off, and compare
-`metrics.meanLuma` between them (now persisted per Stream 3.1 above). Still
-needed: someone with a physical device actually running that comparison — this
-sandbox has none.
+`metrics.meanLuma` between them. `scripts/calibrate-capture-tuning.mjs` now
+does this comparison automatically (its "Flash verification" section, grouped
+by tone, flags a lift under 5 units as a likely no-op) once manifests are
+pulled off a device. Still needed: someone with a physical device actually
+running the capture and pulling the files — this sandbox has none.
 
 ### Screen-flash intensity per tone
 A flash level that exposes fair skin correctly will clip its highlights and
 underexpose deep skin. Intensity should follow the declared tone.
 
-Built: `packages/shared/src/vision/flash.ts` exports `flashIntensityForTone`,
-applied to the JS white-overlay fallback's duration (`apps/mobile/src/app/onboarding/photo.tsx`,
-replacing the old fixed `FLASH_MS`). Numbers are provisional — seeded from the
-same reasoning as `CAPTURE_TUNING`'s tone profile, not measured. See
-`flash.test.ts` for the mechanism tests (monotonic by tone, bounds-checked).
+Built: `packages/shared/src/vision/flash.ts` exports `flashIntensityForTone`
+(`level` 0..1 + `durationMs`), applied in `apps/mobile/src/app/onboarding/photo.tsx`.
+Numbers are provisional — seeded from the same reasoning as `CAPTURE_TUNING`'s
+tone profile, not measured. See `flash.test.ts` for the mechanism tests
+(monotonic by tone, bounds-checked).
 
 Confirmed via the SDK 56 source (`Camera.types.ts`), not assumed: the native
-`flash="screen"` mode is a discrete `'off' | 'on' | 'auto' | 'screen'` enum with
-no numeric intensity control, so the native path cannot honor tone-aware
-intensity today — it stays at its current unconditional near-max behaviour.
-Open product decision: deprioritize the native path in favor of the
-always-controllable JS overlay, or leave native flash intensity unaddressed
-until Expo exposes a level control.
+`flash="screen"` mode itself is a discrete `'off' | 'on' | 'auto' | 'screen'`
+enum with no numeric intensity prop. Rather than wait for Expo to add one,
+intensity is now applied a level below that API: `expo-brightness`'s
+`setBrightnessAsync` (also confirmed against its SDK 56 source — no
+permission needed, app-scoped) sets the actual screen brightness to the
+tone's target `level` before every shot and restores it after, for both flash
+paths, since both are the same "flood the display, camera catches the
+reflection" mechanism at different points in the stack.
+
+Still open: whether raising app-level brightness actually changes the native
+`flash="screen"` mode's own output (as opposed to only the JS overlay, whose
+effect is unambiguous since it paints the same screen). That can only be
+confirmed on a physical device — see the manual verification procedure above,
+which should now also compare `metrics.meanLuma` across tones, not just
+flash-on vs. flash-off, since intensity is tone-aware.
 
 ## Next milestone
 

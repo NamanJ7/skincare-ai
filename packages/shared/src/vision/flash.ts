@@ -3,15 +3,20 @@
  *
  * Both the native `flash="screen"` mode and the JS white-overlay fallback work
  * the same way: flood the display white and let the front camera catch the
- * reflected light. Screen brightness is already maxed at pure white either
- * way, so duration is the only lever either path can control without adding a
- * new dependency (e.g. expo-brightness) — see photo.tsx. Deeper tones reflect
- * less of that light back at a given output, so they get more dose.
+ * reflected light. Deeper tones reflect less of that light back at a given
+ * output, so they get more dose along both levers this product controls:
  *
- * `level` is carried for a future platform that does expose a continuous
- * intensity control; nothing consumes it today (Expo SDK 56's CameraView
- * `flash` prop is a discrete on/off/auto/screen enum, confirmed against the
- * SDK 56 source — no numeric intensity API exists to apply it to).
+ * - `level` — actual screen brightness (0..1), applied via expo-brightness in
+ *   photo.tsx before either flash path fires. Expo SDK 56's CameraView `flash`
+ *   prop itself has no numeric intensity API (confirmed against the SDK 56
+ *   source — it's a discrete on/off/auto/screen enum), so this goes around it
+ *   at the OS level instead of waiting for one to exist.
+ * - `durationMs` — how long the illuminant stays up before the shutter fires.
+ *
+ * Whether raising app-level brightness actually affects the native
+ * `flash="screen"` mode's own light output (vs. only the JS overlay, which is
+ * unambiguously affected since it paints the same screen) is unconfirmed
+ * until tested on a device — see TODOS.md.
  *
  * These numbers are provisional — seeded from the same "deeper tones need
  * more" reasoning as CAPTURE_TUNING's TONE_PROFILE, not measured on a real
