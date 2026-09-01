@@ -11,6 +11,11 @@ export type PregnancySafety = "safe" | "caution" | "avoid";
 export interface ActiveMeta {
   key: ActiveKey;
   label: string;
+  /**
+   * Label without the chemical class in parentheses, for running copy where the
+   * full form reads badly ("Salicylic acid (BHA) night").
+   */
+  short: string;
   /** AHA/BHA chemical exfoliant. */
   isExfoliatingAcid: boolean;
   isRetinoid: boolean;
@@ -28,6 +33,7 @@ export const ACTIVES: Record<ActiveKey, ActiveMeta> = {
   salicylic_acid: {
     key: "salicylic_acid",
     label: "Salicylic acid (BHA)",
+    short: "Salicylic acid",
     isExfoliatingAcid: true,
     isRetinoid: false,
     isBenzoylPeroxide: false,
@@ -38,6 +44,7 @@ export const ACTIVES: Record<ActiveKey, ActiveMeta> = {
   glycolic_acid: {
     key: "glycolic_acid",
     label: "Glycolic acid (AHA)",
+    short: "Glycolic acid",
     isExfoliatingAcid: true,
     isRetinoid: false,
     isBenzoylPeroxide: false,
@@ -48,6 +55,7 @@ export const ACTIVES: Record<ActiveKey, ActiveMeta> = {
   lactic_acid: {
     key: "lactic_acid",
     label: "Lactic acid (AHA)",
+    short: "Lactic acid",
     isExfoliatingAcid: true,
     isRetinoid: false,
     isBenzoylPeroxide: false,
@@ -58,6 +66,7 @@ export const ACTIVES: Record<ActiveKey, ActiveMeta> = {
   mandelic_acid: {
     key: "mandelic_acid",
     label: "Mandelic acid (AHA)",
+    short: "Mandelic acid",
     isExfoliatingAcid: true,
     isRetinoid: false,
     isBenzoylPeroxide: false,
@@ -68,6 +77,7 @@ export const ACTIVES: Record<ActiveKey, ActiveMeta> = {
   benzoyl_peroxide: {
     key: "benzoyl_peroxide",
     label: "Benzoyl peroxide",
+    short: "Benzoyl peroxide",
     isExfoliatingAcid: false,
     isRetinoid: false,
     isBenzoylPeroxide: true,
@@ -78,6 +88,7 @@ export const ACTIVES: Record<ActiveKey, ActiveMeta> = {
   azelaic_acid: {
     key: "azelaic_acid",
     label: "Azelaic acid",
+    short: "Azelaic acid",
     isExfoliatingAcid: false,
     isRetinoid: false,
     isBenzoylPeroxide: false,
@@ -88,6 +99,7 @@ export const ACTIVES: Record<ActiveKey, ActiveMeta> = {
   niacinamide: {
     key: "niacinamide",
     label: "Niacinamide",
+    short: "Niacinamide",
     isExfoliatingAcid: false,
     isRetinoid: false,
     isBenzoylPeroxide: false,
@@ -98,6 +110,7 @@ export const ACTIVES: Record<ActiveKey, ActiveMeta> = {
   retinoid: {
     key: "retinoid",
     label: "Retinoid / retinol",
+    short: "Retinoid",
     isExfoliatingAcid: false,
     isRetinoid: true,
     isBenzoylPeroxide: false,
@@ -108,6 +121,7 @@ export const ACTIVES: Record<ActiveKey, ActiveMeta> = {
   vitamin_c: {
     key: "vitamin_c",
     label: "Vitamin C",
+    short: "Vitamin C",
     isExfoliatingAcid: false,
     isRetinoid: false,
     isBenzoylPeroxide: false,
@@ -118,6 +132,7 @@ export const ACTIVES: Record<ActiveKey, ActiveMeta> = {
   hydroquinone: {
     key: "hydroquinone",
     label: "Hydroquinone",
+    short: "Hydroquinone",
     isExfoliatingAcid: false,
     isRetinoid: false,
     isBenzoylPeroxide: false,
@@ -128,6 +143,7 @@ export const ACTIVES: Record<ActiveKey, ActiveMeta> = {
   hyaluronic_acid: {
     key: "hyaluronic_acid",
     label: "Hyaluronic acid",
+    short: "Hyaluronic acid",
     isExfoliatingAcid: false,
     isRetinoid: false,
     isBenzoylPeroxide: false,
@@ -138,6 +154,7 @@ export const ACTIVES: Record<ActiveKey, ActiveMeta> = {
   ceramides: {
     key: "ceramides",
     label: "Ceramides",
+    short: "Ceramides",
     isExfoliatingAcid: false,
     isRetinoid: false,
     isBenzoylPeroxide: false,

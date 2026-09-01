@@ -7,11 +7,20 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 Pore — a skincare app that turns guided face photos + an intake questionnaire into a personalized
 AM/PM routine. Two clients (marketing/waitlist website + Expo mobile app) share one domain package
 that owns the design tokens, the legal copy, the capture-quality measurement, and the deterministic
-safety rules governing every routine.
+engines governing every routine.
 
-Two things in this product are **code, not prompts**, and that is deliberate: the safety engine
-(`packages/shared/src/safety`) and the capture-quality gate (`packages/shared/src/vision`). Both are
-unit-tested. Treat model output as a draft that these layers correct.
+**The load-bearing parts of this product are code, not prompts**, and that is deliberate. Four
+layers, all unit-tested in `packages/shared`:
+
+| layer | module | question it answers |
+| --- | --- | --- |
+| capture gate | `vision/` | is this photo good enough to assess? |
+| safety engine | `safety/` | what belongs in the routine, and how often? |
+| cadence engine | `schedule/` | which of those steps happen today? |
+| progress engine | `progress/` | is any of this working? |
+
+Treat model output as a draft that these layers correct. The safety, cadence and progress engines
+run in that order, each one clamping what the previous produced.
 
 ## Monorepo layout
 
@@ -29,13 +38,17 @@ pnpm's symlinked store. Don't "fix" that back to symlinks.
   keep it that way.
 - `packages/shared` (`@pore/shared`) — the single source of truth consumed by both apps. Ships TS
   source, not a build; `apps/web/next.config.ts` lists it in `transpilePackages`. Subpath exports:
-  `.`, `./design`, `./safety`, `./types`, `./legal` (note: **no** `./vision` subpath — vision is
-  re-exported from the root barrel only).
+  `.`, `./design`, `./safety`, `./types`, `./legal` (note: **no** `./vision`, `./schedule` or
+  `./progress` subpath — those three are reachable from the root barrel only).
   - `design/` — color/spacing/radius/typography/shadow tokens (`tokens.ts`) plus a Tailwind preset.
   - `types/` — the domain model (`IntakeResponse`, `Routine`/`RoutineStep`, `Assessment`,
     `PhotoQuality`, product types).
   - `safety/` — `applySafetyRules`, the deterministic routine-safety engine, and the `ACTIVES`
     ingredient metadata table + `activeRelevanceScore` it runs against.
+  - `schedule/` — `planDay`/`planWeek`, the deterministic cadence engine (see below) that turns a
+    safety-clamped routine's weekly frequencies into "here is what you do tonight".
+  - `progress/` — `compareAssessments`/`adaptRoutine`, the deterministic progress engine (see below)
+    that measures whether the routine is working and feeds the answer back into it.
   - `vision/` — `scoreFrame` / `captureHint` / `CAPTURE_TUNING`, the pure-maths capture-quality
     measurement. No I/O lives here on purpose, so vitest can cover it.
   - `legal/` — the privacy policy and terms **as data** (`PRIVACY_POLICY`, `TERMS_OF_USE`,
@@ -68,6 +81,8 @@ pnpm --filter @pore/shared test              # vitest run
 pnpm --filter @pore/shared test:watch        # vitest watch mode
 pnpm --filter @pore/shared exec vitest run src/safety/engine.test.ts
 pnpm --filter @pore/shared exec vitest run src/vision/quality.test.ts
+pnpm --filter @pore/shared exec vitest run src/schedule/engine.test.ts
+pnpm --filter @pore/shared exec vitest run src/progress/engine.test.ts
 pnpm --filter @pore/shared typecheck
 
 # web
@@ -81,9 +96,10 @@ pnpm --filter @pore/mobile ios / android / web
 pnpm --filter @pore/mobile typecheck
 ```
 
-Current baseline (keep it here): `pnpm test` → 2 files, 27 tests, all passing. `pnpm typecheck` →
-clean in all three packages. `pnpm lint` → 0 errors, 6 pre-existing `no-unused-vars` warnings
-(`components/ui/Button.tsx`, `lib/mock.ts`). Don't let a change add errors; the warnings are known.
+Current baseline (keep it here): `pnpm test` → 4 files, 83 tests, all passing (`safety` 12, `vision`
+15, `progress` 21, `schedule` 35). `pnpm typecheck` → clean in all three packages. `pnpm lint` → 0
+errors, 6 pre-existing `no-unused-vars` warnings (`components/ui/Button.tsx`, `lib/mock.ts`). Don't
+let a change add errors; the warnings are known.
 
 `packages/shared` is the only package with tests. `apps/web` and `apps/mobile` have none — notably
 the `/api/plan` input validation, which is a trust boundary in front of a paid endpoint (tracked in
@@ -138,8 +154,10 @@ its own message — "invalid request" tells a legitimate client nothing. Keep th
 
 The mobile app calls the same endpoint via `apps/mobile/src/lib/api.ts` (`fetchPlan`), pointed at
 `EXPO_PUBLIC_API_URL` (e.g. your dev machine's LAN IP). If that's unset or the request fails,
-`fetchPlan` returns `null` and `today.tsx` falls back to running its own local draft through
-`applySafetyRules` rather than erroring — so the app always shows a real, safety-clamped routine.
+`fetchPlan` returns `null` rather than throwing. `today.tsx` then resolves its routine down a
+three-step chain — the journal's persisted (adapted) routine, else the generated plan, else its own
+local draft through `applySafetyRules` — so the app always has a real, safety-clamped routine to
+schedule, with or without a reachable API.
 
 ## Architecture: guided capture (the other half)
 
@@ -188,6 +206,78 @@ for `compare.tsx`, `sessionPhotoUri`, `listSessions`, `storedPhotoCount` and `de
 All storage writes are best-effort: a failure degrades to "not kept for later", never to a failed
 capture.
 
+## Architecture: the cadence engine
+
+`packages/shared/src/schedule/engine.ts` is the second deterministic layer, and it runs *after*
+the safety engine. The safety engine decides what belongs in a routine and how often; this one
+decides **which of those steps happen on a given day**, which is the question the user actually
+faces. It is the difference between shipping a report and shipping a routine, and — like the
+safety engine — it is code, not a prompt:
+
+- Each step's weekly frequency is spread evenly over a 7-day cycle (`spreadDays`), so a 3x/week
+  active never lands on consecutive days.
+- **At most one strong active per calendar day.** The safety engine caps per *session*; AM acid
+  plus PM retinoid still passes that cap and still over-exfoliates. Conflicts are resolved by
+  walking the active to the next free day, or dropping it for the cycle if there is none.
+- Strong actives **ramp** from a single weekly use to their target frequency over `RAMP_WEEKS`
+  (6). Gentle steps and SPF run at full frequency from day one.
+- A week only advances the ramp if the user reported nothing worse than `calm` during it. A week
+  with no check-ins at all counts as calm — the product asks for feedback, it doesn't punish
+  silence.
+- A `stinging` report **deloads** the routine for 3 days (two `tight` reports inside 5 days for 2
+  days): strong actives are pulled, barrier steps stay.
+
+Every departure from the nominal plan is a `ScheduleNote` with user-facing copy, the same audit
+contract as `SafetyAdjustment` — so `/today` can always say *why* tonight looks like this. A
+session that renames itself (a "Recovery night") must always carry a note explaining it; a
+headline the user can't account for is worse than no headline. Extend
+`packages/shared/src/schedule/engine.test.ts` when changing any of this.
+
+State lives in `apps/mobile/src/lib/journal.ts` — an on-device JSON file holding the routine start
+date, per-session tick-offs, and the one-tap skin check-ins. It never leaves the phone, it is
+disclosed in the privacy content (`packages/shared/src/legal/content.ts`), and `/plan` must keep
+offering a way to erase it.
+
+`apps/mobile/src/app/today.tsx` is the primary surface and shows **only the current session**;
+`/plan` holds the full assessment and routine as a reference document. Keep it that way — the
+whole point is that the user makes no decisions except the single "how does your skin feel?" tap.
+
+## Architecture: the progress engine
+
+`packages/shared/src/progress/engine.ts` is the third deterministic layer, and it answers the
+question that decides retention: **is any of this working?**
+
+The load-bearing decision is what it does *not* do. **Never show a model the before and after and
+ask whether the skin improved.** A model handed a before-and-after will always find a story, and a
+skincare app that confabulates progress is worse than one that says nothing. Instead each capture
+session gets its own blind `Assessment` from the ordinary `/api/plan` call — which has no idea a
+previous session exists — and `compareAssessments` subtracts the two in code. Preserve that
+blindness; it is the whole credibility of the feature.
+
+- **Comparability gate.** A photo only counts if the capture gate passed it *and* it was shot under
+  `screen_flash`. Ambient light is not repeatable, so an ambient set can be displayed but never
+  subtracted. With no measurable angle in common the engine reports nothing and says why. The
+  refusal is the feature — this is why capture was built as an instrument.
+- `AppearanceLevel` is ordinal, so bands subtract. A concern either assessment was unsure about
+  (confidence < 0.6) is returned as `not_comparable`, never folded into the result.
+- `adaptRoutine` turns the measurement into a routine change, and **always returns through
+  `applySafetyRules`** (see `finish()` — every path goes through it). Adaptation proposes, the
+  safety engine disposes, exactly like the LLM. It cannot raise a frequency past a cap or survive
+  a pregnancy filter.
+- Ordering is the safety argument: **worsening acts first and only ever reduces**; escalation sits
+  behind two gates (`ESCALATE_AFTER_WEEKS`, and an adherence floor). "It isn't working" usually
+  means "it isn't being done", and answering that with a stronger acid is how people damage their
+  barrier. Improvement holds steady — adding more to a working routine is how progress gets undone.
+
+`adaptRoutine` is a *proposal against a routine*, so running it on its own output steps the same
+active up twice. It runs **once**, when a measurement lands (`runReassessment` in `compare.tsx`),
+and the result is persisted via `saveAdaptation`. Never call it during render.
+
+The baseline is recorded at signup (`onboarding/intake.tsx`) and never replaced — a moving zero
+would let slow drift vanish. `/compare` is the verdict surface and the one place the app uses a
+dark surface: measured concerns sit on the deep-green card, and anything the engine declined to
+call is listed separately below so a refusal can never be skimmed as a result.
+
 ## Mobile app
 
 Expo Router, file-based under `apps/mobile/src/app`. `@/*` maps to `src/*`, `@/assets/*` to
@@ -199,9 +289,10 @@ index.tsx              splash animation -> landing -> sign-up / sign-in
 onboarding/age         age gate; <16 blocked, <=17 detours through consent
 onboarding/consent     parental-consent email capture (records the address; does not yet verify)
 onboarding/photo       guided 3-angle capture (the big one — ~420 lines, single screen, shared camera mount)
-onboarding/intake      questionnaire; calls fetchPlan at the end
-today.tsx              the routine + assessment + safety-adjustment UI, "Your photos" privacy row
-compare.tsx            newest session vs the one before it, one angle at a time
+onboarding/intake      questionnaire; calls fetchPlan at the end, records the progress baseline
+today.tsx              THE primary surface: only the current session, from planDay. One check-in tap.
+plan.tsx               the reference document — full assessment, routine, safety adjustments, privacy rows
+compare.tsx            the verdict — compareAssessments on two blind assessments, or an honest refusal
 legal/privacy|terms    render the shared LegalDocument
 ```
 
@@ -221,7 +312,13 @@ calibrates the camera, not as one more anonymous questionnaire step.
   up until fonts are ready.
 - **State**: `src/state/onboarding.tsx` is a single in-memory React context (`OnboardingProvider` /
   `useOnboarding`) carrying `Partial<IntakeResponse>` + `parentEmail` + `photos` + the generated
-  `plan`. There is no persistence layer yet — the only durable state on device is the photo store.
+  `plan`. It is still in-memory and dies with the process.
+- **Durable on-device state is two stores, both plain JSON in the app's document directory, both
+  best-effort on write, and neither ever uploaded**: `src/lib/photos.ts` (capture sessions, above)
+  and `src/lib/journal.ts` (`journal.json` — routine start date, per-session tick-offs, skin
+  check-ins, stored assessments and the persisted adaptation). The journal is what makes the cadence
+  engine reactive rather than static. Both are disclosed in the privacy content and both must keep
+  offering erasure — `deleteJournal()` and `deleteStoredPhotos()`, surfaced on `/plan`.
 - `src/lib/intake.ts` (`buildIntake`) fills an `IntakeResponse` from partial onboarding answers with
   sensible defaults, including defaulting `darkMarkProne` from skin tone rather than assuming it of
   everyone.
@@ -264,8 +361,9 @@ configured in the Tally dashboard, not in code. There is no waitlist API route i
 - **Legal copy is legal text.** `packages/shared/src/legal/content.ts` reproduces the pre-launch
   wording verbatim; sentences marked "Disclosure" state facts about how the deployed site actually
   behaves, verified against the code. Restructure freely, **reword never**, and bump
-  `LEGAL_LAST_UPDATED` whenever any string changes. If the data flow changes (analytics added, a
-  second form provider, a real waitlist endpoint), the text must change with it.
+  `LEGAL_LAST_UPDATED` whenever any string changes. If the data flow changes, the text must change
+  with it — that includes anything new written to the device (the journal disclosure exists because
+  `journal.ts` does), analytics, a second form provider, or a real waitlist endpoint.
 - `packages/shared` type modules (`types/*.ts`) export types only (`export type *` from the barrel).
   Keep new domain types type-only unless they need runtime values; `safety/`, `vision/`, `design/`
   and `legal/` are where runtime values belong.
