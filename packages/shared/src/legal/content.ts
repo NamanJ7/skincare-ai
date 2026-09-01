@@ -61,10 +61,13 @@ export const PRIVACY_POLICY: LegalDocument = {
           text: "In the Pore app you tell us your age, your skin goals and concerns, how sensitive your skin is, any ingredient allergies, and whether you are pregnant or breastfeeding. If you are 17 or younger we also ask for a parent or guardian's email address.",
         },
         {
-          // Disclosure. state/onboarding.tsx holds this in a plain useState
-          // with no persistence layer, and there is no account backend.
+          // Disclosure. state/onboarding.tsx mirrors these answers into
+          // journal.json via saveOnboarding() in lib/journal.ts, so they
+          // survive the app closing. They stay in that file on the device;
+          // there is still no account backend and nothing is uploaded.
+          // deleteJournal() removes them.
           kind: "paragraph",
-          text: "Your answers are held on your device for the length of the session. Pore has no accounts yet, so nothing is saved to a profile.",
+          text: "Your answers are saved on your phone, inside the app, so your routine is still there when you come back. Pore has no accounts yet, so they are never uploaded and nothing is saved to a profile. Removing the app removes them.",
         },
         {
           // Disclosure. apps/mobile/src/lib/journal.ts writes journal.json to

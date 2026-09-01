@@ -11,7 +11,7 @@ import {
   type RoutineStep,
 } from "@pore/shared";
 import { buildIntake } from "@/lib/intake";
-import { deleteJournal, readJournal, recordedDays } from "@/lib/journal";
+import { eraseRecord, readJournal, recordedDays } from "@/lib/journal";
 import { deleteStoredPhotos, listSessions, storedPhotoCount } from "@/lib/photos";
 import { useOnboarding } from "@/state/onboarding";
 import { AppText, Card, Chip, Divider, GhostButton, Screen, colors, spacing } from "@/theme";
@@ -87,7 +87,10 @@ export default function Plan() {
           style: "destructive",
           onPress: () => {
             try {
-              deleteJournal();
+              // Narrower than deleteJournal on purpose: this control promises
+              // the routine survives, and the journal is where the routine now
+              // lives. See eraseRecord in lib/journal.ts.
+              eraseRecord();
               setJournalDays(0);
             } catch {
               Alert.alert("Couldn't erase", "Something went wrong removing the record. Try again.");

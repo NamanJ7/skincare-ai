@@ -1,14 +1,25 @@
-import { router } from "expo-router";
+import { Redirect, router } from "expo-router";
 import { useState } from "react";
 import { View } from "react-native";
 
 import { BrandMark } from "@/components/BrandMark";
 import { HeroDemo } from "@/components/HeroDemo";
 import { SplashAnimation } from "@/components/SplashAnimation";
+import { hasRoutine } from "@/lib/journal";
 import { AppText, GhostButton, PrimaryButton, Screen, colors, spacing } from "@/theme";
 
 export default function Landing() {
   const [splashDone, setSplashDone] = useState(false);
+  // Checked once at mount, not on every render: the journal read is synchronous
+  // file I/O and this is the first screen to paint.
+  const [returning] = useState(hasRoutine);
+
+  // Someone with a routine already said yes to all of this. Sending them back
+  // through the pitch every launch is the difference between an app you open
+  // and an app you have to decide to open.
+  if (returning) {
+    return <Redirect href="/today" />;
+  }
 
   if (!splashDone) {
     return <SplashAnimation onDone={() => setSplashDone(true)} />;
