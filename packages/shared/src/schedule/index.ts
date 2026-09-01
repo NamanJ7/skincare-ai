@@ -6,6 +6,7 @@ export {
   planDay,
   planWeek,
   rampWeekFor,
+  rampWeeksHeld,
   rampedFrequency,
   spreadDays,
   today,
@@ -13,6 +14,7 @@ export {
 } from "./engine";
 export type {
   DayPlan,
+  RampState,
   ScheduleContext,
   ScheduleNote,
   ScheduleNoteId,

@@ -11,6 +11,7 @@ import {
   planDay,
   planWeek,
   rampWeekFor,
+  rampWeeksHeld,
   rampedFrequency,
   spreadDays,
   type SkinCheckIn,
@@ -165,6 +166,57 @@ describe("ramp", () => {
 
   it("clamps to week 1 before the start date", () => {
     expect(rampWeekFor(ctx("2025-12-01"))).toBe(1);
+  });
+});
+
+/**
+ * Holding the ramp is correct behaviour, but a user who silently plateaus at
+ * week 2 for a month cannot tell a working safety mechanism from a broken
+ * progress bar. These lock in that the hold is counted and said out loud.
+ */
+describe("a held ramp explains itself", () => {
+  const sting = (day: number): SkinCheckIn => ({ date: addDays(START, day), feel: "stinging" });
+
+  function pmNoteIds(on: string, checkIns: SkinCheckIn[]): string[] {
+    return planDay(routine(), intake(), ctx(on, checkIns)).pm.notes.map((n) => n.id);
+  }
+
+  it("counts nothing held when every week was calm", () => {
+    expect(rampWeeksHeld(ctx(addDays(START, 21)))).toBe(0);
+    expect(pmNoteIds(addDays(START, 21), [])).not.toContain("ramp_held");
+  });
+
+  it("counts each week the user reported irritation in", () => {
+    expect(rampWeeksHeld(ctx(addDays(START, 14), [sting(3)]))).toBe(1);
+    expect(rampWeeksHeld(ctx(addDays(START, 21), [sting(3), sting(10)]))).toBe(2);
+  });
+
+  it("says so on the evening session, naming the week it is stuck on", () => {
+    const day = planDay(routine(), intake(), ctx(addDays(START, 14), [sting(3)]));
+    const note = day.pm.notes.find((n) => n.id === "ramp_held");
+    expect(note).toBeDefined();
+    expect(note?.detail).toContain(`week 2 of ${RAMP_WEEKS}`);
+  });
+
+  it("stays quiet during a deload — that already explains why tonight is lighter", () => {
+    // Stinging yesterday puts today inside the recovery window.
+    const on = addDays(START, 15);
+    expect(pmNoteIds(on, [sting(3), { date: addDays(START, 14), feel: "stinging" }])).not.toContain(
+      "ramp_held",
+    );
+  });
+
+  it("stays quiet once the ramp is at full strength — nothing is being held", () => {
+    // A single early flare cannot keep someone off full strength a year later.
+    const on = addDays(START, 365);
+    expect(rampWeekFor(ctx(on, [sting(3)]))).toBe(RAMP_WEEKS);
+    expect(pmNoteIds(on, [sting(3)])).not.toContain("ramp_held");
+  });
+
+  it("reports the same hold count on the week plan", () => {
+    const week = planWeek(routine(), intake(), ctx(addDays(START, 14), [sting(3)]));
+    expect(week.rampWeeksHeld).toBe(1);
+    expect(week.rampWeek).toBe(2);
   });
 });
 

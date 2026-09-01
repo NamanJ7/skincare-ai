@@ -67,17 +67,26 @@ not measurements. They are deliberately isolated as named constants at the top o
 the module so they can be tuned in one place once there is real adherence data.
 
 ### No notification, so the app has to be opened to be useful
-`/today` answers "what do I do right now", but nothing prompts the user to ask.
-A single local notification at the user's chosen evening time is the obvious
-partner to this screen, and it is the one place a reminder is genuinely earned
-rather than growth spam. Needs `expo-notifications`, which is not a dependency yet.
+Done: `apps/mobile/src/lib/reminder.ts` schedules one local daily notification at
+an hour the user picks at the end of onboarding, with the off switch on `/plan`.
+It deliberately does **not** name tonight's active. A `DAILY` trigger is
+scheduled once and fires unchanged, so "Retinoid night" would be wrong on the
+four nights a week it isn't one — and worse, a `stinging` check-in deloads the
+routine and renames the session, so the banner could be falsified by the user's
+own report between scheduling and firing. The body says the routine is ready; the
+headline lives on the screen it opens, computed fresh.
+
+Unverified on hardware: whether the permission prompt at the end of onboarding
+converts, and whether 7-10pm are the right four options.
 
 ### The user cannot see the ramp being held
-`rampWeekFor` silently declines to advance a week the user reported irritation in.
-That is the right behaviour and it is tested, but the UI never says it happened —
-so a user who plateaus at week 2 has no idea why. There was a `ramp_held`
-`ScheduleNote` id sketched for this and removed rather than left dead; it wants
-reinstating with real copy and a test.
+Done: `rampState` in `packages/shared/src/schedule/engine.ts` now returns the
+hold count alongside the week, `planDay` emits a `ramp_held` `ScheduleNote` on the
+evening session, and `WeekPlan` carries `rampWeeksHeld`. Six cases in
+`schedule/engine.test.ts` cover it, including the two silences that matter: no
+`ramp_held` during a deload (the deload note already explains the lighter night,
+and two explanations for one thing teaches the user to read neither) and none at
+full strength.
 
 ### `/today` is verified by static render only
 The screen typechecks and renders through `expo export --platform web`, which is
@@ -99,11 +108,11 @@ making a routine *stronger*, so erring toward "not enough evidence" is the safe
 direction. Revisit once there is real adherence data.
 
 ### The two elapsed-time numbers can disagree
-The `/compare` headline says "measured across N weeks" from the gap between the
-two photo sessions; the adaptation copy says "you're N weeks in" from
-`journal.startedOn`. They normally track, but a user who starts the routine well
-before their first photo, or re-captures late, will see two different numbers on
-one screen. Pick one clock and derive both from it.
+Resolved, but not by picking one clock — they measure genuinely different things
+(the gap between two photo sets vs. time on the routine), and forcing them to
+match would make one of them wrong. The `/compare` subtitle now names what its
+number spans: "N weeks between these two photo sets". The numbers can still
+differ; they no longer look like the same fact contradicting itself.
 
 ### Only two assessments are ever kept
 `baseline` and `latest`, matching the two-photo-session model. That is the right
@@ -125,6 +134,113 @@ adaptation paths are covered by the engine's unit tests and a scenario sim. What
 has not been checked on hardware: whether the dark verdict card reads as premium
 rather than heavy next to the cream, and whether "we couldn't measure this"
 lands as honesty or as the app looking broken. That second one is the whole bet.
+
+## Deferred from the app-improvements pass
+
+A review of the mobile app produced ten items. Six shipped on
+`claude/skincare-app-improvements-ygc6za`; these four were deliberately held back
+for a second pass, because they are hierarchy and composition work that is much
+better judged against a build you can hold than against a description.
+
+### `IntakeResponse.currentProducts` is inert
+Cut, not deferred. A grep across `packages/shared/src`, `apps/web/lib` (the
+pipeline and both prompts) and `apps/mobile/src` finds it only ever *written* as
+`[]` — in `buildIntake` and three test fixtures. No engine reads it and neither
+prompt mentions it, so collecting it would produce a "you already own this" label
+that changes nothing about the generated routine. That is the decorative
+personalisation this product otherwise refuses to ship.
+
+Two honest ways to revive it, both bigger than a UI affordance: change
+`ROUTINE_SYSTEM` so the model prefers steps the user already owns, or have the
+safety engine treat an owned product as a reason to keep a step. Until one of
+those exists, leave the field alone rather than collecting data nothing consumes.
+
+### `/plan` is a document dump, not a receipt
+Done. It was twelve stacked `Card`s at identical visual weight — what we noticed
+/ what we couldn't see / see a professional / morning / evening / what we
+adjusted / photos / record / reminder / answers / legal — which buried the one
+thing no competitor can copy. It is now a header, the routine, and two
+`Disclosure` sections:
+
+```
+photo quality + illuminant -> assessment + per-concern confidence
+  -> SafetyAdjustment[] -> tonight
+```
+
+"Why this routine" collapses that whole chain in causal order; "Your data"
+collapses the photos, the record, the reminder and every erase path. The
+escalation cue is deliberately **not** collapsed — a safety cue behind a tap is a
+safety cue that does not exist. No new logic, no new domain types.
+
+The `Disclosure` primitive in `theme/ui.tsx` has no height animation on purpose:
+mounting the children when open is the whole job, and skipping the tween also
+skips the reduced-motion question.
+
+### The week strip should be the navigation
+Done. `WeekStrip` takes `selected` and `onSelectDay`; each day is a `Pressable`
+with a role, a selected state and a label carrying the weekday plus that day's
+evening headline. `/today` holds a `viewingDate`, reset on focus, and the
+"Show tonight instead" button is gone — tapping the day already open flips
+morning/evening.
+
+**A future day is preview-only, and that is load-bearing.** Journal entries are
+keyed by calendar date, and both `adherenceRate` and `rampWeekFor` read back from
+them, so ticking Thursday off on Monday would advance the ramp on a claim that
+had not happened. Four things stop it: `onToggle` and `onFeel` return early
+unless `isToday`, the step rows are `disabled`, the check-in card is not
+rendered, and both writes target `date` rather than `viewingDate` so even a
+bypassed guard could not reach a future day. `planWeek` also runs against today
+rather than the viewed day, so browsing cannot make the ramp week jump.
+
+Back-filling yesterday is deliberately **not** supported. It would inflate the
+adherence rate, which gates whether the routine is allowed to get *stronger*; the
+existing comment in `journal.ts` is explicit that under-counting is the safe
+direction to be wrong in.
+
+### `/compare` is still hard to reach
+Done enough. `/today` now links to it directly once two capture sessions exist,
+and separately offers a re-capture when the ramp reaches full strength. It is no
+longer three levels deep behind `/plan` -> "Your photos" -> "See what changed",
+gated on a session count the user was never told about.
+
+What is still untested is the bet itself: whether "we couldn't measure this"
+reads as integrity or as the app looking broken. That needs people, not code.
+
+### Dynamic Type
+`AppText` sets fixed `fontSize` from tokens against fixed-height layouts (56px
+step rows, a 26px `CheckCircle`, 10px week-strip dots, and the new 44pt
+`TAP_TARGET` floors). At 150-200% Dynamic Type this breaks. The worst offender is
+the sensitivity step in `onboarding/intake.tsx`, which puts "Somewhat - Some
+products sting or make me red" inside a single pill `Chip`; it wants to become a
+two-line option row rather than a pill. The `WeekStrip` is the other one — seven
+fixed-width columns with no wrap.
+
+Held back deliberately: this changes layout on two screens, and how bad it
+actually is at 200% is much better judged on a device than in a diff.
+
+Screen-reader semantics are **done** — every primitive in `theme/ui.tsx` now
+carries a role, and selection state travels as `checked` on `radio`/`checkbox`
+chips. Note for anyone extending this: react-native-web has no handler for the
+`accessibilityState` object at all (it reads `aria-*` props directly), and
+`aria-selected` is not valid on `role="button"`, so a button-role chip conveys
+nothing about being chosen on either the DOM or in an audit. Use `radio` for
+pick-one groups and `checkbox` for independent toggles.
+
+`CheckCircle` already honours `useReducedMotion`; nothing else in the app animates
+yet, but anything added in the `/plan` rework must.
+
+### Not proposed, on purpose
+A product/SKU catalog. `packages/shared/src/types/product.ts` defines `Product`
+and `StepRecommendation` and both are dead code. A curated catalog is real
+liability and real maintenance, and "use what you already own" — asked on `/plan`
+after the user has a routine, never as another onboarding step — is the simpler
+product and the better one. `IntakeResponse.currentProducts` is still hardcoded
+`[]` in `apps/mobile/src/lib/intake.ts` and is the remaining half of that item.
+
+Also not proposed: a streak-maximising retention layer. The consecutive-day
+streak that used to sit on `/today` was replaced with a count of sessions this
+week, because an unbroken chain punishes the one behaviour the deload engine
+exists to encourage — stopping when your skin says stop.
 
 ## Housekeeping
 

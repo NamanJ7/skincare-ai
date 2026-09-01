@@ -133,10 +133,26 @@ session that renames itself (a "Recovery night") must always carry a note explai
 headline the user can't account for is worse than no headline. Extend
 `packages/shared/src/schedule/engine.test.ts` when changing any of this.
 
-State lives in `apps/mobile/src/lib/journal.ts` — an on-device JSON file holding the routine start
-date, per-session tick-offs, and the one-tap skin check-ins. It never leaves the phone, it is
-disclosed in the privacy content (`packages/shared/src/legal/content.ts`), and `/plan` must keep
-offering a way to erase it.
+State lives in two on-device JSON files, same shape and same promise — synchronous reads,
+best-effort writes, nothing uploaded, both disclosed in the privacy content
+(`packages/shared/src/legal/content.ts`) and both erasable from `/plan`, which must keep offering
+that:
+
+- `apps/mobile/src/lib/journal.ts` — the routine start date, per-session tick-offs, the one-tap
+  skin check-ins, the baseline/latest assessments and the adapted routine.
+- `apps/mobile/src/lib/profile.ts` — the intake answers and the generated plan.
+  **This one is load-bearing for safety.** Sensitivity, the pregnancy flag, declared allergies and
+  skin tone are collected once and needed on every launch after that; when they lived in React
+  state, a cold start silently re-ran the whole app against `buildIntake({})` defaults, so
+  `applySafetyRules` was doing exactly the right thing to the wrong answers and a pregnant user
+  could be shown a retinoid. `OnboardingProvider` hydrates from it synchronously before anything
+  renders. Base64 photo payloads are never written to it — they exist for one `/api/plan` request.
+
+`apps/mobile/src/lib/reminder.ts` owns the single local daily notification (one per day, hour
+chosen by the user, off switch on `/plan`). Its body deliberately never names tonight's active: a
+`DAILY` trigger fires unchanged, and a check-in can deload the routine and rename the session
+between scheduling and firing, so the banner could contradict the app. `feedback.ts` wraps
+`expo-haptics` for the tick/complete/select moments — best-effort, no-ops off-device.
 
 `apps/mobile/src/app/today.tsx` is the primary surface and shows **only the current session**;
 `/plan` holds the full assessment and routine as a reference document. Keep it that way — the
