@@ -2,11 +2,12 @@ import { router } from "expo-router";
 import { useState, type ReactNode } from "react";
 import { ActivityIndicator, View } from "react-native";
 
-import type { Sensitivity, SkinGoal, SkinType } from "@pore/shared";
+import { ACTIVES, type ActiveKey, type Sensitivity, type SkinGoal, type SkinType } from "@pore/shared";
 import { fetchPlan } from "@/lib/api";
 import { buildIntake } from "@/lib/intake";
 import { recordAssessment } from "@/lib/journal";
 import { CAPTURE_STEPS, listSessions, type CapturedPhoto } from "@/lib/photos";
+import { REMINDER_HOURS, enableReminder, formatHour } from "@/lib/reminder";
 import { useOnboarding } from "@/state/onboarding";
 import { AppText, Chip, GhostButton, PrimaryButton, ProgressDots, Screen, colors, spacing } from "@/theme";
 
@@ -34,25 +35,59 @@ const SENSITIVITY: { key: Sensitivity; label: string; hint: string }[] = [
   { key: "high", label: "Very", hint: "My skin reacts easily and often" },
 ];
 
-const STEP_COUNT = 4;
+/**
+ * The actives worth asking about by name.
+ *
+ * Not all twelve. "Have you reacted to mandelic acid?" is a question almost
+ * nobody can answer, and a list of twelve chemical names is exactly the kind of
+ * jargon wall that makes people tap through without reading. These six are the
+ * ones that appear on drugstore packaging and that people actually remember
+ * reacting to. Labels come from ACTIVES so there is one source of truth for
+ * ingredient naming across the app.
+ */
+const ASKED_ALLERGENS: ActiveKey[] = [
+  "retinoid",
+  "benzoyl_peroxide",
+  "salicylic_acid",
+  "glycolic_acid",
+  "vitamin_c",
+  "niacinamide",
+];
+
+const STEP_COUNT = 5;
 
 export default function Intake() {
   const { data, update } = useOnboarding();
   const [step, setStep] = useState(0);
   const [analyzing, setAnalyzing] = useState(false);
+  /**
+   * Shown after the routine exists, not as another question before it. The
+   * permission prompt lands on the moment the user has just been handed
+   * something worth being reminded about, which is the only honest time to ask.
+   */
+  const [askingReminder, setAskingReminder] = useState(false);
   const [goals, setGoals] = useState<SkinGoal[]>([]);
   const [skinType, setSkinType] = useState<SkinType | null>(null);
   const [sensitivity, setSensitivity] = useState<Sensitivity | null>(null);
   const [pregnant, setPregnant] = useState<boolean | null>(null);
+  /** null until answered; [] is the real answer "none of these". */
+  const [allergies, setAllergies] = useState<ActiveKey[] | null>(null);
 
   const canAdvance =
     (step === 0 && goals.length > 0) ||
     (step === 1 && skinType !== null) ||
     (step === 2 && sensitivity !== null) ||
-    (step === 3 && pregnant !== null);
+    (step === 3 && pregnant !== null) ||
+    (step === 4 && allergies !== null);
 
   function toggleGoal(key: SkinGoal) {
     setGoals((prev) => (prev.includes(key) ? prev.filter((g) => g !== key) : [...prev, key]));
+  }
+
+  function toggleAllergen(key: ActiveKey) {
+    setAllergies((prev) =>
+      prev?.includes(key) ? prev.filter((a) => a !== key) : [...(prev ?? []), key],
+    );
   }
 
   async function next() {
@@ -67,6 +102,10 @@ export default function Intake() {
       skinType: skinType ?? "combination",
       sensitivity: sensitivity ?? "medium",
       pregnancyOrBreastfeeding: pregnant ?? false,
+      allergies: allergies ?? [],
+      // The marker that says onboarding finished rather than being abandoned.
+      // It is what lets the next cold start go straight to the routine.
+      onboardedAt: new Date().toISOString(),
     } as const;
     update(answers);
 
@@ -94,12 +133,40 @@ export default function Intake() {
         assessment: plan.assessment,
       });
     }
+    setAnalyzing(false);
+    setAskingReminder(true);
+  }
+
+  async function chooseReminder(hour: number | null) {
+    if (hour !== null && (await enableReminder(hour))) update({ reminderHour: hour });
     router.replace("/today");
   }
 
   function back() {
     if (step === 0) router.back();
     else setStep((s) => s - 1);
+  }
+
+  if (askingReminder) {
+    return (
+      <Screen contentStyle={{ paddingTop: spacing.section }}>
+        <AppText variant="title">Want a nudge in the evening?</AppText>
+        <AppText variant="body" color={colors.inkMuted}>
+          One reminder a day, at a time you pick. That&apos;s the only notification Pore sends —
+          no streaks to keep, nothing chasing you. You can turn it off any time.
+        </AppText>
+
+        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: spacing.sm, marginTop: spacing.md }}>
+          {REMINDER_HOURS.map((h) => (
+            <Chip key={h} label={formatHour(h)} onPress={() => void chooseReminder(h)} />
+          ))}
+        </View>
+
+        <View style={{ gap: spacing.sm, marginTop: spacing.lg }}>
+          <GhostButton label="No reminders" onPress={() => void chooseReminder(null)} />
+        </View>
+      </Screen>
+    );
   }
 
   return (
@@ -141,6 +208,30 @@ export default function Intake() {
           <ChipWrap>
             <Chip label="Yes" selected={pregnant === true} onPress={() => setPregnant(true)} />
             <Chip label="No" selected={pregnant === false} onPress={() => setPregnant(false)} />
+          </ChipWrap>
+        </Question>
+      )}
+
+      {step === 4 && (
+        <Question
+          title="Has anything ever irritated your skin?"
+          subtitle="We'll keep it out of your routine entirely. Skip if nothing comes to mind."
+        >
+          <ChipWrap>
+            {ASKED_ALLERGENS.map((key) => (
+              <Chip
+                key={key}
+                label={ACTIVES[key].short}
+                selected={allergies?.includes(key) ?? false}
+                onPress={() => toggleAllergen(key)}
+              />
+            ))}
+            <Chip
+              label="Nothing I know of"
+              tone="lavender"
+              selected={allergies?.length === 0}
+              onPress={() => setAllergies([])}
+            />
           </ChipWrap>
         </Question>
       )}

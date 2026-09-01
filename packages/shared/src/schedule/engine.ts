@@ -44,6 +44,7 @@ export interface SkinCheckIn {
 
 export type ScheduleNoteId =
   | "ramp_building"
+  | "ramp_held"
   | "deload_active"
   | "day_conflict_deferred"
   | "day_conflict_dropped"
@@ -82,6 +83,8 @@ export interface WeekPlan {
   /** 1-based, capped at `RAMP_WEEKS`. Weeks with irritation do not advance it. */
   rampWeek: number;
   rampWeeks: number;
+  /** Weeks the ramp declined to advance because the user reported irritation. */
+  rampWeeksHeld: number;
   /** True if strong actives are currently paused for recovery. */
   deloading: boolean;
   /** Last date (inclusive) the deload covers, when `deloading`. */
@@ -242,19 +245,45 @@ function activeDeload(checkIns: SkinCheckIn[], on: string): Deload | undefined {
  * "calm" during it. A quiet week (no reports at all) advances normally — we ask
  * for feedback, we do not punish its absence.
  */
-export function rampWeekFor(ctx: ScheduleContext): number {
+export interface RampState {
+  /** 1-based ramp week, capped at `RAMP_WEEKS`. */
+  week: number;
+  /**
+   * How many elapsed weeks did NOT advance the ramp because the user reported
+   * something worse than `calm` during them.
+   *
+   * Holding the ramp is the right behaviour and it is why this engine exists,
+   * but doing it silently is not: a user stuck at week 2 for a month has no way
+   * to tell a working safety mechanism from a broken progress bar. This count is
+   * what lets the UI say so out loud.
+   */
+  held: number;
+}
+
+function rampState(ctx: ScheduleContext): RampState {
   const elapsed = Math.max(0, daysBetween(ctx.startedOn, ctx.on));
   const completedWeeks = Math.floor(elapsed / 7);
   const checkIns = ctx.checkIns ?? [];
 
   let week = 1;
+  let held = 0;
   for (let w = 0; w < completedWeeks && week < RAMP_WEEKS; w++) {
     const from = addDays(ctx.startedOn, w * 7);
     const to = addDays(ctx.startedOn, w * 7 + 6);
     const flared = checkIns.some((c) => c.date >= from && c.date <= to && c.feel !== "calm");
-    if (!flared) week++;
+    if (flared) held++;
+    else week++;
   }
-  return week;
+  return { week, held };
+}
+
+export function rampWeekFor(ctx: ScheduleContext): number {
+  return rampState(ctx).week;
+}
+
+/** Weeks the ramp was held back by a report of irritation. See `RampState.held`. */
+export function rampWeeksHeld(ctx: ScheduleContext): number {
+  return rampState(ctx).held;
 }
 
 /* ------------------------------------------------------------------ planning */
@@ -471,7 +500,7 @@ export function planDay(
   intake: IntakeResponse,
   ctx: ScheduleContext,
 ): DayPlan {
-  const rampWeek = rampWeekFor(ctx);
+  const { week: rampWeek, held } = rampState(ctx);
   const deload = activeDeload(ctx.checkIns ?? [], ctx.on);
   const { placements, notes } = placeSteps(routine, intake, rampWeek);
 
@@ -481,6 +510,17 @@ export function planDay(
 
   const am = buildSession("AM", placements, cycleDay, deload, cycleNotes);
   const pm = buildSession("PM", placements, cycleDay, deload, cycleNotes);
+
+  // A held ramp is reported on the evening session, where the strong actives
+  // live. Not during a deload: the deload note already explains why tonight is
+  // lighter, and two explanations for one thing is how a user learns to skip
+  // both. Not at full strength either, since there is nothing left to hold.
+  if (held > 0 && !deload && rampWeek < RAMP_WEEKS) {
+    pm.notes.push({
+      id: "ramp_held",
+      detail: `You're still on week ${rampWeek} of ${RAMP_WEEKS}. We held the pace back ${held === 1 ? "a week" : `${held} weeks`} because your skin wasn't calm — it only moves up after a week that goes smoothly, and that is the routine working rather than stalling.`,
+    });
+  }
 
   return { date: ctx.on, dayIndex, am, pm, anchor: am.anchor ?? pm.anchor };
 }
@@ -499,9 +539,12 @@ export function planWeek(
   const weekStart = addDays(ctx.startedOn, Math.floor(dayIndex / 7) * 7);
   const deload = activeDeload(ctx.checkIns ?? [], ctx.on);
 
+  const { week, held } = rampState(ctx);
+
   return {
-    rampWeek: rampWeekFor(ctx),
+    rampWeek: week,
     rampWeeks: RAMP_WEEKS,
+    rampWeeksHeld: held,
     deloading: deload !== undefined,
     deloadUntil: deload?.until,
     days: Array.from({ length: 7 }, (_, i) =>

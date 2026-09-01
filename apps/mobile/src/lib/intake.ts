@@ -11,7 +11,10 @@ export function buildIntake(data: OnboardingData): IntakeResponse {
     skinType: data.skinType ?? "combination",
     sensitivity: data.sensitivity ?? "medium",
     currentProducts: [],
-    allergies: [],
+    // Asked during onboarding. The safety engine strips any step whose active
+    // appears here, so an empty array is a claim the user told us nothing — it
+    // must never be a default standing in for an answer we failed to keep.
+    allergies: data.allergies ?? [],
     budget: "medium",
     fragrancePreference: "no_preference",
     pregnancyOrBreastfeeding: data.pregnancyOrBreastfeeding ?? false,

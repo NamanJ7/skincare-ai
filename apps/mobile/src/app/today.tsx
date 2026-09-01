@@ -30,6 +30,7 @@ import {
   type SkinFeel,
 } from "@pore/shared";
 import { CheckCircle } from "@/components/CheckCircle";
+import { completed, selected, tapped } from "@/lib/feedback";
 import { WeekStrip } from "@/components/WeekStrip";
 import { buildIntake } from "@/lib/intake";
 import {
@@ -37,7 +38,7 @@ import {
   completedSteps,
   readJournal,
   recordCheckIn,
-  streakDays,
+  sessionsBetween,
   toggleStep,
 } from "@/lib/journal";
 import { useOnboarding } from "@/state/onboarding";
@@ -133,15 +134,31 @@ export default function Today() {
   const session = time === "AM" ? day.am : day.pm;
   const done = completedSteps(journal, date, time);
   const allDone = session.steps.length > 0 && done.length >= session.steps.length;
-  const streak = streakDays(journal, date);
+  const atFullStrength = week.rampWeek >= week.rampWeeks;
+  const doneThisWeek = sessionsBetween(
+    journal,
+    week.days[0]?.date ?? date,
+    week.days[6]?.date ?? date,
+  );
   const feeling = checkInFor(journal, date);
 
   const onToggle = useCallback(
-    (order: number) => setJournal(toggleStep(date, time, order, session.steps.length)),
+    (order: number) => {
+      const next = toggleStep(date, time, order, session.steps.length);
+      // Finishing gets its own feedback. The last tap of a session should not
+      // feel like the third one — it is the moment the routine is done.
+      const nowDone = completedSteps(next, date, time).length >= session.steps.length;
+      if (nowDone && session.steps.length > 0) completed();
+      else tapped();
+      setJournal(next);
+    },
     [date, time, session.steps.length],
   );
 
-  const onFeel = useCallback((feel: SkinFeel) => setJournal(recordCheckIn(date, feel)), [date]);
+  const onFeel = useCallback((feel: SkinFeel) => {
+    selected();
+    setJournal(recordCheckIn(date, feel));
+  }, [date]);
 
   return (
     <Screen contentStyle={{ paddingTop: spacing.lg }}>
@@ -150,9 +167,9 @@ export default function Today() {
           {`${weekdayName(date).toUpperCase()} · ${time === "AM" ? "MORNING" : "EVENING"}`}
         </AppText>
         <AppText variant="title">{session.headline}</AppText>
-        {streak >= 2 && (
+        {doneThisWeek > 0 && (
           <AppText variant="caption" color={colors.inkMuted}>
-            {`${streak} days in a row.`}
+            {`${doneThisWeek} ${doneThisWeek === 1 ? "session" : "sessions"} done this week.`}
           </AppText>
         )}
       </View>
@@ -224,51 +241,71 @@ export default function Today() {
 
       <Card>
         <WeekStrip week={week} today={date} />
+        {/*
+         * The forward contract. Week 1 used to say "WEEK 1 OF 6" and nothing
+         * else — no statement of what the six weeks are for, or what happens at
+         * the end of them. A user who cannot see where the plan is going has no
+         * reason to still be here in a month.
+         */}
+        <AppText variant="caption" color={colors.inkMuted}>
+          {atFullStrength
+            ? "Your actives are at full strength. Take a new set of photos and we'll measure what actually changed."
+            : "Every week your skin stays calm moves your actives one step closer to full strength. Weeks that don't, don't."}
+        </AppText>
+        {atFullStrength && (
+          <GhostButton
+            label="Take a new set of photos"
+            onPress={() => router.push("/onboarding/photo?mode=recheck")}
+          />
+        )}
       </Card>
 
       {/* The single question the product asks. One tap, and it is what moves the
-          ramp forward or pulls it back — so the answer is never cosmetic. */}
-      {(allDone || feeling) && (
-        <Card elevated>
-          <AppText variant="heading">How does your skin feel?</AppText>
-          <AppText variant="caption" color={colors.inkMuted}>
-            {feeling
-              ? "Logged. This is what sets next week's pace — you don't have to adjust anything yourself."
-              : "One tap. It changes what we ask of your skin next."}
-          </AppText>
-          <View style={{ flexDirection: "row", gap: spacing.xs, marginTop: spacing.xxs }}>
-            {FEELS.map(({ feel, label }) => {
-              const selected = feeling === feel;
-              return (
-                <Pressable
-                  key={feel}
-                  onPress={() => onFeel(feel)}
-                  accessibilityRole="radio"
-                  accessibilityState={{ selected }}
-                  accessibilityLabel={`My skin feels ${label.toLowerCase()}`}
-                  style={({ pressed }) => [
-                    {
-                      flex: 1,
-                      minHeight: 48,
-                      alignItems: "center",
-                      justifyContent: "center",
-                      borderRadius: radius.pill,
-                      borderWidth: 1,
-                      borderColor: selected ? colors.primary : colors.hairline,
-                      backgroundColor: selected ? colors.primary : colors.surface,
-                    },
-                    pressed && { opacity: 0.7 },
-                  ]}
-                >
-                  <AppText variant="caption" color={selected ? colors.onPrimary : colors.ink}>
-                    {label}
-                  </AppText>
-                </Pressable>
-              );
-            })}
-          </View>
-        </Card>
-      )}
+          ramp forward or pulls it back — so the answer is never cosmetic.
+          It used to appear only once the session was finished, which locked the
+          answer behind the behaviour it exists to correct: someone who stopped
+          halfway because their face was stinging is exactly the person whose
+          report should pull the actives, and they were the one person who could
+          not file it. It is always available now. */}
+      <Card elevated>
+        <AppText variant="heading">How does your skin feel?</AppText>
+        <AppText variant="caption" color={colors.inkMuted}>
+          {feeling
+            ? "Logged. This is what sets next week's pace — you don't have to adjust anything yourself."
+            : "One tap, whether or not you finished. If something stung, say so and we'll ease off."}
+        </AppText>
+        <View style={{ flexDirection: "row", gap: spacing.xs, marginTop: spacing.xxs }}>
+          {FEELS.map(({ feel, label }) => {
+            const selected = feeling === feel;
+            return (
+              <Pressable
+                key={feel}
+                onPress={() => onFeel(feel)}
+                accessibilityRole="radio"
+                accessibilityState={{ selected }}
+                accessibilityLabel={`My skin feels ${label.toLowerCase()}`}
+                style={({ pressed }) => [
+                  {
+                    flex: 1,
+                    minHeight: 48,
+                    alignItems: "center",
+                    justifyContent: "center",
+                    borderRadius: radius.pill,
+                    borderWidth: 1,
+                    borderColor: selected ? colors.primary : colors.hairline,
+                    backgroundColor: selected ? colors.primary : colors.surface,
+                  },
+                  pressed && { opacity: 0.7 },
+                ]}
+              >
+                <AppText variant="caption" color={selected ? colors.onPrimary : colors.ink}>
+                  {label}
+                </AppText>
+              </Pressable>
+            );
+          })}
+      </View>
+    </Card>
 
       <View style={{ gap: spacing.xs }}>
         <GhostButton

@@ -183,9 +183,17 @@ export default function Compare() {
         PROGRESS
       </AppText>
       <AppText variant="title">{report ? report.headline : "Then and now"}</AppText>
+      {/*
+        * Two elapsed-time numbers used to sit on this screen looking like the
+        * same fact and disagreeing: this one is the gap between the two photo
+        * sets, while the adaptation copy below counts weeks on the routine. They
+        * genuinely measure different things — someone can start a routine long
+        * before their first photo, or re-shoot late — so forcing them to match
+        * would make one of them wrong. Naming what this number spans is the fix.
+        */}
       {report && (
         <AppText variant="body" color={colors.inkMuted}>
-          {`Measured across ${Math.max(1, Math.round(report.daysBetween / 7))} weeks, from two separate readings that never saw each other.`}
+          {`${Math.max(1, Math.round(report.daysBetween / 7))} weeks between these two photo sets, read separately so neither reading ever saw the other.`}
         </AppText>
       )}
 

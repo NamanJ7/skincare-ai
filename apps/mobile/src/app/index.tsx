@@ -1,14 +1,26 @@
-import { router } from "expo-router";
+import { Redirect, router } from "expo-router";
 import { useState } from "react";
 import { View } from "react-native";
 
 import { BrandMark } from "@/components/BrandMark";
 import { HeroDemo } from "@/components/HeroDemo";
 import { SplashAnimation } from "@/components/SplashAnimation";
+import { hasProfile } from "@/lib/profile";
 import { AppText, GhostButton, PrimaryButton, Screen, colors, spacing } from "@/theme";
 
 export default function Landing() {
+  /**
+   * Someone who already has a routine is not a visitor. They opened the app to
+   * find out what to do tonight, and every launch used to put a brand animation
+   * and a marketing page between them and the answer. Read once, on mount, so
+   * the decision can't flip underneath a render.
+   */
+  const [returning] = useState(hasProfile);
   const [splashDone, setSplashDone] = useState(false);
+
+  if (returning) {
+    return <Redirect href="/today" />;
+  }
 
   if (!splashDone) {
     return <SplashAnimation onDone={() => setSplashDone(true)} />;

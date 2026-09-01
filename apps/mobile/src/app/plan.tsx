@@ -12,6 +12,8 @@ import {
 } from "@pore/shared";
 import { buildIntake } from "@/lib/intake";
 import { deleteJournal, readJournal, recordedDays } from "@/lib/journal";
+import { deleteProfile } from "@/lib/profile";
+import { REMINDER_HOURS, disableReminder, enableReminder, formatHour } from "@/lib/reminder";
 import { deleteStoredPhotos, listSessions, storedPhotoCount } from "@/lib/photos";
 import { useOnboarding } from "@/state/onboarding";
 import { AppText, Card, Chip, Divider, GhostButton, Screen, colors, spacing } from "@/theme";
@@ -71,7 +73,7 @@ function confidenceLabel(c: number): string {
 }
 
 export default function Plan() {
-  const { data, update } = useOnboarding();
+  const { data, update, reset } = useOnboarding();
   const [photoCount, setPhotoCount] = useState(() => storedPhotoCount());
   const [sessionCount] = useState(() => listSessions().length);
   const [journalDays, setJournalDays] = useState(() => recordedDays(readJournal()));
@@ -96,6 +98,55 @@ export default function Plan() {
         },
       ],
     );
+  }
+
+  /**
+   * The real "forget me". The journal erase above resets progress but keeps the
+   * routine; this removes the answers and the routine themselves, which is the
+   * only action that leaves nothing of the user on the device.
+   */
+  function confirmStartOver() {
+    Alert.alert(
+      "Erase everything and start over?",
+      "This removes your answers, your assessment and your routine from this phone, along with your record. You'll go back to the beginning.",
+      [
+        { text: "Keep it", style: "cancel" },
+        {
+          text: "Erase everything",
+          style: "destructive",
+          onPress: () => {
+            try {
+              // The reminder is scheduled with the OS, not stored with the
+              // profile, so erasing the profile alone would leave a nightly
+              // notification for a routine that no longer exists.
+              void disableReminder();
+              deleteProfile();
+              deleteJournal();
+              reset();
+              router.replace("/");
+            } catch {
+              Alert.alert("Couldn't erase", "Something went wrong. Try again.");
+            }
+          },
+        },
+      ],
+    );
+  }
+
+  /**
+   * Change or clear the daily reminder. Turning it on can fail — the user may
+   * decline the OS prompt — so the stored hour is only written once the schedule
+   * actually exists. A setting that says "on" while nothing is scheduled is a
+   * lie the user has no way to detect.
+   */
+  async function setReminder(hour: number | null) {
+    if (hour === null) {
+      await disableReminder();
+      update({ reminderHour: undefined });
+      return;
+    }
+    if (await enableReminder(hour)) update({ reminderHour: hour });
+    else Alert.alert("Reminders are off", "Pore needs notification permission to send a reminder. You can turn it on in Settings.");
   }
 
   function confirmDeletePhotos() {
@@ -262,6 +313,37 @@ export default function Plan() {
         {journalDays > 0 && (
           <GhostButton label="Erase my routine record" onPress={confirmEraseJournal} />
         )}
+      </Card>
+
+      <Card>
+        <AppText variant="heading">Evening reminder</AppText>
+        <AppText variant="caption" color={colors.inkMuted}>
+          {data.reminderHour === undefined
+            ? "Off. One nudge a day at a time you pick — the only notification Pore sends."
+            : `On, at ${formatHour(data.reminderHour)}. This is the only notification Pore sends.`}
+        </AppText>
+        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: spacing.sm, marginTop: spacing.xs }}>
+          {REMINDER_HOURS.map((h) => (
+            <Chip
+              key={h}
+              label={formatHour(h)}
+              selected={data.reminderHour === h}
+              onPress={() => void setReminder(h)}
+            />
+          ))}
+        </View>
+        {data.reminderHour !== undefined && (
+          <GhostButton label="Turn the reminder off" onPress={() => void setReminder(null)} />
+        )}
+      </Card>
+
+      <Card>
+        <AppText variant="heading">Your answers</AppText>
+        <AppText variant="caption" color={colors.inkMuted}>
+          The answers you gave at signup and the routine built from them are saved on this phone, so
+          your plan is still here the next time you open the app. They stay on the device.
+        </AppText>
+        <GhostButton label="Erase everything and start over" onPress={confirmStartOver} />
       </Card>
 
       <Card>
