@@ -142,37 +142,69 @@ A review of the mobile app produced ten items. Six shipped on
 for a second pass, because they are hierarchy and composition work that is much
 better judged against a build you can hold than against a description.
 
+### `IntakeResponse.currentProducts` is inert
+Cut, not deferred. A grep across `packages/shared/src`, `apps/web/lib` (the
+pipeline and both prompts) and `apps/mobile/src` finds it only ever *written* as
+`[]` — in `buildIntake` and three test fixtures. No engine reads it and neither
+prompt mentions it, so collecting it would produce a "you already own this" label
+that changes nothing about the generated routine. That is the decorative
+personalisation this product otherwise refuses to ship.
+
+Two honest ways to revive it, both bigger than a UI affordance: change
+`ROUTINE_SYSTEM` so the model prefers steps the user already owns, or have the
+safety engine treat an owned product as a reason to keep a step. Until one of
+those exists, leave the field alone rather than collecting data nothing consumes.
+
 ### `/plan` is a document dump, not a receipt
-Nine stacked `Card`s at identical visual weight: what we noticed / what we
-couldn't see / see a professional / morning / evening / what we adjusted / your
-photos / your record / your answers / legal. It buries the one thing no
-competitor can copy. The full evidence chain already exists in code and is
-currently scattered across four screens as grey bullet lists:
+Done. It was twelve stacked `Card`s at identical visual weight — what we noticed
+/ what we couldn't see / see a professional / morning / evening / what we
+adjusted / photos / record / reminder / answers / legal — which buried the one
+thing no competitor can copy. It is now a header, the routine, and two
+`Disclosure` sections:
 
 ```
 photo quality + illuminant -> assessment + per-concern confidence
-  -> SafetyAdjustment[] -> ScheduleNote[] -> tonight
+  -> SafetyAdjustment[] -> tonight
 ```
 
-Present it as one artifact: the routine first, the reasoning one tap under it,
-the rest behind progressive disclosure. This wants close to zero new logic — it
-is composition and hierarchy. If it starts needing a new engine or a new domain
-type, it has gone wrong.
+"Why this routine" collapses that whole chain in causal order; "Your data"
+collapses the photos, the record, the reminder and every erase path. The
+escalation cue is deliberately **not** collapsed — a safety cue behind a tap is a
+safety cue that does not exist. No new logic, no new domain types.
+
+The `Disclosure` primitive in `theme/ui.tsx` has no height animation on purpose:
+mounting the children when open is the whole job, and skipping the tween also
+skips the reduced-motion question.
 
 ### The week strip should be the navigation
-`WeekStrip` renders seven dots you cannot touch, while `planWeek` already returns
-a full `DayPlan` for all seven days — the data is there and unused. Meanwhile the
-AM/PM switch is a `GhostButton` at the bottom of `/today`, below the week strip
-and the check-in, after a full scroll. Tap a day to see that day, tap today to
-toggle AM/PM, delete the button. One fewer control, strictly more capability.
+Done. `WeekStrip` takes `selected` and `onSelectDay`; each day is a `Pressable`
+with a role, a selected state and a label carrying the weekday plus that day's
+evening headline. `/today` holds a `viewingDate`, reset on focus, and the
+"Show tonight instead" button is gone — tapping the day already open flips
+morning/evening.
+
+**A future day is preview-only, and that is load-bearing.** Journal entries are
+keyed by calendar date, and both `adherenceRate` and `rampWeekFor` read back from
+them, so ticking Thursday off on Monday would advance the ramp on a claim that
+had not happened. Four things stop it: `onToggle` and `onFeel` return early
+unless `isToday`, the step rows are `disabled`, the check-in card is not
+rendered, and both writes target `date` rather than `viewingDate` so even a
+bypassed guard could not reach a future day. `planWeek` also runs against today
+rather than the viewed day, so browsing cannot make the ramp week jump.
+
+Back-filling yesterday is deliberately **not** supported. It would inflate the
+adherence rate, which gates whether the routine is allowed to get *stronger*; the
+existing comment in `journal.ts` is explicit that under-counting is the safe
+direction to be wrong in.
 
 ### `/compare` is still hard to reach
-`/today` now offers a re-capture once the ramp completes, which is the first path
-that does not require going through `/plan` -> "Your photos" -> "See what
-changed" and knowing about an unstated `sessionCount >= 2` condition. That is a
-start, not a fix. The verdict screen is the retention payoff and the whole bet of
-the product — that "we couldn't measure this" reads as integrity rather than
-breakage — and that bet is untested while most users never reach the screen.
+Done enough. `/today` now links to it directly once two capture sessions exist,
+and separately offers a re-capture when the ramp reaches full strength. It is no
+longer three levels deep behind `/plan` -> "Your photos" -> "See what changed",
+gated on a session count the user was never told about.
+
+What is still untested is the bet itself: whether "we couldn't measure this"
+reads as integrity or as the app looking broken. That needs people, not code.
 
 ### Dynamic Type
 `AppText` sets fixed `fontSize` from tokens against fixed-height layouts (56px

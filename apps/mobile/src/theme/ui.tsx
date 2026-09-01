@@ -4,7 +4,7 @@
  * marketing site stay consistent. Headlines use the Fraunces serif; body + UI
  * use Inter (loaded in the root layout, resolved per-weight in ./fonts).
  */
-import type { ReactNode, RefObject } from "react";
+import { useState, type ReactNode, type RefObject } from "react";
 import {
   Pressable,
   ScrollView,
@@ -247,6 +247,91 @@ export function Divider() {
 }
 
 /**
+ * A section that opens.
+ *
+ * /plan carries the only user-visible trace of the three engines — the
+ * assessment's per-concern confidence, what it could not see, and every
+ * SafetyAdjustment. All of it matters and almost none of it is wanted on first
+ * look, which is exactly the shape progressive disclosure is for.
+ *
+ * There is no height animation on purpose. Measuring and tweening a variable
+ * body is a pile of machinery whose entire payoff is a slide, and skipping it
+ * also skips the reduced-motion question. Mounting the children when open is the
+ * whole job.
+ *
+ * The state has to be announced, not just drawn: a chevron that rotates tells a
+ * sighted user everything and a screen-reader user nothing. That is the same
+ * failure the accessibility pass just fixed everywhere else.
+ */
+export function Disclosure({
+  title,
+  summary,
+  defaultOpen = false,
+  children,
+}: {
+  title: string;
+  /** One line under the title, visible whether or not the section is open. */
+  summary?: string;
+  defaultOpen?: boolean;
+  children: ReactNode;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <View style={styles.card}>
+      <Pressable
+        onPress={() => setOpen((o) => !o)}
+        accessibilityRole="button"
+        accessibilityState={{ expanded: open }}
+        // react-native-web has no handler for the accessibilityState object, so
+        // the DOM needs this spelled out. Harmless on native.
+        aria-expanded={open}
+        style={({ pressed }) => [styles.disclosureHeader, pressed && { opacity: 0.6 }]}
+      >
+        <View style={styles.flex}>
+          <AppText variant="heading">{title}</AppText>
+          {summary ? (
+            <AppText variant="caption" color={colors.inkMuted}>
+              {summary}
+            </AppText>
+          ) : null}
+        </View>
+        <Chevron open={open} />
+      </Pressable>
+      {open ? <View style={styles.disclosureBody}>{children}</View> : null}
+    </View>
+  );
+}
+
+/**
+ * Two rules meeting at a point, rotated. Same reasoning as CheckCircle's tick:
+ * no icon dependency, crisp at any size, exactly the brand green. Decorative —
+ * the header that owns it carries the role and the expanded state.
+ */
+function Chevron({ open }: { open: boolean }) {
+  const rule = {
+    position: "absolute" as const,
+    width: 9,
+    height: 1.5,
+    borderRadius: 1,
+    backgroundColor: colors.primary,
+  };
+  return (
+    <View
+      accessible={false}
+      importantForAccessibility="no"
+      style={{ width: 16, height: 16, justifyContent: "center", alignItems: "center" }}
+    >
+      <View
+        style={[rule, { left: 0, transform: [{ rotate: open ? "-45deg" : "45deg" }] }]}
+      />
+      <View
+        style={[rule, { right: 0, transform: [{ rotate: open ? "45deg" : "-45deg" }] }]}
+      />
+    </View>
+  );
+}
+
+/**
  * Minimum comfortable touch target, in points.
  *
  * The chip already reached exactly this by arithmetic — 12pt of padding either
@@ -325,4 +410,12 @@ const styles = StyleSheet.create({
   dotActive: { backgroundColor: colors.primary, width: 20 },
   dotInactive: { backgroundColor: colors.hairline },
   divider: { height: 1, backgroundColor: colors.hairline },
+  disclosureHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: spacing.md,
+    minHeight: TAP_TARGET,
+  },
+  disclosureBody: { gap: spacing.md, marginTop: spacing.xs },
 });

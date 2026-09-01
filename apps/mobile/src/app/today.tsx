@@ -33,6 +33,7 @@ import { CheckCircle } from "@/components/CheckCircle";
 import { completed, selected, tapped } from "@/lib/feedback";
 import { WeekStrip } from "@/components/WeekStrip";
 import { buildIntake } from "@/lib/intake";
+import { listSessions } from "@/lib/photos";
 import {
   checkInFor,
   completedSteps,
@@ -102,6 +103,14 @@ export default function Today() {
   const { data } = useOnboarding();
   const [journal, setJournal] = useState(() => readJournal());
   const [time, setTime] = useState<RoutineTime>(() => currentSession());
+  /**
+   * The day being shown. Defaults to today and usually stays there; the week
+   * strip moves it so "what's on Thursday?" is answerable without leaving the
+   * screen the user already opened.
+   */
+  const [viewingDate, setViewingDate] = useState(() => todayDate());
+  /** Two capture sessions is what makes /compare able to say anything at all. */
+  const [sessionCount] = useState(() => listSessions().length);
 
   const date = todayDate();
   const intake = useMemo(() => buildIntake(data), [data]);
@@ -112,6 +121,7 @@ export default function Today() {
     useCallback(() => {
       setJournal(readJournal());
       setTime(currentSession());
+      setViewingDate(todayDate());
     }, []),
   );
 
@@ -124,15 +134,32 @@ export default function Today() {
   );
 
   const ctx = useMemo(
+    () => ({ startedOn: journal.startedOn, on: viewingDate, checkIns: journal.checkIns }),
+    [journal.startedOn, journal.checkIns, viewingDate],
+  );
+
+  /**
+   * Only today can be written to.
+   *
+   * Every journal entry is keyed by calendar date, and the ramp and the
+   * adherence rate both read back from it. Ticking Thursday off on Monday would
+   * put a claim in that record that had not happened yet — the routine would
+   * then advance its ramp on the strength of it. Other days are readable, and
+   * that is all they are.
+   */
+  const isToday = viewingDate === date;
+
+  const day = useMemo(() => planDay(routine, intake, ctx), [routine, intake, ctx]);
+  // The strip always shows the week the user is actually in, so browsing to
+  // another day cannot make the ramp week or the session count jump around.
+  const weekCtx = useMemo(
     () => ({ startedOn: journal.startedOn, on: date, checkIns: journal.checkIns }),
     [journal.startedOn, journal.checkIns, date],
   );
-
-  const day = useMemo(() => planDay(routine, intake, ctx), [routine, intake, ctx]);
-  const week = useMemo(() => planWeek(routine, intake, ctx), [routine, intake, ctx]);
+  const week = useMemo(() => planWeek(routine, intake, weekCtx), [routine, intake, weekCtx]);
 
   const session = time === "AM" ? day.am : day.pm;
-  const done = completedSteps(journal, date, time);
+  const done = completedSteps(journal, viewingDate, time);
   const allDone = session.steps.length > 0 && done.length >= session.steps.length;
   const atFullStrength = week.rampWeek >= week.rampWeeks;
   const doneThisWeek = sessionsBetween(
@@ -144,6 +171,7 @@ export default function Today() {
 
   const onToggle = useCallback(
     (order: number) => {
+      if (!isToday) return;
       const next = toggleStep(date, time, order, session.steps.length);
       // Finishing gets its own feedback. The last tap of a session should not
       // feel like the third one — it is the moment the routine is done.
@@ -152,34 +180,48 @@ export default function Today() {
       else tapped();
       setJournal(next);
     },
-    [date, time, session.steps.length],
+    [date, time, session.steps.length, isToday],
   );
 
-  const onFeel = useCallback((feel: SkinFeel) => {
-    selected();
-    setJournal(recordCheckIn(date, feel));
-  }, [date]);
+  const onFeel = useCallback(
+    (feel: SkinFeel) => {
+      if (!isToday) return;
+      selected();
+      setJournal(recordCheckIn(date, feel));
+    },
+    [date, isToday],
+  );
 
   return (
     <Screen contentStyle={{ paddingTop: spacing.lg }}>
       <View style={{ gap: spacing.xxs }}>
         <AppText variant="label" color={colors.primary}>
-          {`${weekdayName(date).toUpperCase()} · ${time === "AM" ? "MORNING" : "EVENING"}`}
+          {`${(isToday ? "Today" : weekdayName(viewingDate)).toUpperCase()} · ${time === "AM" ? "MORNING" : "EVENING"}`}
         </AppText>
         <AppText variant="title">{session.headline}</AppText>
-        {doneThisWeek > 0 && (
+        {isToday ? (
+          doneThisWeek > 0 && (
+            <AppText variant="caption" color={colors.inkMuted}>
+              {`${doneThisWeek} ${doneThisWeek === 1 ? "session" : "sessions"} done this week.`}
+            </AppText>
+          )
+        ) : (
           <AppText variant="caption" color={colors.inkMuted}>
-            {`${doneThisWeek} ${doneThisWeek === 1 ? "session" : "sessions"} done this week.`}
+            A look ahead. You tick steps off on the day itself.
           </AppText>
         )}
       </View>
 
       <Card elevated>
         <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "baseline" }}>
-          <AppText variant="heading">{allDone ? "Done for now" : "Do this now"}</AppText>
-          <AppText variant="caption" color={colors.inkMuted}>
-            {`${done.length} of ${session.steps.length}`}
+          <AppText variant="heading">
+            {!isToday ? "What's on this day" : allDone ? "Done for now" : "Do this now"}
           </AppText>
+          {isToday && (
+            <AppText variant="caption" color={colors.inkMuted}>
+              {`${done.length} of ${session.steps.length}`}
+            </AppText>
+          )}
         </View>
 
         <View style={{ marginTop: spacing.xs }}>
@@ -190,8 +232,9 @@ export default function Today() {
                 {i > 0 && <Divider />}
                 <Pressable
                   onPress={() => onToggle(step.order)}
-                  accessibilityRole="checkbox"
-                  accessibilityState={{ checked }}
+                  disabled={!isToday}
+                  accessibilityRole={isToday ? "checkbox" : "text"}
+                  accessibilityState={isToday ? { checked } : undefined}
                   accessibilityLabel={`${stepLabel(step)}. ${step.rationale}`}
                   style={({ pressed }) => [
                     {
@@ -240,7 +283,16 @@ export default function Today() {
       )}
 
       <Card>
-        <WeekStrip week={week} today={date} />
+        <WeekStrip
+          week={week}
+          today={date}
+          selected={viewingDate}
+          // Tapping the day already open flips morning/evening — the switch
+          // that used to be a ghost button at the bottom of the scroll.
+          onSelectDay={(d) =>
+            d === viewingDate ? setTime(time === "AM" ? "PM" : "AM") : setViewingDate(d)
+          }
+        />
         {/*
          * The forward contract. Week 1 used to say "WEEK 1 OF 6" and nothing
          * else — no statement of what the six weeks are for, or what happens at
@@ -267,6 +319,9 @@ export default function Today() {
           halfway because their face was stinging is exactly the person whose
           report should pull the actives, and they were the one person who could
           not file it. It is always available now. */}
+      {/* Only today. "How does your skin feel?" is a statement about now; there
+          is no honest way to answer it for a day that has not happened. */}
+      {isToday && (
       <Card elevated>
         <AppText variant="heading">How does your skin feel?</AppText>
         <AppText variant="caption" color={colors.inkMuted}>
@@ -304,14 +359,16 @@ export default function Today() {
               </Pressable>
             );
           })}
-      </View>
-    </Card>
+        </View>
+      </Card>
+      )}
 
       <View style={{ gap: spacing.xs }}>
-        <GhostButton
-          label={time === "AM" ? "Show tonight instead" : "Show this morning instead"}
-          onPress={() => setTime(time === "AM" ? "PM" : "AM")}
-        />
+        {/* The verdict screen used to be three levels deep behind /plan, gated
+            on a session count the user was never told about. */}
+        {sessionCount >= 2 && (
+          <GhostButton label="See what changed" onPress={() => router.push("/compare")} />
+        )}
         <GhostButton label="Your full plan" onPress={() => router.push("/plan")} />
       </View>
     </Screen>
