@@ -158,7 +158,7 @@ export default function Intake() {
 
         <View style={{ flexDirection: "row", flexWrap: "wrap", gap: spacing.sm, marginTop: spacing.md }}>
           {REMINDER_HOURS.map((h) => (
-            <Chip key={h} label={formatHour(h)} onPress={() => void chooseReminder(h)} />
+            <Chip key={h} label={formatHour(h)} role="radio" onPress={() => void chooseReminder(h)} />
           ))}
         </View>
 
@@ -177,7 +177,7 @@ export default function Intake() {
         <Question title="What do you want to work on?" subtitle="Pick all that apply.">
           <ChipWrap>
             {GOALS.map((g) => (
-              <Chip key={g.key} label={g.label} selected={goals.includes(g.key)} onPress={() => toggleGoal(g.key)} />
+              <Chip key={g.key} label={g.label} role="checkbox" selected={goals.includes(g.key)} onPress={() => toggleGoal(g.key)} />
             ))}
           </ChipWrap>
         </Question>
@@ -187,7 +187,7 @@ export default function Intake() {
         <Question title="How does your skin usually feel?">
           <ChipWrap>
             {SKIN_TYPES.map((s) => (
-              <Chip key={s.key} label={s.label} selected={skinType === s.key} onPress={() => setSkinType(s.key)} />
+              <Chip key={s.key} label={s.label} role="radio" selected={skinType === s.key} onPress={() => setSkinType(s.key)} />
             ))}
           </ChipWrap>
         </Question>
@@ -197,7 +197,7 @@ export default function Intake() {
         <Question title="How sensitive is your skin?" subtitle="This is the biggest factor in keeping your routine safe.">
           <View style={{ gap: spacing.sm }}>
             {SENSITIVITY.map((s) => (
-              <Chip key={s.key} label={`${s.label} — ${s.hint}`} selected={sensitivity === s.key} onPress={() => setSensitivity(s.key)} />
+              <Chip key={s.key} label={`${s.label} — ${s.hint}`} role="radio" selected={sensitivity === s.key} onPress={() => setSensitivity(s.key)} />
             ))}
           </View>
         </Question>
@@ -206,8 +206,8 @@ export default function Intake() {
       {step === 3 && (
         <Question title="Are you pregnant or breastfeeding?" subtitle="Some ingredients are best avoided — we'll adjust automatically.">
           <ChipWrap>
-            <Chip label="Yes" selected={pregnant === true} onPress={() => setPregnant(true)} />
-            <Chip label="No" selected={pregnant === false} onPress={() => setPregnant(false)} />
+            <Chip label="Yes" role="radio" selected={pregnant === true} onPress={() => setPregnant(true)} />
+            <Chip label="No" role="radio" selected={pregnant === false} onPress={() => setPregnant(false)} />
           </ChipWrap>
         </Question>
       )}
@@ -222,6 +222,7 @@ export default function Intake() {
               <Chip
                 key={key}
                 label={ACTIVES[key].short}
+                role="checkbox"
                 selected={allergies?.includes(key) ?? false}
                 onPress={() => toggleAllergen(key)}
               />
@@ -229,6 +230,7 @@ export default function Intake() {
             <Chip
               label="Nothing I know of"
               tone="lavender"
+              role="checkbox"
               selected={allergies?.length === 0}
               onPress={() => setAllergies([])}
             />

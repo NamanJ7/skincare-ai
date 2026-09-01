@@ -327,6 +327,7 @@ export default function Plan() {
             <Chip
               key={h}
               label={formatHour(h)}
+              role="radio"
               selected={data.reminderHour === h}
               onPress={() => void setReminder(h)}
             />

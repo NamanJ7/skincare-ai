@@ -235,6 +235,7 @@ export default function Compare() {
           <Chip
             key={s.angle}
             label={s.angle[0]!.toUpperCase() + s.angle.slice(1)}
+            role="radio"
             selected={angle === s.angle}
             onPress={() => setAngle(s.angle)}
           />

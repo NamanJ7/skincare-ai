@@ -174,15 +174,25 @@ start, not a fix. The verdict screen is the retention payoff and the whole bet o
 the product — that "we couldn't measure this" reads as integrity rather than
 breakage — and that bet is untested while most users never reach the screen.
 
-### Dynamic Type, chip semantics, reduced motion
+### Dynamic Type
 `AppText` sets fixed `fontSize` from tokens against fixed-height layouts (56px
-step rows, a 26px `CheckCircle`, 10px week-strip dots). At 150-200% Dynamic Type
-this breaks; the worst offender is the sensitivity step in
-`onboarding/intake.tsx`, which puts "Somewhat - Some products sting or make me
-red" inside a single pill `Chip`. `Chip` also has no `accessibilityRole` or
-`accessibilityState`, so every selection in onboarding — goals, skin type,
-sensitivity, allergies, reminder hour — is invisible to a screen reader. That
-last one is the cheapest fix on this list and should probably not wait.
+step rows, a 26px `CheckCircle`, 10px week-strip dots, and the new 44pt
+`TAP_TARGET` floors). At 150-200% Dynamic Type this breaks. The worst offender is
+the sensitivity step in `onboarding/intake.tsx`, which puts "Somewhat - Some
+products sting or make me red" inside a single pill `Chip`; it wants to become a
+two-line option row rather than a pill. The `WeekStrip` is the other one — seven
+fixed-width columns with no wrap.
+
+Held back deliberately: this changes layout on two screens, and how bad it
+actually is at 200% is much better judged on a device than in a diff.
+
+Screen-reader semantics are **done** — every primitive in `theme/ui.tsx` now
+carries a role, and selection state travels as `checked` on `radio`/`checkbox`
+chips. Note for anyone extending this: react-native-web has no handler for the
+`accessibilityState` object at all (it reads `aria-*` props directly), and
+`aria-selected` is not valid on `role="button"`, so a button-role chip conveys
+nothing about being chosen on either the DOM or in an audit. Use `radio` for
+pick-one groups and `checkbox` for independent toggles.
 
 `CheckCircle` already honours `useReducedMotion`; nothing else in the app animates
 yet, but anything added in the `/plan` rework must.
