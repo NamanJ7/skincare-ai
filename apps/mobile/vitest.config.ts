@@ -1,4 +1,4 @@
-import { fileURLToPath } from "node:url";
+import { resolve } from "node:path";
 import { defineConfig } from "vitest/config";
 
 /**
@@ -13,8 +13,8 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
   resolve: {
     alias: {
-      "@": fileURLToPath(new URL("./src", import.meta.url)),
-      "expo-file-system": fileURLToPath(new URL("./src/test/expo-file-system.ts", import.meta.url)),
+      "@": resolve(__dirname, "src"),
+      "expo-file-system": resolve(__dirname, "src/test/expo-file-system.ts"),
     },
   },
   test: {

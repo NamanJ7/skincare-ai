@@ -309,13 +309,13 @@ function TodaySession({
         </Card>
       )}
 
-      <View style={{ gap: spacing.xs }}>
-        <GhostButton
-          label={time === "AM" ? "Show tonight instead" : "Show this morning instead"}
-          onPress={() => setTime(time === "AM" ? "PM" : "AM")}
-        />
-        <GhostButton label="Your full plan" onPress={() => router.push("/plan")} />
-      </View>
+      {/* "Your full plan" lived here as a second ghost button of equal weight,
+          which made the one action this screen actually offers compete with
+          navigation. Plan is a tab now. */}
+      <GhostButton
+        label={time === "AM" ? "Show tonight instead" : "Show this morning instead"}
+        onPress={() => setTime(time === "AM" ? "PM" : "AM")}
+      />
     </Screen>
   );
 }

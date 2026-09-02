@@ -39,10 +39,31 @@ import {
 } from "@/lib/journal";
 import { CAPTURE_STEPS, listSessions, sessionPhotoUri } from "@/lib/photos";
 import { useOnboarding } from "@/state/onboarding";
-import { AppText, Card, Chip, GhostButton, Screen, colors, radius, spacing } from "@/theme";
+import { AppText, Card, Chip, GhostButton, PrimaryButton, Screen, colors, radius, spacing } from "@/theme";
 
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+}
+
+/**
+ * When a second capture is worth taking.
+ *
+ * Six weeks after the first — the same horizon the schedule engine ramps over,
+ * and roughly how long skin takes to show a change that isn't just lighting.
+ * Naming the date turns "in a few weeks" into something the user can act on.
+ */
+const READY_AFTER_WEEKS = 6;
+
+function readyDate(firstCapturedAt: string): { label: string; ready: boolean; weeksAway: number } {
+  const due = new Date(firstCapturedAt);
+  due.setDate(due.getDate() + READY_AFTER_WEEKS * 7);
+  const msAway = due.getTime() - Date.now();
+  const weeksAway = Math.max(0, Math.ceil(msAway / (7 * 24 * 60 * 60 * 1000)));
+  return {
+    label: due.toLocaleDateString(undefined, { month: "long", day: "numeric" }),
+    ready: msAway <= 0,
+    weeksAway,
+  };
 }
 
 export default function Compare() {
@@ -139,15 +160,38 @@ export default function Compare() {
     );
   }
 
+  // The empty state used to be a dead end: a sentence saying "in a few weeks"
+  // with no button and no date. It now names the day and offers the action.
   if (sessions.length < 2) {
+    const first = sessions[0];
+    const due = first ? readyDate(first.capturedAt) : null;
     return (
       <Screen contentStyle={{ paddingTop: spacing.lg }}>
-        <GhostButton label="Back" onPress={() => router.back()} />
+        <AppText variant="label" color={colors.primary}>
+          PROGRESS
+        </AppText>
         <AppText variant="title">Nothing to compare yet</AppText>
         <AppText variant="body" color={colors.inkMuted}>
-          Take a second guided set in a few weeks — same screen flash, same spot — and we can measure
-          what actually changed instead of guessing at it.
+          {first
+            ? `We have your first set. Take a second one — same screen flash, same spot — and we can measure what actually changed instead of guessing at it.`
+            : "Once you've taken two guided sets a few weeks apart, this is where we measure what actually changed instead of guessing at it."}
         </AppText>
+
+        {due && (
+          <Card>
+            <AppText variant="heading">Come back on {due.label}</AppText>
+            <AppText variant="caption" color={colors.inkMuted}>
+              {due.ready
+                ? "That's now — enough has changed to be worth measuring."
+                : `That's ${due.weeksAway} ${due.weeksAway === 1 ? "week" : "weeks"} from your first set. Skin takes about that long to show a real difference, so measuring sooner mostly measures the lighting.`}
+            </AppText>
+          </Card>
+        )}
+
+        <PrimaryButton
+          label={first ? "Take my second set" : "Take my first set"}
+          onPress={() => router.push("/onboarding/photo?mode=recheck")}
+        />
       </Screen>
     );
   }
@@ -157,7 +201,6 @@ export default function Compare() {
 
   return (
     <Screen contentStyle={{ paddingTop: spacing.lg }}>
-      <GhostButton label="Back" onPress={() => router.back()} />
       <AppText variant="label" color={colors.primary}>
         PROGRESS
       </AppText>

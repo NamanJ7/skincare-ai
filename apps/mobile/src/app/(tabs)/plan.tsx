@@ -220,9 +220,9 @@ export default function Plan() {
             {photoCount} {photoCount === 1 ? "photo is" : "photos are"} saved on this phone, inside
             the app. They were never uploaded to photo storage and are not on our servers.
           </AppText>
-          {sessionCount >= 2 && (
-            <GhostButton label="See what changed" onPress={() => router.push("/compare")} />
-          )}
+          {/* "See what changed" used to live here, behind sessionCount >= 2,
+              which made the progress surface reachable only once you already
+              had something to see. It is a tab now. */}
           <GhostButton
             label="Take a new set"
             onPress={() => router.push("/onboarding/photo?mode=recheck")}
