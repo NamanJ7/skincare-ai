@@ -19,7 +19,6 @@ import {
   type PhotoQuality,
   type PlanInput,
   type PlanResult,
-  type Routine,
 } from "@pore/shared";
 import { AssessmentSchema, RoutineDraftSchema, normalizeDraft } from "./schemas";
 import { ASSESSMENT_SYSTEM, ROUTINE_SYSTEM } from "./prompts";

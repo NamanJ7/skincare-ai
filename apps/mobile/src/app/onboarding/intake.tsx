@@ -1,6 +1,6 @@
 import { router } from "expo-router";
 import { useEffect, useState, type ReactNode } from "react";
-import { ActivityIndicator, View } from "react-native";
+import { ActivityIndicator, Pressable, View } from "react-native";
 
 import type { PlanError, Sensitivity, SkinGoal, SkinType } from "@pore/shared";
 import { fetchPlan } from "@/lib/api";
@@ -17,6 +17,7 @@ import {
   ProgressDots,
   Screen,
   colors,
+  radius,
   spacing,
 } from "@/theme";
 
@@ -149,7 +150,14 @@ export default function Intake() {
         <Question title="What do you want to work on?" subtitle="Pick all that apply.">
           <ChipWrap>
             {GOALS.map((g) => (
-              <Chip key={g.key} label={g.label} selected={goals.includes(g.key)} onPress={() => toggleGoal(g.key)} />
+              <Chip
+                key={g.key}
+                label={g.label}
+                // Multi-select, so these announce as checkboxes rather than radios.
+                role="checkbox"
+                selected={goals.includes(g.key)}
+                onPress={() => toggleGoal(g.key)}
+              />
             ))}
           </ChipWrap>
         </Question>
@@ -167,10 +175,47 @@ export default function Intake() {
 
       {step === 2 && (
         <Question title="How sensitive is your skin?" subtitle="This is the biggest factor in keeping your routine safe.">
+          {/* These were pill Chips holding a full sentence ("Very — My skin
+              reacts easily and often"), which wraps badly inside a pill radius
+              and buries the answer in the hint. Full-width rows give the label
+              and its explanation their own lines. */}
           <View style={{ gap: spacing.sm }}>
-            {SENSITIVITY.map((s) => (
-              <Chip key={s.key} label={`${s.label} — ${s.hint}`} selected={sensitivity === s.key} onPress={() => setSensitivity(s.key)} />
-            ))}
+            {SENSITIVITY.map((s) => {
+              const selected = sensitivity === s.key;
+              return (
+                <Pressable
+                  key={s.key}
+                  onPress={() => setSensitivity(s.key)}
+                  accessibilityRole="radio"
+                  accessibilityState={{ selected }}
+                  accessibilityLabel={`${s.label}. ${s.hint}`}
+                  style={({ pressed }) => [
+                    {
+                      minHeight: 60,
+                      justifyContent: "center",
+                      gap: spacing.xxs,
+                      paddingVertical: spacing.sm,
+                      paddingHorizontal: spacing.md,
+                      borderRadius: radius.md,
+                      borderWidth: 1,
+                      borderColor: selected ? colors.primary : colors.hairline,
+                      backgroundColor: selected ? colors.primary : colors.surface,
+                    },
+                    pressed && { opacity: 0.7 },
+                  ]}
+                >
+                  <AppText variant="bodyStrong" color={selected ? colors.onPrimary : colors.ink}>
+                    {s.label}
+                  </AppText>
+                  <AppText
+                    variant="caption"
+                    color={selected ? colors.accent : colors.inkMuted}
+                  >
+                    {s.hint}
+                  </AppText>
+                </Pressable>
+              );
+            })}
           </View>
         </Question>
       )}

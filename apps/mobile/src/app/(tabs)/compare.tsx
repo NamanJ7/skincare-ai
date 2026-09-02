@@ -39,7 +39,18 @@ import {
 } from "@/lib/journal";
 import { CAPTURE_STEPS, listSessions, sessionPhotoUri } from "@/lib/photos";
 import { useOnboarding } from "@/state/onboarding";
-import { AppText, Card, Chip, GhostButton, PrimaryButton, Screen, colors, radius, spacing } from "@/theme";
+import {
+  AppText,
+  Card,
+  Chip,
+  GhostButton,
+  PrimaryButton,
+  Screen,
+  colors,
+  direction,
+  radius,
+  spacing,
+} from "@/theme";
 
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
@@ -293,7 +304,7 @@ function VerdictCard({ report }: { report: ProgressReport }) {
         }}
       >
         {measured.length === 0 ? (
-          <AppText variant="body" color={colors.onPrimary}>
+          <AppText variant="body" color={colors.onDark}>
             Nothing moved enough to call either way yet.
           </AppText>
         ) : (
@@ -320,30 +331,41 @@ function VerdictCard({ report }: { report: ProgressReport }) {
   );
 }
 
+/**
+ * One measured concern.
+ *
+ * "Worse" and "No change" used to render in the identical muted white, so the
+ * one screen whose entire job is communicating direction made two of its three
+ * outcomes indistinguishable. Each direction now has its own token, and the
+ * arrow means colour is not the only carrier.
+ */
 function VerdictRow({ progress, first }: { progress: ConcernProgress; first: boolean }) {
-  const improved = progress.direction === "improved";
-  const worse = progress.direction === "worse";
-  const movement = improved ? "Better" : worse ? "Worse" : "No change";
+  const movement =
+    progress.direction === "improved"
+      ? { label: "Better", mark: "↓", color: direction.improved }
+      : progress.direction === "worse"
+        ? { label: "Worse", mark: "↑", color: direction.worse }
+        : { label: "No change", mark: "–", color: direction.unchanged };
 
   return (
     <View
       style={{
         gap: spacing.xxs,
         borderTopWidth: first ? 0 : 1,
-        borderTopColor: "rgba(255,255,255,0.14)",
+        borderTopColor: colors.onDarkHairline,
         paddingTop: first ? 0 : spacing.md,
       }}
     >
       <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "baseline" }}>
-        <AppText variant="bodyStrong" color={colors.onPrimary}>
+        <AppText variant="bodyStrong" color={colors.onDark}>
           {CONCERN_LABELS[progress.concern]}
         </AppText>
-        <AppText variant="caption" color={improved ? colors.accent : "rgba(255,255,255,0.75)"}>
-          {movement}
+        <AppText variant="caption" color={movement.color}>
+          {`${movement.mark} ${movement.label}`}
         </AppText>
       </View>
       {progress.before && progress.after && (
-        <AppText variant="caption" color="rgba(255,255,255,0.75)">
+        <AppText variant="caption" color={colors.onDarkMuted}>
           {`${BAND_LABELS[progress.before] ?? progress.before} → ${BAND_LABELS[progress.after] ?? progress.after}`}
         </AppText>
       )}
