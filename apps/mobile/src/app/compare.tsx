@@ -23,10 +23,10 @@ import {
   adaptRoutine,
   compareAssessments,
   type CaptureAngle,
-  type ConcernKey,
   type ConcernProgress,
   type ProgressReport,
 } from "@pore/shared";
+import { BAND_LABELS, CONCERN_LABELS } from "@/lib/labels";
 import { fetchPlan } from "@/lib/api";
 import { buildIntake } from "@/lib/intake";
 import {
@@ -40,25 +40,6 @@ import {
 import { CAPTURE_STEPS, listSessions, sessionPhotoUri } from "@/lib/photos";
 import { useOnboarding } from "@/state/onboarding";
 import { AppText, Card, Chip, GhostButton, Screen, colors, radius, spacing } from "@/theme";
-
-const CONCERN_LABELS: Record<ConcernKey, string> = {
-  acne_like_breakouts: "Acne-like breakouts",
-  oiliness: "Oiliness",
-  dryness_flaking: "Dryness / flaking",
-  texture_congestion: "Texture & congestion",
-  uneven_tone: "Uneven tone",
-  dark_spot_appearance: "Dark-spot appearance",
-  redness_appearance: "Redness appearance",
-  fine_line_appearance: "Fine-line appearance",
-  irritation_signs: "Signs of irritation",
-};
-
-const BAND_LABELS: Record<string, string> = {
-  none: "Clear",
-  mild: "Mild",
-  moderate: "Moderate",
-  noticeable: "Noticeable",
-};
 
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
@@ -85,20 +66,18 @@ export default function Compare() {
     setAssessing(true);
     setAssessError(null);
     try {
-      const result = await fetchPlan({
-        images: photos.map((p) => ({ data: p.data, mediaType: "image/jpeg" })),
+      const outcome = await fetchPlan({
+        images: photos.map((p) => ({ data: p.data, mediaType: "image/jpeg", quality: p.quality })),
         intake: buildIntake(data),
       });
-      if (!result) {
-        setAssessError(
-          "We couldn't reach the assessment service, so your photos are saved but not measured yet. Try again when you're back online.",
-        );
+      if (!outcome.ok) {
+        setAssessError(`${outcome.error.message} Your photos are saved either way.`);
         return;
       }
       const recorded = recordAssessment({
         sessionId: sessions[0]?.id ?? "current",
         capturedAt: photos[0]?.capturedAt ?? new Date().toISOString(),
-        assessment: result.assessment,
+        assessment: outcome.plan.assessment,
       });
 
       // Measure, then adapt — once, here, at the moment the reading lands.

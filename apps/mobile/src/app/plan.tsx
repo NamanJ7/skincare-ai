@@ -1,67 +1,23 @@
-import { router } from "expo-router";
-import { useMemo, useState } from "react";
+import { router, useFocusEffect } from "expo-router";
+import { useCallback, useMemo, useState } from "react";
 import { Alert, Pressable, View } from "react-native";
 
-import {
-  ACTIVES,
-  applySafetyRules,
-  type ConcernKey,
-  type ProductCategory,
-  type Routine,
-  type RoutineStep,
-} from "@pore/shared";
-import { buildIntake } from "@/lib/intake";
+import { ACTIVES, ASSESSMENT_DISCLAIMER, type RoutineStep } from "@pore/shared";
 import { eraseRecord, readJournal, recordedDays } from "@/lib/journal";
+import { CATEGORY_LABELS, CONCERN_LABELS, frequencyLabel } from "@/lib/labels";
 import { deleteStoredPhotos, listSessions, storedPhotoCount } from "@/lib/photos";
 import { useOnboarding } from "@/state/onboarding";
-import { AppText, Card, Chip, Divider, GhostButton, Screen, colors, spacing } from "@/theme";
-
-const CATEGORY_LABELS: Record<ProductCategory, string> = {
-  cleanser: "Cleanser",
-  treatment: "Treatment",
-  serum: "Serum",
-  moisturizer: "Moisturizer",
-  sunscreen: "Sunscreen (SPF)",
-  exfoliant: "Exfoliant",
-  spot_treatment: "Spot treatment",
-};
-
-const CONCERN_LABELS: Record<ConcernKey, string> = {
-  acne_like_breakouts: "Acne-like breakouts",
-  oiliness: "Oiliness",
-  dryness_flaking: "Dryness / flaking",
-  texture_congestion: "Texture & congestion",
-  uneven_tone: "Uneven tone",
-  dark_spot_appearance: "Dark-spot appearance",
-  redness_appearance: "Redness appearance",
-  fine_line_appearance: "Fine-line appearance",
-  irritation_signs: "Signs of irritation",
-};
-
-/** Local fallback draft (over-loaded on purpose so the safety engine acts). */
-function draftRoutine(): Routine {
-  const step = (
-    order: number,
-    category: ProductCategory,
-    active: RoutineStep["active"],
-    frequencyPerWeek: number,
-    rationale: string,
-  ): RoutineStep => ({ order, category, active, frequencyPerWeek, rationale, irritationRisk: "medium" });
-  return {
-    am: [
-      step(1, "cleanser", undefined, 7, "Start clean without stripping your skin."),
-      step(2, "serum", "vitamin_c", 7, "Brightens and helps even out tone over time."),
-      step(3, "moisturizer", undefined, 7, "Locks in hydration and supports your barrier."),
-    ],
-    pm: [
-      step(1, "cleanser", undefined, 7, "Remove the day's oil and sunscreen."),
-      step(2, "exfoliant", "salicylic_acid", 4, "Helps clear pores and reduce breakouts."),
-      step(3, "exfoliant", "glycolic_acid", 4, "Smooths texture and fades marks."),
-      step(4, "treatment", "retinoid", 7, "Boosts cell turnover for texture and marks."),
-    ],
-    notes: ["Patch-test any new active for a few days before full use."],
-  };
-}
+import {
+  AppText,
+  Card,
+  Chip,
+  Divider,
+  GhostButton,
+  PrimaryButton,
+  Screen,
+  colors,
+  spacing,
+} from "@/theme";
 
 /** Plain-language band for a 0..1 confidence, so the number is not the whole story. */
 function confidenceLabel(c: number): string {
@@ -73,8 +29,20 @@ function confidenceLabel(c: number): string {
 export default function Plan() {
   const { data, update } = useOnboarding();
   const [photoCount, setPhotoCount] = useState(() => storedPhotoCount());
-  const [sessionCount] = useState(() => listSessions().length);
+  const [sessionCount, setSessionCount] = useState(() => listSessions().length);
   const [journalDays, setJournalDays] = useState(() => recordedDays(readJournal()));
+
+  // These were read once in useState initialisers and never again, so taking a
+  // new photo set and coming back showed the old counts — and hid the "See what
+  // changed" button that the new set had just unlocked. today.tsx already reads
+  // on focus; this screen now does too.
+  useFocusEffect(
+    useCallback(() => {
+      setPhotoCount(storedPhotoCount());
+      setSessionCount(listSessions().length);
+      setJournalDays(recordedDays(readJournal()));
+    }, []),
+  );
 
   function confirmEraseJournal() {
     Alert.alert(
@@ -124,36 +92,42 @@ export default function Plan() {
     );
   }
 
-  // Prefer the server-generated plan; otherwise run the engine locally so the
-  // screen still demonstrates the full flow offline.
+  // No local fallback. This screen used to synthesise a routine and three
+  // invented findings ("Acne-like breakouts · moderate") whenever the real plan
+  // was missing, and present them as the user's assessment. A plan we did not
+  // build is not a plan we get to show.
   const view = useMemo(() => {
-    if (data.plan) {
-      const a = data.plan.assessment;
-      return {
-        concerns: a.findings
-          .filter((f) => f.present)
-          .map((f) => `${CONCERN_LABELS[f.concern]} · ${f.appearanceLevel}`),
-        summary: a.summary,
-        escalate: a.escalation.recommendProfessional,
-        confidence: a.overallConfidence,
-        limitations: a.limitations,
-        photoQuality: a.photoQuality,
-        routine: data.plan.routine,
-        adjustments: data.plan.adjustments,
-      };
-    }
-    const { routine, adjustments } = applySafetyRules(draftRoutine(), buildIntake(data));
+    if (!data.plan) return null;
+    const a = data.plan.assessment;
     return {
-      concerns: ["Acne-like breakouts · moderate", "Dark-spot appearance · mild", "Oiliness · noticeable"],
-      summary: "A simple routine built around your skin — with only the steps you actually need.",
-      escalate: false,
-      confidence: null,
-      limitations: [],
-      photoQuality: [],
-      routine,
-      adjustments,
+      concerns: a.findings
+        .filter((f) => f.present)
+        .map((f) => `${CONCERN_LABELS[f.concern]} · ${f.appearanceLevel}`),
+      summary: a.summary,
+      escalate: a.escalation.recommendProfessional,
+      confidence: a.overallConfidence,
+      limitations: a.limitations,
+      photoQuality: a.photoQuality,
+      routine: data.plan.routine,
+      adjustments: data.plan.adjustments,
     };
-  }, [data]);
+  }, [data.plan]);
+
+  if (!view) {
+    return (
+      <Screen contentStyle={{ paddingTop: spacing.lg }}>
+        <AppText variant="label" color={colors.primary}>
+          YOUR FULL PLAN
+        </AppText>
+        <AppText variant="title">Nothing to show yet</AppText>
+        <AppText variant="body" color={colors.inkMuted}>
+          Your assessment and routine live here once they&apos;ve been built. It takes three photos
+          and four questions.
+        </AppText>
+        <PrimaryButton label="Build my routine" onPress={() => router.push("/onboarding/photo")} />
+      </Screen>
+    );
+  }
 
   return (
     <Screen contentStyle={{ paddingTop: spacing.lg }}>
@@ -215,15 +189,9 @@ export default function Plan() {
       <RoutineCard title="Morning" steps={view.routine.am} />
       <RoutineCard title="Evening" steps={view.routine.pm} />
 
-      <Card>
-        <AppText variant="caption" color={colors.inkMuted}>
-          These are the steps and weekly frequencies your routine is built from. Which of them you
-          do on any given day is worked out for you on Today — you never have to plan a night
-          yourself.
-        </AppText>
-        <GhostButton label="Back to today" onPress={() => router.replace("/today")} />
-      </Card>
-
+      {/* Moved directly under the routine it explains. This card is the whole
+          trust argument of the product, and it used to sit below a "Back to
+          today" button, so the people most likely to want it never reached it. */}
       {view.adjustments.length > 0 && (
         <Card>
           <AppText variant="heading">What Pore adjusted to keep you safe</AppText>
@@ -236,6 +204,14 @@ export default function Plan() {
           </View>
         </Card>
       )}
+
+      <Card>
+        <AppText variant="caption" color={colors.inkMuted}>
+          These are the steps and weekly frequencies your routine is built from. Which of them you
+          do on any given day is worked out for you on Today — you never have to plan a night
+          yourself.
+        </AppText>
+      </Card>
 
       {photoCount > 0 && (
         <Card>
@@ -269,8 +245,7 @@ export default function Plan() {
 
       <Card>
         <AppText variant="caption" color={colors.inkMuted}>
-          Pore offers cosmetic skincare guidance, not medical advice. If something looks painful, is bleeding,
-          spreading quickly, or isn&apos;t improving, please check in with a pharmacist or doctor.
+          {ASSESSMENT_DISCLAIMER}
         </AppText>
         <Pressable
           onPress={() => router.push("/legal/terms")}
@@ -303,7 +278,7 @@ function RoutineCard({ title, steps }: { title: string; steps: RoutineStep[] }) 
                 {s.order}. {s.active ? ACTIVES[s.active].label : CATEGORY_LABELS[s.category]}
               </AppText>
               <AppText variant="caption" color={colors.primary}>
-                {s.frequencyPerWeek >= 7 ? "Daily" : `${s.frequencyPerWeek}x / week`}
+                {frequencyLabel(s.frequencyPerWeek)}
               </AppText>
             </View>
             <AppText variant="caption" color={colors.inkMuted}>

@@ -16,16 +16,13 @@ import { useCallback, useMemo, useState } from "react";
 import { Pressable, View } from "react-native";
 
 import {
-  ACTIVES,
-  applySafetyRules,
   currentSession,
   planDay,
   planWeek,
   today as todayDate,
   weekdayName,
-  type ProductCategory,
+  type IntakeResponse,
   type Routine,
-  type RoutineStep,
   type RoutineTime,
   type SkinFeel,
 } from "@pore/shared";
@@ -39,63 +36,27 @@ import {
   recordCheckIn,
   streakDays,
   toggleStep,
+  type Journal,
 } from "@/lib/journal";
+import { stepLabel } from "@/lib/labels";
 import { useOnboarding } from "@/state/onboarding";
 import {
   AppText,
   Card,
   Divider,
   GhostButton,
+  PrimaryButton,
   Screen,
   colors,
   radius,
   spacing,
 } from "@/theme";
 
-const CATEGORY_LABELS: Record<ProductCategory, string> = {
-  cleanser: "Cleanser",
-  treatment: "Treatment",
-  serum: "Serum",
-  moisturizer: "Moisturizer",
-  sunscreen: "Sunscreen (SPF)",
-  exfoliant: "Exfoliant",
-  spot_treatment: "Spot treatment",
-};
-
 const FEELS: { feel: SkinFeel; label: string }[] = [
   { feel: "calm", label: "Calm" },
   { feel: "tight", label: "Tight" },
   { feel: "stinging", label: "Stinging" },
 ];
-
-/** Same over-loaded draft the plan screen uses, so the engine has work to do. */
-function draftRoutine(): Routine {
-  const step = (
-    order: number,
-    category: ProductCategory,
-    active: RoutineStep["active"],
-    frequencyPerWeek: number,
-    rationale: string,
-  ): RoutineStep => ({ order, category, active, frequencyPerWeek, rationale, irritationRisk: "medium" });
-  return {
-    am: [
-      step(1, "cleanser", undefined, 7, "Start clean without stripping your skin."),
-      step(2, "serum", "vitamin_c", 7, "Brightens and helps even out tone over time."),
-      step(3, "moisturizer", undefined, 7, "Locks in hydration and supports your barrier."),
-    ],
-    pm: [
-      step(1, "cleanser", undefined, 7, "Remove the day's oil and sunscreen."),
-      step(2, "exfoliant", "salicylic_acid", 4, "Helps clear pores and reduce breakouts."),
-      step(3, "exfoliant", "glycolic_acid", 4, "Smooths texture and fades marks."),
-      step(4, "treatment", "retinoid", 7, "Boosts cell turnover for texture and marks."),
-    ],
-    notes: ["Patch-test any new active for a few days before full use."],
-  };
-}
-
-function stepLabel(step: RoutineStep): string {
-  return step.active ? ACTIVES[step.active].short : CATEGORY_LABELS[step.category];
-}
 
 export default function Today() {
   const { data } = useOnboarding();
@@ -115,13 +76,65 @@ export default function Today() {
   );
 
   // Precedence: a routine the progress engine has already adapted beats the one
-  // generated at signup, which beats a locally clamped draft. Once a measured
-  // re-assessment has moved a frequency, that is the routine the user is on.
-  const routine = useMemo(
-    () => journal.routine ?? data.plan?.routine ?? applySafetyRules(draftRoutine(), intake).routine,
-    [journal.routine, data.plan, intake],
-  );
+  // generated at signup. There is deliberately no third fallback — this screen
+  // used to synthesise a demo routine when both were missing and present it as
+  // the user's own, which turned every failure upstream into a silent one.
+  const routine = journal.routine ?? data.plan?.routine;
 
+  if (!routine) return <NoRoutineYet />;
+  return (
+    <TodaySession
+      routine={routine}
+      journal={journal}
+      setJournal={setJournal}
+      time={time}
+      setTime={setTime}
+      date={date}
+      intake={intake}
+    />
+  );
+}
+
+/**
+ * What the screen shows when there is no routine to show.
+ *
+ * Reachable if generation failed, or the record was erased. Naming that plainly
+ * and offering the way forward beats the old behaviour, which was to render a
+ * hardcoded sample routine as though it had been built for this person.
+ */
+function NoRoutineYet() {
+  return (
+    <Screen contentStyle={{ paddingTop: spacing.lg }}>
+      <AppText variant="label" color={colors.primary}>
+        NOT READY YET
+      </AppText>
+      <AppText variant="title">Your routine isn&apos;t built</AppText>
+      <AppText variant="body" color={colors.inkMuted}>
+        We don&apos;t have a finished plan for you on this phone. Three photos and four questions is
+        all it takes, and we&apos;ll keep the answers you already gave.
+      </AppText>
+      <PrimaryButton label="Build my routine" onPress={() => router.push("/onboarding/photo")} />
+    </Screen>
+  );
+}
+
+function TodaySession({
+  routine,
+  journal,
+  setJournal,
+  time,
+  setTime,
+  date,
+  intake,
+}: {
+  routine: Routine;
+  journal: Journal;
+  setJournal: (j: Journal) => void;
+  time: RoutineTime;
+  setTime: (t: RoutineTime) => void;
+  date: string;
+  intake: IntakeResponse;
+}) {
   const ctx = useMemo(
     () => ({ startedOn: journal.startedOn, on: date, checkIns: journal.checkIns }),
     [journal.startedOn, journal.checkIns, date],
@@ -133,15 +146,20 @@ export default function Today() {
   const session = time === "AM" ? day.am : day.pm;
   const done = completedSteps(journal, date, time);
   const allDone = session.steps.length > 0 && done.length >= session.steps.length;
+  const started = done.length > 0;
   const streak = streakDays(journal, date);
   const feeling = checkInFor(journal, date);
+  const evening = time === "PM";
 
   const onToggle = useCallback(
     (order: number) => setJournal(toggleStep(date, time, order, session.steps.length)),
-    [date, time, session.steps.length],
+    [date, time, session.steps.length, setJournal],
   );
 
-  const onFeel = useCallback((feel: SkinFeel) => setJournal(recordCheckIn(date, feel)), [date]);
+  const onFeel = useCallback(
+    (feel: SkinFeel) => setJournal(recordCheckIn(date, feel)),
+    [date, setJournal],
+  );
 
   return (
     <Screen contentStyle={{ paddingTop: spacing.lg }}>
@@ -150,9 +168,12 @@ export default function Today() {
           {`${weekdayName(date).toUpperCase()} · ${time === "AM" ? "MORNING" : "EVENING"}`}
         </AppText>
         <AppText variant="title">{session.headline}</AppText>
-        {streak >= 2 && (
+        {/* The first completed day used to pass in silence (streak >= 2), which
+            is exactly the moment someone decides whether this is a thing they
+            do now. Day one gets acknowledged. */}
+        {streak >= 1 && (
           <AppText variant="caption" color={colors.inkMuted}>
-            {`${streak} days in a row.`}
+            {streak === 1 ? "First day done." : `${streak} days in a row.`}
           </AppText>
         )}
       </View>
@@ -164,6 +185,15 @@ export default function Today() {
             {`${done.length} of ${session.steps.length}`}
           </AppText>
         </View>
+        {/* Finishing used to just stop. Saying what comes next is the difference
+            between an ending and a loop. */}
+        {allDone && (
+          <AppText variant="caption" color={colors.inkMuted}>
+            {evening
+              ? "That's tonight finished. Next up is tomorrow morning."
+              : "That's this morning finished. Next up is tonight."}
+          </AppText>
+        )}
 
         <View style={{ marginTop: spacing.xs }}>
           {session.steps.map((step, i) => {
@@ -211,7 +241,10 @@ export default function Today() {
 
       {session.notes.length > 0 && (
         <Card>
-          <AppText variant="heading">Why tonight looks like this</AppText>
+          {/* Was hardcoded to "tonight", so it said so at eight in the morning. */}
+          <AppText variant="heading">
+            {evening ? "Why tonight looks like this" : "Why this morning looks like this"}
+          </AppText>
           <View style={{ gap: spacing.xs, marginTop: spacing.xxs }}>
             {session.notes.map((note, i) => (
               <AppText key={`${note.id}-${i}`} variant="caption" color={colors.ink}>
@@ -227,8 +260,14 @@ export default function Today() {
       </Card>
 
       {/* The single question the product asks. One tap, and it is what moves the
-          ramp forward or pulls it back — so the answer is never cosmetic. */}
-      {(allDone || feeling) && (
+          ramp forward or pulls it back — so the answer is never cosmetic.
+
+          This used to be gated on `allDone || feeling`, so someone who did three
+          of four steps was never asked. The schedule engine reads a week with no
+          check-ins as calm and advances the ramp on it, which meant Pore was
+          escalating actives on the strength of an answer it had never shown the
+          user. Anyone who has started the session can answer it. */}
+      {(started || allDone || feeling) && (
         <Card elevated>
           <AppText variant="heading">How does your skin feel?</AppText>
           <AppText variant="caption" color={colors.inkMuted}>

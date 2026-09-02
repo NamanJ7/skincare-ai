@@ -26,6 +26,21 @@ import type { LegalDocument } from "./types";
 export const MEDICAL_DISCLAIMER =
   "Pore provides skincare education and routine guidance and is not a substitute for professional medical advice.";
 
+/**
+ * The longer disclaimer that travels with an assessment.
+ *
+ * Distinct from MEDICAL_DISCLAIMER above, which is the one-line version used in
+ * the legal documents. This one carries the escalation advice, so it belongs
+ * anywhere a user is being told what their skin looks like.
+ *
+ * It lived in three places — apps/web/lib/mock.ts, apps/mobile plan.tsx, and
+ * the assessment prompt — and had already drifted between them ("not a medical
+ * diagnosis" vs "not medical advice"). Safety copy is the last thing that
+ * should be maintained by copy-paste.
+ */
+export const ASSESSMENT_DISCLAIMER =
+  "Pore offers cosmetic skincare guidance, not medical advice. If something looks painful, is bleeding, spreading quickly, or isn't improving, please check in with a pharmacist or doctor.";
+
 /** Where privacy and legal questions go. Matches the /contact page. */
 export const LEGAL_CONTACT_EMAIL = "reachporeai@gmail.com";
 

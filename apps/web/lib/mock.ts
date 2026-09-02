@@ -4,10 +4,14 @@
  * over-loaded (two acids at night, a daily retinoid, no SPF) so the real safety
  * engine has visible work to do.
  */
-import type { Assessment, CaptureAngle, IntakeResponse, PhotoQuality, Routine } from "@pore/shared";
-
-const DISCLAIMER =
-  "Pore offers cosmetic skincare guidance, not a medical diagnosis. If something looks painful, is bleeding, spreading quickly, or isn't improving, please check in with a pharmacist or doctor.";
+import {
+  ASSESSMENT_DISCLAIMER,
+  type Assessment,
+  type CaptureAngle,
+  type IntakeResponse,
+  type PhotoQuality,
+  type Routine,
+} from "@pore/shared";
 
 const ANGLES: CaptureAngle[] = ["front", "left", "right"];
 
@@ -61,7 +65,7 @@ export function mockAssessment(
     limitations,
     summary:
       "Your skin looks like it's dealing with some everyday breakouts and a little leftover marking — both very common and very workable. A simple, consistent routine will go a long way here.",
-    disclaimer: DISCLAIMER,
+    disclaimer: ASSESSMENT_DISCLAIMER,
   };
 }
 
