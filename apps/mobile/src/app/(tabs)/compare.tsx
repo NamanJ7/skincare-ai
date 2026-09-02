@@ -15,8 +15,8 @@
  * the point.
  */
 import { Image } from "expo-image";
-import { router, useLocalSearchParams } from "expo-router";
-import { useCallback, useEffect, useState } from "react";
+import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ActivityIndicator, View } from "react-native";
 
 import {
@@ -80,11 +80,31 @@ function readyDate(firstCapturedAt: string): { label: string; ready: boolean; we
 export default function Compare() {
   const { mode } = useLocalSearchParams<{ mode?: string }>();
   const { data } = useOnboarding();
-  const [sessions] = useState(() => listSessions());
+  const [sessions, setSessions] = useState(() => listSessions());
   const [journal, setJournal] = useState<Journal>(() => readJournal());
   const [angle, setAngle] = useState<CaptureAngle>("front");
   const [assessing, setAssessing] = useState(false);
   const [assessError, setAssessError] = useState<string | null>(null);
+  /**
+   * Guards the one-shot reassessment.
+   *
+   * `runReassessment` is a useCallback over `data`, and the effect below depends
+   * on it, so anything that changes the onboarding object would re-fire it —
+   * paying for a second Opus call and, worse, recording a second assessment
+   * that `adaptRoutine` would then step the routine up against. It runs once
+   * per arrival with ?mode=recheck.
+   */
+  const started = useRef(false);
+
+  // A capture session written just before we navigated here won't be in the
+  // list captured at mount, and this is a tab now, so it can be revisited
+  // without remounting at all.
+  useFocusEffect(
+    useCallback(() => {
+      setSessions(listSessions());
+      setJournal(readJournal());
+    }, []),
+  );
 
   /**
    * Re-assessment runs here rather than on the capture screen, so capture stays
@@ -140,7 +160,9 @@ export default function Compare() {
   }, [data, sessions]);
 
   useEffect(() => {
-    if (mode === "recheck") void runReassessment();
+    if (mode !== "recheck" || started.current) return;
+    started.current = true;
+    void runReassessment();
   }, [mode, runReassessment]);
 
   const { baseline, latest } = journal;

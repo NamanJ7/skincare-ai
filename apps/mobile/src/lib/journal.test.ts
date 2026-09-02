@@ -81,6 +81,25 @@ describe("onboarding answers survive a restart", () => {
   });
 });
 
+describe("allergies reach the safety engine", () => {
+  it("removes an active the user listed, end to end", () => {
+    // The engine has always had this rule; nothing ever gave it an allergy to
+    // act on, because buildIntake hardcoded an empty list and no screen asked.
+    saveOnboarding({ allergies: ["retinoid"] });
+
+    const intake = buildIntake(readJournal().intake ?? {});
+    const { routine, adjustments } = applySafetyRules(retinoidRoutine(), intake);
+
+    expect(routine.pm.some((s) => s.active === "retinoid")).toBe(false);
+    expect(adjustments.some((a) => a.rule === "allergy_removed")).toBe(true);
+  });
+
+  it("defaults to no allergies rather than dropping actives on a blank answer", () => {
+    saveOnboarding({ skinType: "oily" });
+    expect(buildIntake(readJournal().intake ?? {}).allergies).toEqual([]);
+  });
+});
+
 describe("what goes to disk", () => {
   it("never writes photo base64 into the journal", () => {
     saveOnboarding({

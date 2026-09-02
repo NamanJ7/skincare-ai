@@ -2,7 +2,14 @@ import { router } from "expo-router";
 import { useEffect, useState, type ReactNode } from "react";
 import { ActivityIndicator, Pressable, View } from "react-native";
 
-import type { PlanError, Sensitivity, SkinGoal, SkinType } from "@pore/shared";
+import {
+  ACTIVES,
+  type ActiveKey,
+  type PlanError,
+  type Sensitivity,
+  type SkinGoal,
+  type SkinType,
+} from "@pore/shared";
 import { fetchPlan } from "@/lib/api";
 import { buildIntake } from "@/lib/intake";
 import { recordAssessment } from "@/lib/journal";
@@ -45,7 +52,22 @@ const SENSITIVITY: { key: Sensitivity; label: string; hint: string }[] = [
   { key: "high", label: "Very", hint: "My skin reacts easily and often" },
 ];
 
-const STEP_COUNT = 4;
+/**
+ * The actives the safety engine can actually exclude.
+ *
+ * `applySafetyRules` removes any step whose active appears in
+ * `intake.allergies`, and CLAUDE.md lists that as one of the guarantees — but
+ * nothing ever asked, `buildIntake` hardcoded an empty list, and the privacy
+ * policy already told users "you tell us any ingredient allergies". A
+ * documented safety rule with no input path is just dead code.
+ *
+ * Sourced from ACTIVES so the options can never drift from what the engine
+ * understands: a free-text field here would produce strings that silently
+ * match nothing.
+ */
+const ALLERGENS = Object.values(ACTIVES).map((a) => ({ key: a.key, label: a.short }));
+
+const STEP_COUNT = 5;
 
 export default function Intake() {
   const { data, update } = useOnboarding();
@@ -56,15 +78,24 @@ export default function Intake() {
   const [skinType, setSkinType] = useState<SkinType | null>(null);
   const [sensitivity, setSensitivity] = useState<Sensitivity | null>(null);
   const [pregnant, setPregnant] = useState<boolean | null>(null);
+  const [allergies, setAllergies] = useState<ActiveKey[]>([]);
 
   const canAdvance =
     (step === 0 && goals.length > 0) ||
     (step === 1 && skinType !== null) ||
     (step === 2 && sensitivity !== null) ||
-    (step === 3 && pregnant !== null);
+    (step === 3 && pregnant !== null) ||
+    // Allergies are opt-in: an empty list is a real answer ("nothing comes to
+    // mind"), so this step never blocks. Making it required would trade a
+    // finished onboarding for a field most people leave empty.
+    step === 4;
 
   function toggleGoal(key: SkinGoal) {
     setGoals((prev) => (prev.includes(key) ? prev.filter((g) => g !== key) : [...prev, key]));
+  }
+
+  function toggleAllergy(key: ActiveKey) {
+    setAllergies((prev) => (prev.includes(key) ? prev.filter((a) => a !== key) : [...prev, key]));
   }
 
   const answers = {
@@ -72,6 +103,7 @@ export default function Intake() {
     skinType: skinType ?? "combination",
     sensitivity: sensitivity ?? "medium",
     pregnancyOrBreastfeeding: pregnant ?? false,
+    allergies,
   } as const;
 
   /**
@@ -225,6 +257,25 @@ export default function Intake() {
           <ChipWrap>
             <Chip label="Yes" selected={pregnant === true} onPress={() => setPregnant(true)} />
             <Chip label="No" selected={pregnant === false} onPress={() => setPregnant(false)} />
+          </ChipWrap>
+        </Question>
+      )}
+
+      {step === 4 && (
+        <Question
+          title="Anything your skin reacts to?"
+          subtitle="We'll leave these out of your routine entirely. Skip if nothing comes to mind."
+        >
+          <ChipWrap>
+            {ALLERGENS.map((a) => (
+              <Chip
+                key={a.key}
+                label={a.label}
+                role="checkbox"
+                selected={allergies.includes(a.key)}
+                onPress={() => toggleAllergy(a.key)}
+              />
+            ))}
           </ChipWrap>
         </Question>
       )}

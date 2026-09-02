@@ -369,7 +369,15 @@ export default function PhotoCapture() {
           {CAPTURE_STEPS.map((s, i) => {
             const photo = photos.find((p) => p.angle === s.angle);
             return (
-              <Pressable key={s.angle} onPress={() => retake(i)} style={{ flex: 1, gap: spacing.xxs }}>
+              <Pressable
+                key={s.angle}
+                onPress={() => retake(i)}
+                accessibilityRole="button"
+                accessibilityLabel={`Retake your ${s.angle} photo${
+                  photo?.quality.flags.length ? ", which was flagged by the quality check" : ""
+                }`}
+                style={{ flex: 1, gap: spacing.xxs }}
+              >
                 <Image
                   source={{ uri: photo?.uri }}
                   style={{ width: "100%", aspectRatio: 3 / 4, borderRadius: radius.md, backgroundColor: colors.surface }}

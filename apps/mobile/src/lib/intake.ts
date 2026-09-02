@@ -11,7 +11,9 @@ export function buildIntake(data: OnboardingData): IntakeResponse {
     skinType: data.skinType ?? "combination",
     sensitivity: data.sensitivity ?? "medium",
     currentProducts: [],
-    allergies: [],
+    // Was hardcoded to [], so the safety engine's allergy_removed rule could
+    // never fire no matter what the user had told us.
+    allergies: data.allergies ?? [],
     budget: "medium",
     fragrancePreference: "no_preference",
     pregnancyOrBreastfeeding: data.pregnancyOrBreastfeeding ?? false,
