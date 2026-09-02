@@ -8,6 +8,13 @@
  * Storage is deliberately dumb (one small JSON file, synchronous reads) and
  * every write is best-effort. Losing a check-off should never break a session —
  * the worst case is the user re-taps a step.
+ *
+ * Known limitation: expo-file-system's Directory/File API is native-only, so on
+ * the Expo *web* target every read throws and is caught, and the app behaves as
+ * a permanently fresh install. That is fine for web as a development target and
+ * would not be fine if Pore ever shipped a web build — it would need a storage
+ * adapter here first. The unit tests cover this module against an in-memory
+ * stand-in (src/test/expo-file-system.ts) precisely because the browser cannot.
  */
 import { Directory, File, Paths } from "expo-file-system";
 import {
