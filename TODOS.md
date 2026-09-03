@@ -72,12 +72,11 @@ A single local notification at the user's chosen evening time is the obvious
 partner to this screen, and it is the one place a reminder is genuinely earned
 rather than growth spam. Needs `expo-notifications`, which is not a dependency yet.
 
-### The user cannot see the ramp being held
-`rampWeekFor` silently declines to advance a week the user reported irritation in.
-That is the right behaviour and it is tested, but the UI never says it happened —
-so a user who plateaus at week 2 has no idea why. There was a `ramp_held`
-`ScheduleNote` id sketched for this and removed rather than left dead; it wants
-reinstating with real copy and a test.
+### ~~The user cannot see the ramp being held~~ — done
+`rampProgress` now reports `heldByFlare` alongside the week, and the evening
+session carries a `ramp_held` note explaining it. Only the most recent completed
+week counts, so a flare five weeks ago is not offered as an explanation for
+tonight. Covered by `schedule/engine.test.ts`.
 
 ### `/today` is verified by static render only
 The screen typechecks and renders through `expo export --platform web`, which is
@@ -128,12 +127,50 @@ lands as honesty or as the app looking broken. That second one is the whole bet.
 
 ## Housekeeping
 
-### Marketing and app parity
-Onboarding is now photo-first, which matches `apps/web/components/sections/HowItWorks.tsx`
-and `FeatureCards.tsx`. Check no other marketing copy still describes an order
-the app no longer uses.
+### ~~Marketing and app parity~~ — done, and it was worse than an ordering problem
+The site sold two features that did not exist anywhere: a "product shelf" (listed
+as a *free-tier* feature in `lib/pricing.ts`) and "smarter product guidance" with
+a routine-fit signal. It also said mobile was "coming soon" while a complete Expo
+app sat in this repo, depicted a web dashboard with a "My shelf" tab, and
+described "a picture" when the app takes three under a controlled illuminant.
+All of it now describes what actually ships — capture as an instrument, the
+deterministic clamp, the pacing, and a comparison the product refuses to fake.
+`packages/shared/src/types/product.ts` was imported by nothing and is deleted.
+
+Two things deliberately left as claims about the future, clearly marked: the
+store badges ("not on the app stores yet") and the paid tiers. A FAQ entry now
+answers "does Pore recommend specific products to buy?" with "not today".
 
 ### `apps/web` has no tests
 `packages/shared` is the only package with a test suite. The `/api/plan` input
 validation in `apps/web/app/api/plan/route.ts` is a trust boundary in front of a
 paid endpoint and is currently only covered by manual probes.
+
+## Landed in the refinement pass, still unverified on hardware
+
+Everything below typechecks, has unit tests where it is deterministic, and
+bundles through `expo export --platform web`. None of it has been in a hand.
+
+### Haptics
+`apps/mobile/src/lib/feedback.ts` wraps `expo-haptics` (new dependency, pinned to
+the SDK 56 line). Attached to: ticking a step, finishing a session (a heavier
+success), every `Chip` selection (in the primitive, not at the call sites), and
+the capture quality gate passing vs rejecting — those two look identical at arm's
+length with the screen lighting your face and mean opposite things. Confirm the
+session-complete success does not feel like a reward loop.
+
+### Native headers
+`_layout.tsx` turns the platform header on per-route, chevron only, because four
+screens had no back affordance and the ones that did hand-rolled it. Check the
+header does not crowd the screens that open at `spacing.section`, and that the
+camera and landing stay full-bleed.
+
+### The allergy step
+Onboarding is five questions now, not four. The fifth needs a real look: whether
+"Nothing I know of" reads as a valid answer rather than a skip, and whether nine
+ingredient chips is a wall of jargon to someone who has never used an active.
+
+### Reduce-motion
+The splash is skipped entirely and the hero loop parks on its results frame.
+Verify against the OS setting on both platforms — this is the one behaviour that
+cannot be checked from a bundle.
