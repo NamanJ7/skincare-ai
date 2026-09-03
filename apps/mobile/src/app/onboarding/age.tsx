@@ -1,9 +1,9 @@
 import { router } from "expo-router";
 import { useState } from "react";
-import { StyleSheet, TextInput, View } from "react-native";
+import { View } from "react-native";
 
 import { useOnboarding } from "@/state/onboarding";
-import { AppText, Card, PrimaryButton, Screen, colors, radius, spacing } from "@/theme";
+import { AppText, Card, PrimaryButton, Screen, TextField, colors, spacing } from "@/theme";
 
 export default function AgeGate() {
   const { update } = useOnboarding();
@@ -29,15 +29,16 @@ export default function AgeGate() {
         to approve.
       </AppText>
 
-      <TextInput
-        value={value}
-        onChangeText={(t) => setValue(t.replace(/[^0-9]/g, "").slice(0, 3))}
-        keyboardType="number-pad"
-        placeholder="Age"
-        placeholderTextColor={colors.inkMuted}
-        style={styles.input}
-        maxLength={3}
-      />
+      <View style={{ marginTop: spacing.sm }}>
+        <TextField
+          label="Age"
+          value={value}
+          onChangeText={(t) => setValue(t.replace(/[^0-9]/g, "").slice(0, 3))}
+          keyboardType="number-pad"
+          placeholder="e.g. 24"
+          maxLength={3}
+        />
+      </View>
 
       {blocked ? (
         <Card>
@@ -45,30 +46,16 @@ export default function AgeGate() {
             Pore is for ages 16 and up
           </AppText>
           <AppText variant="caption" color={colors.inkMuted}>
-            Thanks for your interest! For younger skin, the safest step is to talk with a parent, pharmacist,
-            or doctor about a gentle routine.
+            Thanks for your interest. For younger skin, the safest step is to talk with a parent,
+            pharmacist, or doctor about a gentle routine — a cleanser, a moisturiser and sunscreen
+            is genuinely most of it at your age.
           </AppText>
         </Card>
       ) : null}
 
       <View style={{ marginTop: spacing.md }}>
-        <PrimaryButton label="Continue" onPress={onContinue} disabled={!valid || blocked} />
+        <PrimaryButton label="Continue to the photos" onPress={onContinue} disabled={!valid || blocked} />
       </View>
     </Screen>
   );
 }
-
-const styles = StyleSheet.create({
-  input: {
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.hairline,
-    borderRadius: radius.md,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.md,
-    fontSize: 22,
-    fontWeight: "600",
-    color: colors.ink,
-    marginTop: spacing.sm,
-  },
-});

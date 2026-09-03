@@ -193,8 +193,7 @@ export default function Intake() {
   }
 
   function back() {
-    if (step === 0) router.back();
-    else setStep((s) => s - 1);
+    setStep((s) => Math.max(0, s - 1));
   }
 
   if (analyzing) {
@@ -234,7 +233,7 @@ export default function Intake() {
         </Card>
         <View style={{ gap: spacing.sm, marginTop: spacing.md }}>
           <PrimaryButton label="Try again" onPress={() => void generate(answersNow())} />
-          <GhostButton label="Change my answers" onPress={() => setFailure(null)} />
+          <GhostButton label="Change my answers" tone="quiet" onPress={() => setFailure(null)} />
         </View>
       </Screen>
     );
@@ -318,7 +317,7 @@ export default function Intake() {
           onPress={next}
           disabled={!canAdvance}
         />
-        <GhostButton label="Back" onPress={back} />
+        {step > 0 && <GhostButton label="Back" tone="quiet" onPress={back} />}
       </View>
     </Screen>
   );

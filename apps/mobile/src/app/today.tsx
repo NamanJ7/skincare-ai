@@ -34,6 +34,7 @@ import {
 } from "@pore/shared";
 import { CheckCircle } from "@/components/CheckCircle";
 import { WeekStrip } from "@/components/WeekStrip";
+import { selected, succeeded, tapped } from "@/lib/feedback";
 import { buildIntake } from "@/lib/intake";
 import {
   activeRoutine,
@@ -124,10 +125,23 @@ export default function Today() {
   );
 
   const onToggle = useCallback(
-    (order: number, total: number) => setJournal(toggleStep(date, time, order, total)),
+    (order: number, total: number) => {
+      const next = toggleStep(date, time, order, total);
+      // A heavier confirmation for finishing the session than for one step —
+      // the session is the thing worth feeling.
+      if (next.finished.includes(`${date}:${time}`)) succeeded();
+      else tapped();
+      setJournal(next);
+    },
     [date, time],
   );
-  const onFeel = useCallback((feel: SkinFeel) => setJournal(recordCheckIn(date, feel)), [date]);
+  const onFeel = useCallback(
+    (feel: SkinFeel) => {
+      selected();
+      setJournal(recordCheckIn(date, feel));
+    },
+    [date],
+  );
 
   // No routine means no plan was ever successfully generated. Say that, and
   // give the one action that fixes it — never a stand-in routine.

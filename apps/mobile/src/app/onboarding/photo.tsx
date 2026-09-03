@@ -19,6 +19,7 @@ import { ActivityIndicator, Linking, Pressable, StyleSheet, View } from "react-n
 
 import type { SkinTone } from "@pore/shared";
 import { CaptureFrame } from "@/components/CaptureFrame";
+import { failed, succeeded } from "@/lib/feedback";
 import {
   CAPTURE_STEPS,
   isRejected,
@@ -39,6 +40,7 @@ import {
   PrimaryButton,
   Screen,
   colors,
+  overlay,
   radius,
   spacing,
 } from "@/theme";
@@ -119,6 +121,7 @@ export default function PhotoCapture() {
 
   const finishStep = useCallback(
     (photo: CapturedPhoto) => {
+      succeeded();
       setPhotos((prev) => [...prev.filter((p) => p.angle !== photo.angle), photo]);
       setStrikes(0);
       setError(null);
@@ -170,6 +173,7 @@ export default function PhotoCapture() {
       );
 
       if (isRejected(outcome)) {
+        failed();
         setStrikes((s) => s + 1);
         setError(outcome.hint);
       } else {
@@ -178,6 +182,7 @@ export default function PhotoCapture() {
     } catch {
       // A frame we cannot decode is, from the user's side, the same as a frame
       // that came out badly: take another one.
+      failed();
       setStrikes((s) => s + 1);
       setError("That one didn't come through — try again");
     } finally {
@@ -418,7 +423,7 @@ const styles = StyleSheet.create({
   link: { minHeight: 44, justifyContent: "center" },
   pressed: { opacity: 0.6 },
   cameraRoot: { flex: 1, backgroundColor: colors.ink },
-  flash: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: "#FFFFFF" },
+  flash: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: colors.surface },
   controls: {
     position: "absolute",
     bottom: spacing.xl,
@@ -428,7 +433,7 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
   },
   useAnyway: {
-    backgroundColor: "rgba(28,28,26,0.7)",
+    backgroundColor: overlay.onPhoto,
     borderRadius: radius.pill,
     paddingVertical: spacing.xs,
     paddingHorizontal: spacing.md,
@@ -438,7 +443,7 @@ const styles = StyleSheet.create({
     height: 76,
     borderRadius: radius.pill,
     borderWidth: 4,
-    borderColor: "rgba(255,255,255,0.9)",
+    borderColor: overlay.onDarkLine,
     alignItems: "center",
     justifyContent: "center",
   },

@@ -44,6 +44,7 @@ export interface SkinCheckIn {
 
 export type ScheduleNoteId =
   | "ramp_building"
+  | "ramp_held"
   | "deload_active"
   | "day_conflict_deferred"
   | "day_conflict_dropped"
@@ -242,19 +243,48 @@ function activeDeload(checkIns: SkinCheckIn[], on: string): Deload | undefined {
  * "calm" during it. A quiet week (no reports at all) advances normally — we ask
  * for feedback, we do not punish its absence.
  */
-export function rampWeekFor(ctx: ScheduleContext): number {
+export interface RampProgress {
+  /** The ramp week the user is in, 1..RAMP_WEEKS. */
+  week: number;
+  /**
+   * True when the week just gone did not advance the ramp because the user
+   * reported irritation in it.
+   *
+   * Holding is the right behaviour and it is tested, but it used to happen in
+   * silence — so a user who plateaued at week 2 saw a strip that never moved
+   * and no reason anywhere. Only the most recent completed week counts here: a
+   * flare five weeks ago is history, not an explanation for tonight.
+   */
+  heldByFlare: boolean;
+}
+
+export function rampProgress(ctx: ScheduleContext): RampProgress {
   const elapsed = Math.max(0, daysBetween(ctx.startedOn, ctx.on));
   const completedWeeks = Math.floor(elapsed / 7);
   const checkIns = ctx.checkIns ?? [];
 
-  let week = 1;
-  for (let w = 0; w < completedWeeks && week < RAMP_WEEKS; w++) {
+  const flaredIn = (w: number) => {
     const from = addDays(ctx.startedOn, w * 7);
     const to = addDays(ctx.startedOn, w * 7 + 6);
-    const flared = checkIns.some((c) => c.date >= from && c.date <= to && c.feel !== "calm");
-    if (!flared) week++;
+    return checkIns.some((c) => c.date >= from && c.date <= to && c.feel !== "calm");
+  };
+
+  let week = 1;
+  for (let w = 0; w < completedWeeks && week < RAMP_WEEKS; w++) {
+    if (!flaredIn(w)) week++;
   }
-  return week;
+
+  // Nothing is being held back once the ramp is finished, and there is nothing
+  // to hold before the first week is complete.
+  const heldByFlare =
+    completedWeeks > 0 && week < RAMP_WEEKS && flaredIn(completedWeeks - 1);
+
+  return { week, heldByFlare };
+}
+
+/** The ramp week alone. Most callers only need this. */
+export function rampWeekFor(ctx: ScheduleContext): number {
+  return rampProgress(ctx).week;
 }
 
 /* ------------------------------------------------------------------ planning */
@@ -419,7 +449,10 @@ function buildSession(
     notes.push(
       ...cycleNotes.filter((n) =>
         n.active === undefined
-          ? false
+          ? // A held ramp is about the routine, not about one active, so it has
+            // no `active` to match on. It rides with the evening session, which
+            // is where the strong actives it is holding back would have landed.
+            n.id === "ramp_held" && time === "PM"
           : n.id === "day_conflict_dropped"
             ? owned.has(n.active)
             : tonight.has(n.active),
@@ -471,13 +504,20 @@ export function planDay(
   intake: IntakeResponse,
   ctx: ScheduleContext,
 ): DayPlan {
-  const rampWeek = rampWeekFor(ctx);
+  const ramp = rampProgress(ctx);
   const deload = activeDeload(ctx.checkIns ?? [], ctx.on);
-  const { placements, notes } = placeSteps(routine, intake, rampWeek);
+  const { placements, notes } = placeSteps(routine, intake, ramp.week);
 
   const dayIndex = Math.max(0, daysBetween(ctx.startedOn, ctx.on));
   const cycleDay = dayIndex % 7;
   const cycleNotes = [...(notes.get(-1) ?? []), ...(notes.get(cycleDay) ?? [])];
+  if (ramp.heldByFlare) {
+    cycleNotes.push({
+      id: "ramp_held",
+      detail:
+        "We're holding you at this week's pace rather than stepping up — you told us your skin wasn't calm last week. It moves again after a week that is.",
+    });
+  }
 
   const am = buildSession("AM", placements, cycleDay, deload, cycleNotes);
   const pm = buildSession("PM", placements, cycleDay, deload, cycleNotes);

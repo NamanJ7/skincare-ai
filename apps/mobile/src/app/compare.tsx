@@ -40,7 +40,7 @@ import {
 } from "@/lib/journal";
 import { CAPTURE_STEPS, listSessions, sessionPhotoUri } from "@/lib/photos";
 import { useOnboarding } from "@/state/onboarding";
-import { AppText, Card, Chip, GhostButton, Screen, colors, radius, spacing } from "@/theme";
+import { AppText, Card, Chip, GhostButton, Screen, colors, overlay, radius, spacing } from "@/theme";
 
 const CONCERN_LABELS: Record<ConcernKey, string> = {
   acne_like_breakouts: "Acne-like breakouts",
@@ -173,7 +173,6 @@ export default function Compare() {
   if (assessing) {
     return (
       <Screen contentStyle={{ paddingTop: spacing.lg }}>
-        <GhostButton label="Back" tone="quiet" onPress={() => router.back()} />
         <AppText variant="label" color={colors.primary}>
           MEASURING
         </AppText>
@@ -190,7 +189,6 @@ export default function Compare() {
   if (sessions.length < 2) {
     return (
       <Screen contentStyle={{ paddingTop: spacing.lg }}>
-        <GhostButton label="Back" onPress={() => router.back()} />
         <AppText variant="title">Nothing to compare yet</AppText>
         <AppText variant="body" color={colors.inkMuted}>
           Take a second guided set in a few weeks — same screen flash, same spot — and we can measure
@@ -205,7 +203,6 @@ export default function Compare() {
 
   return (
     <Screen contentStyle={{ paddingTop: spacing.lg }}>
-      <GhostButton label="Back" onPress={() => router.back()} />
       <AppText variant="label" color={colors.primary}>
         PROGRESS
       </AppText>
@@ -335,7 +332,7 @@ function VerdictRow({ progress, first }: { progress: ConcernProgress; first: boo
       style={{
         gap: spacing.xxs,
         borderTopWidth: first ? 0 : 1,
-        borderTopColor: "rgba(255,255,255,0.14)",
+        borderTopColor: overlay.onDarkFill,
         paddingTop: first ? 0 : spacing.md,
       }}
     >
@@ -343,12 +340,12 @@ function VerdictRow({ progress, first }: { progress: ConcernProgress; first: boo
         <AppText variant="bodyStrong" color={colors.onPrimary}>
           {CONCERN_LABELS[progress.concern]}
         </AppText>
-        <AppText variant="caption" color={improved ? colors.accent : "rgba(255,255,255,0.75)"}>
+        <AppText variant="caption" color={improved ? colors.accent : overlay.onDarkMuted}>
           {movement}
         </AppText>
       </View>
       {progress.before && progress.after && (
-        <AppText variant="caption" color="rgba(255,255,255,0.75)">
+        <AppText variant="caption" color={overlay.onDarkMuted}>
           {`${BAND_LABELS[progress.before] ?? progress.before} → ${BAND_LABELS[progress.after] ?? progress.after}`}
         </AppText>
       )}

@@ -20,6 +20,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { colors, overlay, radius, shadow, spacing, typography } from "@pore/shared";
+import { selected as hapticSelect } from "@/lib/feedback";
 import { resolveFontFamily } from "./fonts";
 
 type TextVariant = keyof typeof typography;
@@ -182,7 +183,13 @@ export function Chip({
   const interactive = onPress !== undefined;
   return (
     <Pressable
-      onPress={onPress}
+      onPress={
+        onPress &&
+        (() => {
+          hapticSelect();
+          onPress();
+        })
+      }
       disabled={!interactive}
       accessible={interactive}
       accessibilityRole={interactive ? "button" : undefined}

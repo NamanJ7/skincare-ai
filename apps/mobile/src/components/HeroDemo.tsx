@@ -16,6 +16,7 @@ import Animated, {
   Extrapolation,
   interpolate,
   useAnimatedStyle,
+  useReducedMotion,
   useSharedValue,
   withRepeat,
   withTiming,
@@ -37,15 +38,26 @@ const TRACK_W = INNER_W - spacing.md * 2 - spacing.md * 2; // sheet padding both
 
 export function HeroDemo() {
   const progress = useSharedValue(0);
+  /**
+   * This loops forever on the landing screen with no way to pause it, which is
+   * the single clearest thing on the phone for "reduce motion" to switch off.
+   * Parked at the point in the loop where the results are on screen, so the
+   * still frame still shows what the product does.
+   */
+  const reduceMotion = useReducedMotion();
 
   useEffect(() => {
+    if (reduceMotion) {
+      progress.value = 0.6;
+      return;
+    }
     progress.value = 0;
     progress.value = withRepeat(
       withTiming(1, { duration: LOOP_MS, easing: Easing.linear }),
       -1,
       false,
     );
-  }, []);
+  }, [reduceMotion]);
 
   // --- Scanning phase (0 .. 0.30) -----------------------------------------
   const scanLineStyle = useAnimatedStyle(() => ({

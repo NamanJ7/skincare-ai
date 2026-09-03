@@ -9,6 +9,7 @@ import { StyleSheet, View } from "react-native";
 import Animated, {
   Easing,
   useAnimatedStyle,
+  useReducedMotion,
   useSharedValue,
   withDelay,
   withTiming,
@@ -21,6 +22,12 @@ const OUT_CUBIC = Easing.out(Easing.cubic);
 const TOTAL_MS = 2350;
 
 export function SplashAnimation({ onDone }: { onDone: () => void }) {
+  /**
+   * A 2.35s brand reveal between the user and the app is exactly what "reduce
+   * motion" is asking us not to do, so we skip it entirely rather than play it
+   * faster. Reanimated reads the OS setting; no new dependency.
+   */
+  const reduceMotion = useReducedMotion();
   const drop = useSharedValue(0);
   const word = useSharedValue(0);
   const tag = useSharedValue(0);
@@ -28,6 +35,11 @@ export function SplashAnimation({ onDone }: { onDone: () => void }) {
   const done = useRef(false);
 
   useEffect(() => {
+    if (reduceMotion) {
+      done.current = true;
+      onDone();
+      return;
+    }
     drop.value = withDelay(100, withTiming(1, { duration: 650, easing: OUT_CUBIC }));
     word.value = withDelay(550, withTiming(1, { duration: 500, easing: OUT_CUBIC }));
     tag.value = withDelay(850, withTiming(1, { duration: 500, easing: OUT_CUBIC }));
@@ -40,7 +52,7 @@ export function SplashAnimation({ onDone }: { onDone: () => void }) {
       }
     }, TOTAL_MS);
     return () => clearTimeout(timer);
-  }, []);
+  }, [reduceMotion]);
 
   const containerStyle = useAnimatedStyle(() => ({ opacity: container.value }));
   const dropStyle = useAnimatedStyle(() => ({

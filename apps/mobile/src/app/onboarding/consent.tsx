@@ -1,9 +1,9 @@
 import { router } from "expo-router";
 import { useState } from "react";
-import { Pressable, StyleSheet, TextInput } from "react-native";
+import { Pressable } from "react-native";
 
 import { useOnboarding } from "@/state/onboarding";
-import { AppText, Card, PrimaryButton, Screen, colors, radius, spacing } from "@/theme";
+import { AppText, Card, PrimaryButton, Screen, TextField, colors, spacing } from "@/theme";
 
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -15,40 +15,49 @@ export default function ParentalConsent() {
   function onContinue() {
     if (!valid) return;
     update({ parentEmail: email.trim() });
-    // Real build: send a verifiable consent request to the parent before any
-    // photo capture, and record approval. For now we proceed to capture.
     router.push("/onboarding/photo");
   }
 
   return (
     <Screen contentStyle={{ paddingTop: spacing.section }}>
-      <AppText variant="title">A parent needs to approve</AppText>
+      <AppText variant="title">Tell a parent or guardian</AppText>
+      {/*
+        This screen used to say a parent "needs to approve before Pore looks at
+        any photos", then proceed to the camera on any valid-looking email —
+        no request sent, no approval recorded. Verifiable consent is a real
+        build, not a text field, so until it exists the screen says what it
+        actually does.
+      */}
       <AppText variant="body" color={colors.inkMuted}>
-        Since you&apos;re under 18, a parent or guardian needs to approve before Pore looks at any
-        photos. Add their email so we can reach them for approval.
+        Since you&apos;re under 18, we ask you to bring a parent or guardian in before you start.
+        We&apos;ll send them a note about what Pore does with your photos.
       </AppText>
 
-      <TextInput
+      <TextField
+        label="Parent or guardian email"
         value={email}
         onChangeText={setEmail}
         keyboardType="email-address"
         autoCapitalize="none"
         autoCorrect={false}
         placeholder="parent@email.com"
-        placeholderTextColor={colors.inkMuted}
-        style={styles.input}
       />
 
       <Card>
         <AppText variant="caption" color={colors.inkMuted}>
-          We only use this email to confirm consent. Pore never trains on or sells anyone&apos;s data.
-          Photos stay on your phone and are never saved on our servers.
+          This email is only ever used to tell them about Pore. Your photos stay on your phone, are
+          sent only for your own analysis, and are never stored on our servers. Pore never trains on
+          or sells anyone&apos;s data.
         </AppText>
         <Pressable
           onPress={() => router.push("/legal/privacy")}
           accessibilityRole="link"
           accessibilityLabel="Read the Privacy Policy"
-          style={({ pressed }) => [styles.link, pressed && styles.pressed]}
+          hitSlop={8}
+          style={({ pressed }) => [
+            { minHeight: 44, justifyContent: "center" },
+            pressed && { opacity: 0.6 },
+          ]}
         >
           <AppText variant="caption" color={colors.primary}>
             Read the Privacy Policy
@@ -56,23 +65,7 @@ export default function ParentalConsent() {
         </Pressable>
       </Card>
 
-      <PrimaryButton label="Continue" onPress={onContinue} disabled={!valid} />
+      <PrimaryButton label="Continue to the photos" onPress={onContinue} disabled={!valid} />
     </Screen>
   );
 }
-
-const styles = StyleSheet.create({
-  link: { minHeight: 44, justifyContent: "center" },
-  pressed: { opacity: 0.6 },
-  input: {
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.hairline,
-    borderRadius: radius.md,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.md,
-    fontSize: 17,
-    color: colors.ink,
-    marginTop: spacing.sm,
-  },
-});

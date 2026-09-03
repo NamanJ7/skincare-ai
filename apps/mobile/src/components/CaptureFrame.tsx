@@ -8,9 +8,9 @@
  * oval transparent. No mask library, no native module.
  */
 import { StyleSheet, View, type LayoutChangeEvent } from "react-native";
-import { AppText, ProgressDots, colors, radius, spacing } from "@/theme";
+import { AppText, ProgressDots, colors, overlay, radius, spacing } from "@/theme";
 
-const SCRIM = "rgba(28,28,26,0.62)";
+const SCRIM = overlay.scrim;
 /** Large enough to cover any phone once the oval is centred. */
 const BLEED = 900;
 
@@ -51,7 +51,7 @@ export function CaptureFrame({
             height: OVAL_H,
             borderRadius: OVAL_W / 2,
             borderWidth: 2,
-            borderColor: error ? colors.escalate : "rgba(255,255,255,0.85)",
+            borderColor: error ? colors.escalate : overlay.onDarkLine,
           }}
         />
       </View>
@@ -70,7 +70,7 @@ export function CaptureFrame({
         <AppText variant="heading" color={colors.onPrimary} style={{ textAlign: "center" }}>
           {title}
         </AppText>
-        <AppText variant="caption" color="rgba(255,255,255,0.8)" style={{ textAlign: "center" }}>
+        <AppText variant="caption" color={overlay.onDarkMuted} style={{ textAlign: "center" }}>
           {hint}
         </AppText>
       </View>
