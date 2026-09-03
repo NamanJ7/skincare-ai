@@ -5,7 +5,7 @@
  * the hero. Built on react-native-reanimated (already a dependency).
  */
 import { useEffect, useRef } from "react";
-import { StyleSheet, View } from "react-native";
+import { StyleSheet } from "react-native";
 import Animated, {
   Easing,
   useAnimatedStyle,
