@@ -1,0 +1,56 @@
+# The gate this repo did not have.
+#
+# Twelve PRs merged with no automated check of any kind. The only signal on a
+# pull request was Vercel reporting that a deploy happened, which says nothing
+# about whether the tests pass — and the bug that started this workflow's own
+# PR (a pregnancy safety filter silently switching off after an app restart)
+# survived precisely because nothing ran the tests that would have caught it.
+#
+# One job, cheap checks first, so a failure reports in under a minute rather
+# than after the Next.js build.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A new push makes the in-flight run irrelevant; don't pay for both.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: typecheck · test · lint · build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Reads the pnpm version from package.json's `packageManager` field, so
+      # the version lives in exactly one place.
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # All three packages.
+      - run: pnpm typecheck
+
+      # packages/shared (safety, schedule, progress, vision) and apps/mobile
+      # (onboarding persistence, and that the safety rules still fire on it).
+      - run: pnpm test
+
+      # web only — apps/mobile and packages/shared have no eslint config yet.
+      - run: pnpm lint
+
+      # Last because it is the slowest, and a type error should not wait on it.
+      # No ANTHROPIC_API_KEY: the pipeline builds its client inside a function
+      # and falls back to the deterministic mock, so the build needs no secret.
+      - run: pnpm build

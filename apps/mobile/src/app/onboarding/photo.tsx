@@ -352,18 +352,32 @@ export default function PhotoCapture() {
 
   // ------------------------------------------------------------ reviewing --
   if (stage === "reviewing") {
+    // "Use it anyway" lets a rejected frame through after two strikes, so the
+    // old copy ("Each one passed the sharpness and lighting check") was a claim
+    // the screen could not always back up. Say what is actually true of this set.
+    const flagged = photos.filter((p) => p.quality.flags.length > 0).length;
     return (
       <Screen contentStyle={{ paddingTop: spacing.lg }}>
-        <AppText variant="title">All three, checked</AppText>
+        <AppText variant="title">{flagged > 0 ? "Your three photos" : "All three, checked"}</AppText>
         <AppText variant="body" color={colors.inkMuted}>
-          Each one passed the sharpness and lighting check. Tap any photo to take it again.
+          {flagged === 0
+            ? "Each one passed the sharpness and lighting check. Tap any photo to take it again."
+            : `${flagged === 1 ? "One photo" : `${flagged} photos`} didn't pass the sharpness and lighting check. We'll still read ${flagged === 1 ? "it" : "them"}, with less confidence. Tap any photo to take it again.`}
         </AppText>
 
         <View style={{ flexDirection: "row", gap: spacing.sm }}>
           {CAPTURE_STEPS.map((s, i) => {
             const photo = photos.find((p) => p.angle === s.angle);
             return (
-              <Pressable key={s.angle} onPress={() => retake(i)} style={{ flex: 1, gap: spacing.xxs }}>
+              <Pressable
+                key={s.angle}
+                onPress={() => retake(i)}
+                accessibilityRole="button"
+                accessibilityLabel={`Retake your ${s.angle} photo${
+                  photo?.quality.flags.length ? ", which was flagged by the quality check" : ""
+                }`}
+                style={{ flex: 1, gap: spacing.xxs }}
+              >
                 <Image
                   source={{ uri: photo?.uri }}
                   style={{ width: "100%", aspectRatio: 3 / 4, borderRadius: radius.md, backgroundColor: colors.surface }}

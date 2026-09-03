@@ -40,6 +40,45 @@ export const colors = {
   caution: "#C98A3B",
   /** "See a professional" cue (muted clay, calm — not a red alert). */
   escalate: "#C5705D",
+
+  /**
+   * The dark verdict surface on /compare — the one place the app goes dark, so
+   * the answer to "is this working?" lands before the photographs do.
+   *
+   * These exist because that screen was hand-writing rgba(255,255,255,0.14) and
+   * rgba(255,255,255,0.75) inline. A deliberate, documented part of the system
+   * deserves tokens; three magic alphas is how a surface drifts.
+   */
+  onDark: "#FFFFFF",
+  /** Secondary text on the dark surface. ~6.3:1 on `primary`. */
+  onDarkMuted: "rgba(255,255,255,0.75)",
+  /** Hairlines and row dividers on the dark surface. */
+  onDarkHairline: "rgba(255,255,255,0.14)",
+} as const;
+
+/**
+ * How direction reads on the verdict card.
+ *
+ * /compare rendered "Worse" and "No change" in the identical muted white, so
+ * the one screen whose entire job is communicating direction made two of its
+ * three outcomes look the same. Improvement gets the lavender it always had;
+ * worsening gets the caution amber that already exists for exactly this.
+ */
+export const direction = {
+  improved: "#E6E0F2",
+  worse: "#E0A868",
+  unchanged: "rgba(255,255,255,0.75)",
+} as const;
+
+/**
+ * Motion. Two durations and nothing else — enough to make state changes
+ * legible, few enough that transitions stay consistent across screens.
+ */
+export const motion = {
+  /** Tap feedback, checkbox fills, colour changes. */
+  fast: 120,
+  /** Cards appearing, sheets, anything covering distance. */
+  base: 220,
 } as const;
 
 /** 8px spacing base. */

@@ -6,6 +6,7 @@
  */
 import type { ReactNode, RefObject } from "react";
 import {
+  ActivityIndicator,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -18,7 +19,7 @@ import {
   type ViewStyle,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { colors, radius, spacing, typography } from "@pore/shared";
+import { colors, radius, shadow, spacing, typography } from "@pore/shared";
 import { resolveFontFamily } from "./fonts";
 
 type TextVariant = keyof typeof typography;
@@ -95,6 +96,43 @@ export function PrimaryButton({
   label,
   onPress,
   disabled = false,
+  loading = false,
+}: {
+  label: string;
+  onPress?: () => void;
+  disabled?: boolean;
+  /** Shows a spinner in place of the label and blocks repeat presses. */
+  loading?: boolean;
+}) {
+  const inert = disabled || loading;
+  return (
+    <Pressable
+      onPress={onPress}
+      disabled={inert}
+      accessibilityRole="button"
+      accessibilityState={{ disabled: inert, busy: loading }}
+      accessibilityLabel={label}
+      style={({ pressed }) => [
+        styles.btn,
+        { backgroundColor: pressed ? colors.primaryPress : colors.primary },
+        inert && styles.disabled,
+      ]}
+    >
+      {loading ? (
+        <ActivityIndicator color={colors.onPrimary} />
+      ) : (
+        <AppText variant="bodyStrong" color={colors.onPrimary}>
+          {label}
+        </AppText>
+      )}
+    </Pressable>
+  );
+}
+
+export function GhostButton({
+  label,
+  onPress,
+  disabled = false,
 }: {
   label: string;
   onPress?: () => void;
@@ -104,22 +142,15 @@ export function PrimaryButton({
     <Pressable
       onPress={onPress}
       disabled={disabled}
+      accessibilityRole="button"
+      accessibilityState={{ disabled }}
+      accessibilityLabel={label}
       style={({ pressed }) => [
-        styles.btn,
-        { backgroundColor: pressed ? colors.primaryPress : colors.primary },
+        styles.ghost,
+        pressed && styles.ghostPressed,
         disabled && styles.disabled,
       ]}
     >
-      <AppText variant="bodyStrong" color={colors.onPrimary}>
-        {label}
-      </AppText>
-    </Pressable>
-  );
-}
-
-export function GhostButton({ label, onPress }: { label: string; onPress?: () => void }) {
-  return (
-    <Pressable onPress={onPress} style={({ pressed }) => [styles.ghost, pressed && styles.ghostPressed]}>
       <AppText variant="bodyStrong" color={colors.primary}>
         {label}
       </AppText>
@@ -127,25 +158,53 @@ export function GhostButton({ label, onPress }: { label: string; onPress?: () =>
   );
 }
 
+/**
+ * The primary input control across the whole questionnaire and the tone picker.
+ *
+ * Three things it was missing: any press feedback at all, an accessibility role,
+ * and a way to be a plain label. That last one matters because /plan renders
+ * findings as chips with no `onPress`, so screen readers announced a button
+ * that did nothing. Without `onPress` it is now static text, not a control.
+ */
 export function Chip({
   label,
   selected = false,
   tone = "primary",
   onPress,
+  /** Multi-select groups are checkboxes; single-select are radios. */
+  role = "radio",
 }: {
   label: string;
   selected?: boolean;
   /** Selected fill: deep green ("primary") or soft lavender ("lavender"). */
   tone?: "primary" | "lavender";
   onPress?: () => void;
+  role?: "radio" | "checkbox";
 }) {
   const selectedStyle = tone === "lavender" ? styles.chipSelectedLavender : styles.chipSelected;
   const selectedTextColor = tone === "lavender" ? colors.accentInk : colors.onPrimary;
+  const body = (
+    <AppText variant="caption" color={selected ? selectedTextColor : colors.ink}>
+      {label}
+    </AppText>
+  );
+
+  if (!onPress) {
+    return <View style={[styles.chip, selected ? selectedStyle : styles.chipDefault]}>{body}</View>;
+  }
+
   return (
-    <Pressable onPress={onPress} style={[styles.chip, selected ? selectedStyle : styles.chipDefault]}>
-      <AppText variant="caption" color={selected ? selectedTextColor : colors.ink}>
-        {label}
-      </AppText>
+    <Pressable
+      onPress={onPress}
+      accessibilityRole={role}
+      accessibilityState={role === "checkbox" ? { checked: selected } : { selected }}
+      style={({ pressed }) => [
+        styles.chip,
+        selected ? selectedStyle : styles.chipDefault,
+        pressed && styles.chipPressed,
+      ]}
+    >
+      {body}
     </Pressable>
   );
 }
@@ -197,13 +256,18 @@ const styles = StyleSheet.create({
     borderColor: colors.hairline,
     gap: spacing.sm,
   },
+  // Was hand-written here while shadow.card sat unused in tokens.ts. The token
+  // is the single soft elevation in the system; it should be the only source.
+  // Was hand-written here while shadow.card sat unused in tokens.ts. The token
+  // carries its own alpha in `color`, so `opacity` stays 1 and the whole thing
+  // is used verbatim — one source for the single soft elevation in the system.
   cardShadow: {
     borderWidth: 0,
-    shadowColor: "#1C1C1A",
-    shadowOpacity: 0.06,
-    shadowRadius: 20,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 2,
+    shadowColor: shadow.card.color,
+    shadowOpacity: shadow.card.opacity,
+    shadowRadius: shadow.card.radius,
+    shadowOffset: shadow.card.offset,
+    elevation: shadow.card.elevation,
   },
   btn: {
     borderRadius: radius.pill,
@@ -222,16 +286,22 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.primary,
   },
-  ghostPressed: { backgroundColor: "rgba(50,72,63,0.08)" },
+  // colors.primary at 8%. Was written out as a literal, which meant a change to
+  // the brand green would have silently left this behind.
+  ghostPressed: { backgroundColor: `${colors.primary}14` },
   chip: {
     borderRadius: radius.pill,
     paddingVertical: spacing.sm,
     paddingHorizontal: spacing.md,
     borderWidth: 1,
+    // Comfortably past the 44pt minimum once the caption line-height is added.
+    minHeight: 44,
+    justifyContent: "center",
   },
   chipDefault: { backgroundColor: colors.surface, borderColor: colors.hairline },
   chipSelected: { backgroundColor: colors.primary, borderColor: colors.primary },
   chipSelectedLavender: { backgroundColor: colors.accent, borderColor: colors.accent },
+  chipPressed: { opacity: 0.65 },
   field: {
     backgroundColor: colors.surface,
     borderWidth: 1,
@@ -239,8 +309,8 @@ const styles = StyleSheet.create({
     borderRadius: radius.md,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.md,
-    fontFamily: resolveFontFamily("body", "400"),
-    fontSize: 17,
+    fontFamily: resolveFontFamily(typography.body.family, typography.body.weight),
+    fontSize: typography.body.size,
     color: colors.ink,
   },
   dots: { flexDirection: "row", gap: spacing.xs, justifyContent: "center" },

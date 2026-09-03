@@ -1,4 +1,5 @@
 /** What the user tells us up front. Drives routine generation + safety. */
+import type { ActiveKey } from "./routine";
 
 export type SkinType = "oily" | "dry" | "combination" | "normal";
 
@@ -33,8 +34,14 @@ export interface IntakeResponse {
   sensitivity: Sensitivity;
   /** Active keys the user already owns (so we can prefer "use what you own"). */
   currentProducts: string[];
-  /** Active keys / ingredients the user is allergic to or has reacted badly to. */
-  allergies: string[];
+  /**
+   * Actives the user is allergic to or has reacted badly to.
+   *
+   * Typed as ActiveKey rather than string because that is what the safety
+   * engine compares against (`intake.allergies.includes(step.active)`). A bare
+   * string[] let a typo sit in this field looking like a working allergy filter.
+   */
+  allergies: ActiveKey[];
   budget: Budget;
   fragrancePreference: FragrancePreference;
   /** Hard safety flag — strips contraindicated actives from the routine. */

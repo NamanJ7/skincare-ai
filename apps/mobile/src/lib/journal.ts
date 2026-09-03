@@ -8,6 +8,13 @@
  * Storage is deliberately dumb (one small JSON file, synchronous reads) and
  * every write is best-effort. Losing a check-off should never break a session —
  * the worst case is the user re-taps a step.
+ *
+ * Known limitation: expo-file-system's Directory/File API is native-only, so on
+ * the Expo *web* target every read throws and is caught, and the app behaves as
+ * a permanently fresh install. That is fine for web as a development target and
+ * would not be fine if Pore ever shipped a web build — it would need a storage
+ * adapter here first. The unit tests cover this module against an in-memory
+ * stand-in (src/test/expo-file-system.ts) precisely because the browser cannot.
  */
 import { Directory, File, Paths } from "expo-file-system";
 import {
@@ -19,6 +26,10 @@ import {
   type SkinCheckIn,
   type SkinFeel,
 } from "@pore/shared";
+// Type-only, so this never becomes a runtime import cycle with the provider
+// that reads and writes through these functions.
+import type { PlanResult } from "./api";
+import type { OnboardingData } from "@/state/onboarding";
 
 const DIR_NAME = "journal";
 const FILE_NAME = "journal.json";
@@ -53,7 +64,30 @@ interface Journal {
    * same active up a second time. It runs once, when a measurement lands.
    */
   lastAdaptation?: ProgressAdjustment[];
+  /**
+   * The onboarding answers, kept so they survive the app being closed.
+   *
+   * These are load-bearing for safety, not convenience: `buildIntake` fills
+   * defaults for anything missing, and one of those defaults is
+   * `pregnancyOrBreastfeeding: false`. Holding the answers in memory only meant
+   * a restart silently turned the pregnancy filter off for someone who had told
+   * us they were pregnant.
+   */
+  intake?: PersistedIntake;
+  /** The generated assessment + safety-clamped routine from signup. */
+  plan?: PlanResult;
 }
+
+/**
+ * The onboarding answers as they go to disk.
+ *
+ * `photos` is stripped: `CapturedPhoto.data` is a base64 JPEG held in memory
+ * for the duration of one /api/plan request, and the JPEGs themselves already
+ * live in `skin-photos/`. Writing them here would add megabytes to a file we
+ * read synchronously on every screen focus, to store a second copy of something
+ * we already have. `plan` is stripped because it has its own field above.
+ */
+export type PersistedIntake = Omit<OnboardingData, "photos" | "plan">;
 
 /** One capture session's blind assessment, tagged with when it was taken. */
 export interface StoredAssessment {
@@ -79,19 +113,19 @@ function empty(): Journal {
 }
 
 /**
- * Read the journal, creating it on first run.
+ * Read the journal, defaulting every field on first run.
  *
- * The first read is what sets `startedOn`, so the ramp starts the day the user
- * first opens their routine rather than at some arbitrary epoch.
+ * Reading deliberately does not write. An earlier version persisted a fresh
+ * journal here, which anchored `startedOn` to whenever the file first happened
+ * to be read — so someone who opened the app, looked around, and finished
+ * onboarding five days later started their six-week ramp already five days in.
+ * `startedOn` is now anchored by the first real write instead, which is either
+ * the plan landing (`saveOnboarding`) or the first step ticked off.
  */
 export function readJournal(): Journal {
   try {
     const f = file();
-    if (!f.exists) {
-      const fresh = empty();
-      writeJournal(fresh);
-      return fresh;
-    }
+    if (!f.exists) return empty();
     const parsed = JSON.parse(f.textSync()) as Partial<Journal>;
     return {
       version: 1,
@@ -103,10 +137,28 @@ export function readJournal(): Journal {
       latest: parsed.latest,
       routine: parsed.routine,
       lastAdaptation: parsed.lastAdaptation,
+      intake: parsed.intake,
+      plan: parsed.plan,
     };
   } catch {
     return empty();
   }
+}
+
+/**
+ * Persist the onboarding answers, and the plan once it exists.
+ *
+ * Called on every `update()` from the onboarding provider, so a half-finished
+ * questionnaire survives the app being closed mid-flow as readily as a
+ * finished one.
+ */
+export function saveOnboarding(data: OnboardingData): Journal {
+  const journal = readJournal();
+  const { photos: _photos, plan, ...answers } = data;
+  journal.intake = answers;
+  if (plan) journal.plan = plan;
+  writeJournal(journal);
+  return journal;
 }
 
 function writeJournal(journal: Journal): void {
@@ -258,7 +310,46 @@ export function recordedDays(journal: Journal): number {
   return days.size;
 }
 
-/** Wipe the journal — the "forget me" path, alongside deleting the photos. */
+/**
+ * Erase what the user did, keeping the routine they did it with.
+ *
+ * This is what the "Erase my routine record" control on /plan actually
+ * promises: the tick-offs and check-ins go, the routine stays, and the ramp
+ * restarts from today. It is a narrower operation than `deleteJournal`, which
+ * removes the answers and the plan as well.
+ *
+ * Splitting the two matters more now that the journal holds the routine: wiping
+ * the whole file behind a button labelled "your routine stays" would take the
+ * routine with it.
+ */
+export function eraseRecord(): Journal {
+  const journal = readJournal();
+  journal.completed = {};
+  journal.finished = [];
+  journal.checkIns = [];
+  journal.startedOn = today();
+  writeJournal(journal);
+  return journal;
+}
+
+/**
+ * Whether this device already has a routine to go back to.
+ *
+ * Drives the launch redirect: a returning user should land on today's session,
+ * not on the marketing splash they already said yes to.
+ */
+export function hasRoutine(journal: Journal = readJournal()): boolean {
+  return Boolean(journal.routine ?? journal.plan?.routine);
+}
+
+/**
+ * Wipe the journal — the "forget me" path, alongside deleting the photos.
+ *
+ * Deliberately the one function here that throws instead of swallowing. Every
+ * other write is best-effort because losing a tick-off costs a re-tap; an erase
+ * that quietly fails would tell someone their record was gone when it is still
+ * on the phone. The caller (`plan.tsx`) catches this and says so.
+ */
 export function deleteJournal(): void {
   const d = dir();
   if (d.exists) d.delete();

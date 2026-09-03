@@ -15,18 +15,18 @@
  * the point.
  */
 import { Image } from "expo-image";
-import { router, useLocalSearchParams } from "expo-router";
-import { useCallback, useEffect, useState } from "react";
+import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ActivityIndicator, View } from "react-native";
 
 import {
   adaptRoutine,
   compareAssessments,
   type CaptureAngle,
-  type ConcernKey,
   type ConcernProgress,
   type ProgressReport,
 } from "@pore/shared";
+import { BAND_LABELS, CONCERN_LABELS } from "@/lib/labels";
 import { fetchPlan } from "@/lib/api";
 import { buildIntake } from "@/lib/intake";
 import {
@@ -39,39 +39,72 @@ import {
 } from "@/lib/journal";
 import { CAPTURE_STEPS, listSessions, sessionPhotoUri } from "@/lib/photos";
 import { useOnboarding } from "@/state/onboarding";
-import { AppText, Card, Chip, GhostButton, Screen, colors, radius, spacing } from "@/theme";
-
-const CONCERN_LABELS: Record<ConcernKey, string> = {
-  acne_like_breakouts: "Acne-like breakouts",
-  oiliness: "Oiliness",
-  dryness_flaking: "Dryness / flaking",
-  texture_congestion: "Texture & congestion",
-  uneven_tone: "Uneven tone",
-  dark_spot_appearance: "Dark-spot appearance",
-  redness_appearance: "Redness appearance",
-  fine_line_appearance: "Fine-line appearance",
-  irritation_signs: "Signs of irritation",
-};
-
-const BAND_LABELS: Record<string, string> = {
-  none: "Clear",
-  mild: "Mild",
-  moderate: "Moderate",
-  noticeable: "Noticeable",
-};
+import {
+  AppText,
+  Card,
+  Chip,
+  GhostButton,
+  PrimaryButton,
+  Screen,
+  colors,
+  direction,
+  radius,
+  spacing,
+} from "@/theme";
 
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
 }
 
+/**
+ * When a second capture is worth taking.
+ *
+ * Six weeks after the first — the same horizon the schedule engine ramps over,
+ * and roughly how long skin takes to show a change that isn't just lighting.
+ * Naming the date turns "in a few weeks" into something the user can act on.
+ */
+const READY_AFTER_WEEKS = 6;
+
+function readyDate(firstCapturedAt: string): { label: string; ready: boolean; weeksAway: number } {
+  const due = new Date(firstCapturedAt);
+  due.setDate(due.getDate() + READY_AFTER_WEEKS * 7);
+  const msAway = due.getTime() - Date.now();
+  const weeksAway = Math.max(0, Math.ceil(msAway / (7 * 24 * 60 * 60 * 1000)));
+  return {
+    label: due.toLocaleDateString(undefined, { month: "long", day: "numeric" }),
+    ready: msAway <= 0,
+    weeksAway,
+  };
+}
+
 export default function Compare() {
   const { mode } = useLocalSearchParams<{ mode?: string }>();
   const { data } = useOnboarding();
-  const [sessions] = useState(() => listSessions());
+  const [sessions, setSessions] = useState(() => listSessions());
   const [journal, setJournal] = useState<Journal>(() => readJournal());
   const [angle, setAngle] = useState<CaptureAngle>("front");
   const [assessing, setAssessing] = useState(false);
   const [assessError, setAssessError] = useState<string | null>(null);
+  /**
+   * Guards the one-shot reassessment.
+   *
+   * `runReassessment` is a useCallback over `data`, and the effect below depends
+   * on it, so anything that changes the onboarding object would re-fire it —
+   * paying for a second Opus call and, worse, recording a second assessment
+   * that `adaptRoutine` would then step the routine up against. It runs once
+   * per arrival with ?mode=recheck.
+   */
+  const started = useRef(false);
+
+  // A capture session written just before we navigated here won't be in the
+  // list captured at mount, and this is a tab now, so it can be revisited
+  // without remounting at all.
+  useFocusEffect(
+    useCallback(() => {
+      setSessions(listSessions());
+      setJournal(readJournal());
+    }, []),
+  );
 
   /**
    * Re-assessment runs here rather than on the capture screen, so capture stays
@@ -85,20 +118,18 @@ export default function Compare() {
     setAssessing(true);
     setAssessError(null);
     try {
-      const result = await fetchPlan({
-        images: photos.map((p) => ({ data: p.data, mediaType: "image/jpeg" })),
+      const outcome = await fetchPlan({
+        images: photos.map((p) => ({ data: p.data, mediaType: "image/jpeg", quality: p.quality })),
         intake: buildIntake(data),
       });
-      if (!result) {
-        setAssessError(
-          "We couldn't reach the assessment service, so your photos are saved but not measured yet. Try again when you're back online.",
-        );
+      if (!outcome.ok) {
+        setAssessError(`${outcome.error.message} Your photos are saved either way.`);
         return;
       }
       const recorded = recordAssessment({
         sessionId: sessions[0]?.id ?? "current",
         capturedAt: photos[0]?.capturedAt ?? new Date().toISOString(),
-        assessment: result.assessment,
+        assessment: outcome.plan.assessment,
       });
 
       // Measure, then adapt — once, here, at the moment the reading lands.
@@ -129,7 +160,9 @@ export default function Compare() {
   }, [data, sessions]);
 
   useEffect(() => {
-    if (mode === "recheck") void runReassessment();
+    if (mode !== "recheck" || started.current) return;
+    started.current = true;
+    void runReassessment();
   }, [mode, runReassessment]);
 
   const { baseline, latest } = journal;
@@ -160,15 +193,38 @@ export default function Compare() {
     );
   }
 
+  // The empty state used to be a dead end: a sentence saying "in a few weeks"
+  // with no button and no date. It now names the day and offers the action.
   if (sessions.length < 2) {
+    const first = sessions[0];
+    const due = first ? readyDate(first.capturedAt) : null;
     return (
       <Screen contentStyle={{ paddingTop: spacing.lg }}>
-        <GhostButton label="Back" onPress={() => router.back()} />
+        <AppText variant="label" color={colors.primary}>
+          PROGRESS
+        </AppText>
         <AppText variant="title">Nothing to compare yet</AppText>
         <AppText variant="body" color={colors.inkMuted}>
-          Take a second guided set in a few weeks — same screen flash, same spot — and we can measure
-          what actually changed instead of guessing at it.
+          {first
+            ? `We have your first set. Take a second one — same screen flash, same spot — and we can measure what actually changed instead of guessing at it.`
+            : "Once you've taken two guided sets a few weeks apart, this is where we measure what actually changed instead of guessing at it."}
         </AppText>
+
+        {due && (
+          <Card>
+            <AppText variant="heading">Come back on {due.label}</AppText>
+            <AppText variant="caption" color={colors.inkMuted}>
+              {due.ready
+                ? "That's now — enough has changed to be worth measuring."
+                : `That's ${due.weeksAway} ${due.weeksAway === 1 ? "week" : "weeks"} from your first set. Skin takes about that long to show a real difference, so measuring sooner mostly measures the lighting.`}
+            </AppText>
+          </Card>
+        )}
+
+        <PrimaryButton
+          label={first ? "Take my second set" : "Take my first set"}
+          onPress={() => router.push("/onboarding/photo?mode=recheck")}
+        />
       </Screen>
     );
   }
@@ -178,7 +234,6 @@ export default function Compare() {
 
   return (
     <Screen contentStyle={{ paddingTop: spacing.lg }}>
-      <GhostButton label="Back" onPress={() => router.back()} />
       <AppText variant="label" color={colors.primary}>
         PROGRESS
       </AppText>
@@ -271,7 +326,7 @@ function VerdictCard({ report }: { report: ProgressReport }) {
         }}
       >
         {measured.length === 0 ? (
-          <AppText variant="body" color={colors.onPrimary}>
+          <AppText variant="body" color={colors.onDark}>
             Nothing moved enough to call either way yet.
           </AppText>
         ) : (
@@ -298,30 +353,41 @@ function VerdictCard({ report }: { report: ProgressReport }) {
   );
 }
 
+/**
+ * One measured concern.
+ *
+ * "Worse" and "No change" used to render in the identical muted white, so the
+ * one screen whose entire job is communicating direction made two of its three
+ * outcomes indistinguishable. Each direction now has its own token, and the
+ * arrow means colour is not the only carrier.
+ */
 function VerdictRow({ progress, first }: { progress: ConcernProgress; first: boolean }) {
-  const improved = progress.direction === "improved";
-  const worse = progress.direction === "worse";
-  const movement = improved ? "Better" : worse ? "Worse" : "No change";
+  const movement =
+    progress.direction === "improved"
+      ? { label: "Better", mark: "↓", color: direction.improved }
+      : progress.direction === "worse"
+        ? { label: "Worse", mark: "↑", color: direction.worse }
+        : { label: "No change", mark: "–", color: direction.unchanged };
 
   return (
     <View
       style={{
         gap: spacing.xxs,
         borderTopWidth: first ? 0 : 1,
-        borderTopColor: "rgba(255,255,255,0.14)",
+        borderTopColor: colors.onDarkHairline,
         paddingTop: first ? 0 : spacing.md,
       }}
     >
       <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "baseline" }}>
-        <AppText variant="bodyStrong" color={colors.onPrimary}>
+        <AppText variant="bodyStrong" color={colors.onDark}>
           {CONCERN_LABELS[progress.concern]}
         </AppText>
-        <AppText variant="caption" color={improved ? colors.accent : "rgba(255,255,255,0.75)"}>
-          {movement}
+        <AppText variant="caption" color={movement.color}>
+          {`${movement.mark} ${movement.label}`}
         </AppText>
       </View>
       {progress.before && progress.after && (
-        <AppText variant="caption" color="rgba(255,255,255,0.75)">
+        <AppText variant="caption" color={colors.onDarkMuted}>
           {`${BAND_LABELS[progress.before] ?? progress.before} → ${BAND_LABELS[progress.after] ?? progress.after}`}
         </AppText>
       )}

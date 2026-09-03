@@ -26,6 +26,21 @@ import type { LegalDocument } from "./types";
 export const MEDICAL_DISCLAIMER =
   "Pore provides skincare education and routine guidance and is not a substitute for professional medical advice.";
 
+/**
+ * The longer disclaimer that travels with an assessment.
+ *
+ * Distinct from MEDICAL_DISCLAIMER above, which is the one-line version used in
+ * the legal documents. This one carries the escalation advice, so it belongs
+ * anywhere a user is being told what their skin looks like.
+ *
+ * It lived in three places — apps/web/lib/mock.ts, apps/mobile plan.tsx, and
+ * the assessment prompt — and had already drifted between them ("not a medical
+ * diagnosis" vs "not medical advice"). Safety copy is the last thing that
+ * should be maintained by copy-paste.
+ */
+export const ASSESSMENT_DISCLAIMER =
+  "Pore offers cosmetic skincare guidance, not medical advice. If something looks painful, is bleeding, spreading quickly, or isn't improving, please check in with a pharmacist or doctor.";
+
 /** Where privacy and legal questions go. Matches the /contact page. */
 export const LEGAL_CONTACT_EMAIL = "reachporeai@gmail.com";
 
@@ -61,10 +76,13 @@ export const PRIVACY_POLICY: LegalDocument = {
           text: "In the Pore app you tell us your age, your skin goals and concerns, how sensitive your skin is, any ingredient allergies, and whether you are pregnant or breastfeeding. If you are 17 or younger we also ask for a parent or guardian's email address.",
         },
         {
-          // Disclosure. state/onboarding.tsx holds this in a plain useState
-          // with no persistence layer, and there is no account backend.
+          // Disclosure. state/onboarding.tsx mirrors these answers into
+          // journal.json via saveOnboarding() in lib/journal.ts, so they
+          // survive the app closing. They stay in that file on the device;
+          // there is still no account backend and nothing is uploaded.
+          // deleteJournal() removes them.
           kind: "paragraph",
-          text: "Your answers are held on your device for the length of the session. Pore has no accounts yet, so nothing is saved to a profile.",
+          text: "Your answers are saved on your phone, inside the app, so your routine is still there when you come back. Pore has no accounts yet, so they are never uploaded and nothing is saved to a profile. Removing the app removes them.",
         },
         {
           // Disclosure. apps/mobile/src/lib/journal.ts writes journal.json to

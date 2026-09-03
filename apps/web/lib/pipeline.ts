@@ -16,40 +16,17 @@ import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import {
   applySafetyRules,
   type Assessment,
-  type IntakeResponse,
   type PhotoQuality,
-  type Routine,
-  type SafetyAdjustment,
+  type PlanInput,
+  type PlanResult,
 } from "@pore/shared";
 import { AssessmentSchema, RoutineDraftSchema, normalizeDraft } from "./schemas";
 import { ASSESSMENT_SYSTEM, ROUTINE_SYSTEM } from "./prompts";
 import { draftRoutine, mockAssessment } from "./mock";
 
-export type ImageMediaType = "image/jpeg" | "image/png" | "image/webp" | "image/gif";
-
-export interface PlanImage {
-  /** base64-encoded image bytes (no data: prefix). */
-  data: string;
-  mediaType?: ImageMediaType;
-  /**
-   * What the on-device capture gate measured for this shot. Optional so older
-   * clients keep working, but when present it is put in front of the image so
-   * the model can weight what it is looking at.
-   */
-  quality?: PhotoQuality;
-}
-
-export interface PlanInput {
-  images: PlanImage[];
-  intake: IntakeResponse;
-}
-
-export interface PlanResult {
-  assessment: Assessment;
-  routine: Routine;
-  adjustments: SafetyAdjustment[];
-  mode: "ai" | "mock";
-}
+// The request/response contract lives in @pore/shared so this route and the
+// mobile client cannot drift apart again. Re-exported for existing importers.
+export type { ImageMediaType, PlanImage, PlanInput, PlanResult } from "@pore/shared";
 
 const MODEL = "claude-opus-4-8";
 

@@ -22,8 +22,13 @@ export default function SignUp() {
     <Screen contentStyle={{ paddingTop: spacing.xxl }}>
       <View style={{ gap: spacing.xs }}>
         <AppText variant="title">Create your account</AppText>
+        {/* Was "Save your skin scans and routine, and track your progress over
+            time" — a promise about an account backend that does not exist. Your
+            routine and photos are genuinely kept, but on this device, so that is
+            what it says now. */}
         <AppText variant="body" color={colors.inkMuted}>
-          Save your skin scans and routine, and track your progress over time.
+          Your routine, photos, and progress stay on this phone. Accounts and syncing across devices
+          are coming later.
         </AppText>
       </View>
 

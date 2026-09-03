@@ -1,14 +1,32 @@
 import { router } from "expo-router";
-import { useState, type ReactNode } from "react";
-import { ActivityIndicator, View } from "react-native";
+import { useEffect, useState, type ReactNode } from "react";
+import { ActivityIndicator, Pressable, View } from "react-native";
 
-import type { Sensitivity, SkinGoal, SkinType } from "@pore/shared";
+import {
+  ACTIVES,
+  type ActiveKey,
+  type PlanError,
+  type Sensitivity,
+  type SkinGoal,
+  type SkinType,
+} from "@pore/shared";
 import { fetchPlan } from "@/lib/api";
 import { buildIntake } from "@/lib/intake";
 import { recordAssessment } from "@/lib/journal";
 import { CAPTURE_STEPS, listSessions, type CapturedPhoto } from "@/lib/photos";
 import { useOnboarding } from "@/state/onboarding";
-import { AppText, Chip, GhostButton, PrimaryButton, ProgressDots, Screen, colors, spacing } from "@/theme";
+import {
+  AppText,
+  Card,
+  Chip,
+  GhostButton,
+  PrimaryButton,
+  ProgressDots,
+  Screen,
+  colors,
+  radius,
+  spacing,
+} from "@/theme";
 
 const GOALS: { key: SkinGoal; label: string }[] = [
   { key: "acne", label: "Acne / breakouts" },
@@ -34,55 +52,88 @@ const SENSITIVITY: { key: Sensitivity; label: string; hint: string }[] = [
   { key: "high", label: "Very", hint: "My skin reacts easily and often" },
 ];
 
-const STEP_COUNT = 4;
+/**
+ * The actives the safety engine can actually exclude.
+ *
+ * `applySafetyRules` removes any step whose active appears in
+ * `intake.allergies`, and CLAUDE.md lists that as one of the guarantees — but
+ * nothing ever asked, `buildIntake` hardcoded an empty list, and the privacy
+ * policy already told users "you tell us any ingredient allergies". A
+ * documented safety rule with no input path is just dead code.
+ *
+ * Sourced from ACTIVES so the options can never drift from what the engine
+ * understands: a free-text field here would produce strings that silently
+ * match nothing.
+ */
+const ALLERGENS = Object.values(ACTIVES).map((a) => ({ key: a.key, label: a.short }));
+
+const STEP_COUNT = 5;
 
 export default function Intake() {
   const { data, update } = useOnboarding();
   const [step, setStep] = useState(0);
   const [analyzing, setAnalyzing] = useState(false);
+  const [error, setError] = useState<PlanError | null>(null);
   const [goals, setGoals] = useState<SkinGoal[]>([]);
   const [skinType, setSkinType] = useState<SkinType | null>(null);
   const [sensitivity, setSensitivity] = useState<Sensitivity | null>(null);
   const [pregnant, setPregnant] = useState<boolean | null>(null);
+  const [allergies, setAllergies] = useState<ActiveKey[]>([]);
 
   const canAdvance =
     (step === 0 && goals.length > 0) ||
     (step === 1 && skinType !== null) ||
     (step === 2 && sensitivity !== null) ||
-    (step === 3 && pregnant !== null);
+    (step === 3 && pregnant !== null) ||
+    // Allergies are opt-in: an empty list is a real answer ("nothing comes to
+    // mind"), so this step never blocks. Making it required would trade a
+    // finished onboarding for a field most people leave empty.
+    step === 4;
 
   function toggleGoal(key: SkinGoal) {
     setGoals((prev) => (prev.includes(key) ? prev.filter((g) => g !== key) : [...prev, key]));
   }
 
-  async function next() {
-    if (!canAdvance) return;
-    if (step < STEP_COUNT - 1) {
-      setStep((s) => s + 1);
-      return;
-    }
+  function toggleAllergy(key: ActiveKey) {
+    setAllergies((prev) => (prev.includes(key) ? prev.filter((a) => a !== key) : [...prev, key]));
+  }
 
-    const answers = {
-      goals,
-      skinType: skinType ?? "combination",
-      sensitivity: sensitivity ?? "medium",
-      pregnancyOrBreastfeeding: pregnant ?? false,
-    } as const;
-    update(answers);
+  const answers = {
+    goals,
+    skinType: skinType ?? "combination",
+    sensitivity: sensitivity ?? "medium",
+    pregnancyOrBreastfeeding: pregnant ?? false,
+    allergies,
+  } as const;
 
-    // The photos were taken first, but the assessment needs these answers, so
-    // generation happens here rather than running on questionnaire defaults.
+  /**
+   * Generate the plan.
+   *
+   * Split out from `next()` so the failure state can retry it without walking
+   * the questionnaire again — the answers are already saved, so a retry is one
+   * tap rather than four screens.
+   */
+  async function generate() {
     setAnalyzing(true);
-    const photos = data.photos ?? [];
-    const ordered = CAPTURE_STEPS.map((s) => photos.find((p) => p.angle === s.angle)).filter(
-      (p): p is CapturedPhoto => p !== undefined,
-    );
-    const plan = await fetchPlan({
-      images: ordered.map((p) => ({ data: p.data, mediaType: "image/jpeg", quality: p.quality })),
-      intake: buildIntake({ ...data, ...answers }),
-    });
-    if (plan) {
-      update({ plan });
+    setError(null);
+    try {
+      const photos = data.photos ?? [];
+      const ordered = CAPTURE_STEPS.map((s) => photos.find((p) => p.angle === s.angle)).filter(
+        (p): p is CapturedPhoto => p !== undefined,
+      );
+      const outcome = await fetchPlan({
+        images: ordered.map((p) => ({ data: p.data, mediaType: "image/jpeg", quality: p.quality })),
+        intake: buildIntake({ ...data, ...answers }),
+      });
+
+      // A failed plan used to navigate to /today anyway, where a hardcoded demo
+      // routine stood in for the one we never built. Say what happened instead.
+      if (!outcome.ok) {
+        setError(outcome.error);
+        return;
+      }
+
+      update({ plan: outcome.plan });
       // This first reading is the zero every later measurement subtracts from,
       // so it is filed away the moment it exists. Without it there is nothing
       // to compare a return visit against.
@@ -91,10 +142,31 @@ export default function Intake() {
         // stored session is the set this assessment was made from.
         sessionId: listSessions()[0]?.id ?? "baseline",
         capturedAt: ordered[0]?.capturedAt ?? new Date().toISOString(),
-        assessment: plan.assessment,
+        assessment: outcome.plan.assessment,
       });
+      router.replace("/today");
+    } catch {
+      setError({
+        kind: "unknown",
+        message: "Something went wrong building your routine. Trying again usually works.",
+        retryable: true,
+      });
+    } finally {
+      // Previously never reset, so any throw left the spinner up forever.
+      setAnalyzing(false);
     }
-    router.replace("/today");
+  }
+
+  async function next() {
+    if (!canAdvance) return;
+    if (step < STEP_COUNT - 1) {
+      setStep((s) => s + 1);
+      return;
+    }
+    // The photos were taken first, but the assessment needs these answers, so
+    // generation happens here rather than running on questionnaire defaults.
+    update(answers);
+    await generate();
   }
 
   function back() {
@@ -110,7 +182,14 @@ export default function Intake() {
         <Question title="What do you want to work on?" subtitle="Pick all that apply.">
           <ChipWrap>
             {GOALS.map((g) => (
-              <Chip key={g.key} label={g.label} selected={goals.includes(g.key)} onPress={() => toggleGoal(g.key)} />
+              <Chip
+                key={g.key}
+                label={g.label}
+                // Multi-select, so these announce as checkboxes rather than radios.
+                role="checkbox"
+                selected={goals.includes(g.key)}
+                onPress={() => toggleGoal(g.key)}
+              />
             ))}
           </ChipWrap>
         </Question>
@@ -128,10 +207,47 @@ export default function Intake() {
 
       {step === 2 && (
         <Question title="How sensitive is your skin?" subtitle="This is the biggest factor in keeping your routine safe.">
+          {/* These were pill Chips holding a full sentence ("Very — My skin
+              reacts easily and often"), which wraps badly inside a pill radius
+              and buries the answer in the hint. Full-width rows give the label
+              and its explanation their own lines. */}
           <View style={{ gap: spacing.sm }}>
-            {SENSITIVITY.map((s) => (
-              <Chip key={s.key} label={`${s.label} — ${s.hint}`} selected={sensitivity === s.key} onPress={() => setSensitivity(s.key)} />
-            ))}
+            {SENSITIVITY.map((s) => {
+              const selected = sensitivity === s.key;
+              return (
+                <Pressable
+                  key={s.key}
+                  onPress={() => setSensitivity(s.key)}
+                  accessibilityRole="radio"
+                  accessibilityState={{ selected }}
+                  accessibilityLabel={`${s.label}. ${s.hint}`}
+                  style={({ pressed }) => [
+                    {
+                      minHeight: 60,
+                      justifyContent: "center",
+                      gap: spacing.xxs,
+                      paddingVertical: spacing.sm,
+                      paddingHorizontal: spacing.md,
+                      borderRadius: radius.md,
+                      borderWidth: 1,
+                      borderColor: selected ? colors.primary : colors.hairline,
+                      backgroundColor: selected ? colors.primary : colors.surface,
+                    },
+                    pressed && { opacity: 0.7 },
+                  ]}
+                >
+                  <AppText variant="bodyStrong" color={selected ? colors.onPrimary : colors.ink}>
+                    {s.label}
+                  </AppText>
+                  <AppText
+                    variant="caption"
+                    color={selected ? colors.accent : colors.inkMuted}
+                  >
+                    {s.hint}
+                  </AppText>
+                </Pressable>
+              );
+            })}
           </View>
         </Question>
       )}
@@ -145,12 +261,47 @@ export default function Intake() {
         </Question>
       )}
 
-      {analyzing ? (
-        <View style={{ alignItems: "center", gap: spacing.sm, marginTop: spacing.lg }}>
-          <ActivityIndicator color={colors.primary} />
-          <AppText variant="caption" color={colors.inkMuted}>
-            Reading your skin and building a routine…
+      {step === 4 && (
+        <Question
+          title="Anything your skin reacts to?"
+          subtitle="We'll leave these out of your routine entirely. Skip if nothing comes to mind."
+        >
+          <ChipWrap>
+            {ALLERGENS.map((a) => (
+              <Chip
+                key={a.key}
+                label={a.label}
+                role="checkbox"
+                selected={allergies.includes(a.key)}
+                onPress={() => toggleAllergy(a.key)}
+              />
+            ))}
+          </ChipWrap>
+        </Question>
+      )}
+
+      {error && (
+        <Card>
+          <AppText variant="bodyStrong" color={colors.escalate}>
+            We couldn&apos;t finish your routine
           </AppText>
+          <AppText variant="caption" color={colors.inkMuted}>
+            {error.message}
+          </AppText>
+          <View style={{ gap: spacing.xs, marginTop: spacing.xs }}>
+            {error.retryable && <PrimaryButton label="Try again" onPress={() => void generate()} />}
+            <GhostButton
+              label="Retake my photos"
+              onPress={() => router.replace("/onboarding/photo")}
+            />
+          </View>
+        </Card>
+      )}
+
+      {analyzing ? (
+        <View style={{ gap: spacing.sm, marginTop: spacing.lg }}>
+          <ActivityIndicator color={colors.primary} />
+          <BuildStages />
         </View>
       ) : (
         <View style={{ gap: spacing.sm, marginTop: spacing.lg }}>
@@ -159,10 +310,60 @@ export default function Intake() {
             onPress={next}
             disabled={!canAdvance}
           />
-          <GhostButton label="Back" onPress={back} />
+          {!error && <GhostButton label="Back" onPress={back} />}
         </View>
       )}
     </Screen>
+  );
+}
+
+/**
+ * What is happening during the wait, named.
+ *
+ * The plan is two model calls behind a 60s ceiling, and this used to be one
+ * spinner and one line of text. A minute of undifferentiated waiting is where
+ * people decide an app is broken. Naming the three real stages costs nothing,
+ * and it is the only place in onboarding where we get to explain that a
+ * deterministic safety pass runs over whatever the model suggested.
+ *
+ * The timings are honest about being approximate: they advance the *label*, not
+ * a progress bar, so nothing here claims to know how far along the request is.
+ */
+const BUILD_STAGES = [
+  { after: 0, text: "Reading your photos — texture, tone, and what's actually visible." },
+  { after: 12_000, text: "Matching what we found to your goals and building a routine." },
+  { after: 30_000, text: "Running the safety checks — frequencies, interactions, your sensitivity." },
+];
+
+function BuildStages() {
+  const [elapsed, setElapsed] = useState(0);
+
+  useEffect(() => {
+    const started = Date.now();
+    const id = setInterval(() => setElapsed(Date.now() - started), 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  return (
+    <View style={{ gap: spacing.xs }}>
+      {BUILD_STAGES.map((stage, i) => {
+        const reached = elapsed >= stage.after;
+        const current = reached && (i === BUILD_STAGES.length - 1 || elapsed < BUILD_STAGES[i + 1]!.after);
+        return (
+          <AppText
+            key={stage.after}
+            variant={current ? "bodyStrong" : "caption"}
+            color={reached ? colors.ink : colors.inkMuted}
+            style={!reached ? { opacity: 0.5 } : undefined}
+          >
+            {stage.text}
+          </AppText>
+        );
+      })}
+      <AppText variant="caption" color={colors.inkMuted} style={{ marginTop: spacing.xxs }}>
+        This takes up to a minute. Keep the app open.
+      </AppText>
+    </View>
   );
 }
 
