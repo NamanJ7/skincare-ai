@@ -40,6 +40,30 @@ export const colors = {
   caution: "#C98A3B",
   /** "See a professional" cue (muted clay, calm — not a red alert). */
   escalate: "#C5705D",
+  /** Pressed state for a destructive/escalation control. */
+  escalatePress: "#A85B4A",
+  /** Disabled ink — text on a control that cannot be used. */
+  inkDisabled: "#A8A8A2",
+} as const;
+
+/**
+ * Translucent fills. Every scrim, overlay and pressed tint in the app used to
+ * be an rgba() literal invented in whichever file needed it, which is how five
+ * files ended up with five different blacks. These are the only ones.
+ */
+export const overlay = {
+  /** Camera scrim outside the capture oval. */
+  scrim: "rgba(28,28,26,0.62)",
+  /** A control floating on top of a photo or camera preview. */
+  onPhoto: "rgba(28,28,26,0.70)",
+  /** Guide lines and hairlines drawn over a dark preview. */
+  onDarkLine: "rgba(255,255,255,0.85)",
+  /** Secondary text on the deep-green verdict card. */
+  onDarkMuted: "rgba(255,255,255,0.75)",
+  /** A divider or inset fill on the deep-green verdict card. */
+  onDarkFill: "rgba(255,255,255,0.14)",
+  /** Pressed wash for an outlined control on cream. */
+  primaryTint: "rgba(50,72,63,0.08)",
 } as const;
 
 /** 8px spacing base. */
@@ -101,6 +125,7 @@ export const shadow = {
 } as const;
 
 export type ColorToken = keyof typeof colors;
+export type OverlayToken = keyof typeof overlay;
 export type SpacingToken = keyof typeof spacing;
 export type RadiusToken = keyof typeof radius;
 export type FontFamilyToken = keyof typeof fontFamily;

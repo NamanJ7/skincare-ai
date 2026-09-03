@@ -222,6 +222,32 @@ export function writeManifest(photos: CapturedPhoto[], sessionId: string): void 
   appendToSessionIndex({ id: sessionId, capturedAt });
 }
 
+/**
+ * Delete photo folders that never made it into the session index.
+ *
+ * Each shot is written to disk as it is taken, but a session is only indexed
+ * once all three are done — so an app killed mid-capture leaves JPEGs that
+ * `listSessions` can never see and nothing will ever use. They still counted
+ * toward the "N photos are saved on this phone" disclosure, which meant the
+ * privacy card and the comparison view disagreed about what existed.
+ *
+ * Swept when a new capture begins, which is the only moment it matters.
+ */
+export function sweepOrphanSessions(keepId?: string): void {
+  try {
+    const dir = photosDir();
+    if (!dir.exists) return;
+    const known = new Set(readSessionIndex().map((s) => s.id));
+    for (const entry of dir.list()) {
+      if (!(entry instanceof Directory)) continue;
+      if (known.has(entry.name) || entry.name === keepId) continue;
+      entry.delete();
+    }
+  } catch {
+    // Housekeeping. Never worth failing a capture over.
+  }
+}
+
 /** How many photos are on this device right now, across every session. Drives the "Your photos" row. */
 export function storedPhotoCount(): number {
   try {

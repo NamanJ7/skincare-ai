@@ -86,8 +86,10 @@ export async function POST(req: Request) {
     });
     return Response.json(result);
   } catch (err) {
+    // The detail goes to the server log, not to the client: SDK errors carry
+    // key state, model ids and internal paths, and the client has no use for
+    // any of it beyond "try again".
     console.error("/api/plan failed:", err);
-    const message = err instanceof Error ? err.message : "Unknown error";
-    return Response.json({ error: message }, { status: 500 });
+    return Response.json({ error: "Could not generate a plan" }, { status: 500 });
   }
 }

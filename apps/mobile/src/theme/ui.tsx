@@ -6,6 +6,7 @@
  */
 import type { ReactNode, RefObject } from "react";
 import {
+  ActivityIndicator,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -18,7 +19,7 @@ import {
   type ViewStyle,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { colors, radius, spacing, typography } from "@pore/shared";
+import { colors, overlay, radius, shadow, spacing, typography } from "@pore/shared";
 import { resolveFontFamily } from "./fonts";
 
 type TextVariant = keyof typeof typography;
@@ -95,32 +96,67 @@ export function PrimaryButton({
   label,
   onPress,
   disabled = false,
+  loading = false,
+  tone = "primary",
 }: {
   label: string;
   onPress?: () => void;
   disabled?: boolean;
+  /** Shows a spinner in place and blocks presses — the button stays put. */
+  loading?: boolean;
+  /** "danger" for destructive confirmations, so they never look like the CTA. */
+  tone?: "primary" | "danger";
 }) {
+  const base = tone === "danger" ? colors.escalate : colors.primary;
+  const pressedFill = tone === "danger" ? colors.escalatePress : colors.primaryPress;
+  const blocked = disabled || loading;
   return (
     <Pressable
       onPress={onPress}
-      disabled={disabled}
+      disabled={blocked}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      accessibilityState={{ disabled: blocked, busy: loading }}
       style={({ pressed }) => [
         styles.btn,
-        { backgroundColor: pressed ? colors.primaryPress : colors.primary },
+        { backgroundColor: pressed ? pressedFill : base },
         disabled && styles.disabled,
       ]}
     >
-      <AppText variant="bodyStrong" color={colors.onPrimary}>
-        {label}
-      </AppText>
+      <View style={styles.btnRow}>
+        {loading ? <ActivityIndicator color={colors.onPrimary} size="small" /> : null}
+        <AppText variant="bodyStrong" color={colors.onPrimary}>
+          {label}
+        </AppText>
+      </View>
     </Pressable>
   );
 }
 
-export function GhostButton({ label, onPress }: { label: string; onPress?: () => void }) {
+export function GhostButton({
+  label,
+  onPress,
+  tone = "primary",
+}: {
+  label: string;
+  onPress?: () => void;
+  /** "danger" for destructive actions, "quiet" for anything below the fold. */
+  tone?: "primary" | "danger" | "quiet";
+}) {
+  const ink =
+    tone === "danger" ? colors.escalate : tone === "quiet" ? colors.inkMuted : colors.primary;
   return (
-    <Pressable onPress={onPress} style={({ pressed }) => [styles.ghost, pressed && styles.ghostPressed]}>
-      <AppText variant="bodyStrong" color={colors.primary}>
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      style={({ pressed }) => [
+        styles.ghost,
+        { borderColor: tone === "quiet" ? colors.hairline : ink },
+        pressed && styles.ghostPressed,
+      ]}
+    >
+      <AppText variant="bodyStrong" color={ink}>
         {label}
       </AppText>
     </Pressable>
@@ -141,8 +177,23 @@ export function Chip({
 }) {
   const selectedStyle = tone === "lavender" ? styles.chipSelectedLavender : styles.chipSelected;
   const selectedTextColor = tone === "lavender" ? colors.accentInk : colors.onPrimary;
+  // A read-only chip (no onPress) is a label, not a control — don't announce it
+  // as a button or let it take focus.
+  const interactive = onPress !== undefined;
   return (
-    <Pressable onPress={onPress} style={[styles.chip, selected ? selectedStyle : styles.chipDefault]}>
+    <Pressable
+      onPress={onPress}
+      disabled={!interactive}
+      accessible={interactive}
+      accessibilityRole={interactive ? "button" : undefined}
+      accessibilityState={interactive ? { selected } : undefined}
+      hitSlop={interactive ? 6 : undefined}
+      style={({ pressed }) => [
+        styles.chip,
+        selected ? selectedStyle : styles.chipDefault,
+        pressed && styles.chipPressed,
+      ]}
+    >
       <AppText variant="caption" color={selected ? selectedTextColor : colors.ink}>
         {label}
       </AppText>
@@ -152,7 +203,12 @@ export function Chip({
 
 export function ProgressDots({ count, index }: { count: number; index: number }) {
   return (
-    <View style={styles.dots}>
+    <View
+      style={styles.dots}
+      accessible
+      accessibilityRole="progressbar"
+      accessibilityLabel={`Question ${index + 1} of ${count}`}
+    >
       {Array.from({ length: count }).map((_, i) => (
         <View key={i} style={[styles.dot, i === index ? styles.dotActive : styles.dotInactive]} />
       ))}
@@ -199,12 +255,13 @@ const styles = StyleSheet.create({
   },
   cardShadow: {
     borderWidth: 0,
-    shadowColor: "#1C1C1A",
+    shadowColor: colors.ink,
     shadowOpacity: 0.06,
-    shadowRadius: 20,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 2,
+    shadowRadius: shadow.card.radius,
+    shadowOffset: shadow.card.offset,
+    elevation: shadow.card.elevation,
   },
+  btnRow: { flexDirection: "row", alignItems: "center", gap: spacing.xs },
   btn: {
     borderRadius: radius.pill,
     paddingVertical: spacing.md,
@@ -220,9 +277,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 1,
-    borderColor: colors.primary,
   },
-  ghostPressed: { backgroundColor: "rgba(50,72,63,0.08)" },
+  ghostPressed: { backgroundColor: overlay.primaryTint },
   chip: {
     borderRadius: radius.pill,
     paddingVertical: spacing.sm,
@@ -230,6 +286,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   chipDefault: { backgroundColor: colors.surface, borderColor: colors.hairline },
+  chipPressed: { opacity: 0.6 },
   chipSelected: { backgroundColor: colors.primary, borderColor: colors.primary },
   chipSelectedLavender: { backgroundColor: colors.accent, borderColor: colors.accent },
   field: {
@@ -240,7 +297,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.md,
     fontFamily: resolveFontFamily("body", "400"),
-    fontSize: 17,
+    fontSize: typography.body.size,
     color: colors.ink,
   },
   dots: { flexDirection: "row", gap: spacing.xs, justifyContent: "center" },

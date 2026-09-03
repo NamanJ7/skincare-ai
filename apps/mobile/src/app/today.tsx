@@ -10,6 +10,11 @@
  * treatment as the safety rules. Nothing on this screen asks the user to decide
  * anything except the one question at the end, which is what keeps the plan
  * honest week to week.
+ *
+ * The routine is read from the on-device record, never reconstructed. This
+ * screen used to fall back to a hardcoded demo routine when the in-memory plan
+ * was missing, which after a restart was always — so the app quietly showed
+ * every returning user a generic routine and called it theirs.
  */
 import { router, useFocusEffect } from "expo-router";
 import { useCallback, useMemo, useState } from "react";
@@ -17,14 +22,12 @@ import { Pressable, View } from "react-native";
 
 import {
   ACTIVES,
-  applySafetyRules,
   currentSession,
   planDay,
   planWeek,
   today as todayDate,
   weekdayName,
   type ProductCategory,
-  type Routine,
   type RoutineStep,
   type RoutineTime,
   type SkinFeel,
@@ -33,19 +36,22 @@ import { CheckCircle } from "@/components/CheckCircle";
 import { WeekStrip } from "@/components/WeekStrip";
 import { buildIntake } from "@/lib/intake";
 import {
+  activeRoutine,
   checkInFor,
   completedSteps,
   readJournal,
   recordCheckIn,
   streakDays,
   toggleStep,
+  weeksOnRoutine,
 } from "@/lib/journal";
-import { useOnboarding } from "@/state/onboarding";
+import { listSessions } from "@/lib/photos";
 import {
   AppText,
   Card,
   Divider,
   GhostButton,
+  PrimaryButton,
   Screen,
   colors,
   radius,
@@ -68,80 +74,94 @@ const FEELS: { feel: SkinFeel; label: string }[] = [
   { feel: "stinging", label: "Stinging" },
 ];
 
-/** Same over-loaded draft the plan screen uses, so the engine has work to do. */
-function draftRoutine(): Routine {
-  const step = (
-    order: number,
-    category: ProductCategory,
-    active: RoutineStep["active"],
-    frequencyPerWeek: number,
-    rationale: string,
-  ): RoutineStep => ({ order, category, active, frequencyPerWeek, rationale, irritationRisk: "medium" });
-  return {
-    am: [
-      step(1, "cleanser", undefined, 7, "Start clean without stripping your skin."),
-      step(2, "serum", "vitamin_c", 7, "Brightens and helps even out tone over time."),
-      step(3, "moisturizer", undefined, 7, "Locks in hydration and supports your barrier."),
-    ],
-    pm: [
-      step(1, "cleanser", undefined, 7, "Remove the day's oil and sunscreen."),
-      step(2, "exfoliant", "salicylic_acid", 4, "Helps clear pores and reduce breakouts."),
-      step(3, "exfoliant", "glycolic_acid", 4, "Smooths texture and fades marks."),
-      step(4, "treatment", "retinoid", 7, "Boosts cell turnover for texture and marks."),
-    ],
-    notes: ["Patch-test any new active for a few days before full use."],
-  };
-}
+/** After this long on one routine, a second photo set can actually be measured. */
+const RECHECK_AFTER_WEEKS = 4;
 
 function stepLabel(step: RoutineStep): string {
   return step.active ? ACTIVES[step.active].short : CATEGORY_LABELS[step.category];
 }
 
 export default function Today() {
-  const { data } = useOnboarding();
   const [journal, setJournal] = useState(() => readJournal());
+  const [date, setDate] = useState(() => todayDate());
   const [time, setTime] = useState<RoutineTime>(() => currentSession());
-
-  const date = todayDate();
-  const intake = useMemo(() => buildIntake(data), [data]);
+  const [sessionCount, setSessionCount] = useState(() => listSessions().length);
 
   // Re-read on focus: the record can be erased from /plan, and a session left
   // open overnight should come back as the new day rather than yesterday's.
+  //
+  // The AM/PM choice is deliberately *not* reset here. It used to be, which
+  // meant a user who tapped "Show tonight instead", looked at /plan, and came
+  // back was silently bounced to the morning. It only resets when the calendar
+  // day actually turns over.
   useFocusEffect(
     useCallback(() => {
       setJournal(readJournal());
-      setTime(currentSession());
+      setSessionCount(listSessions().length);
+      const now = todayDate();
+      setDate((prev) => {
+        if (prev !== now) setTime(currentSession());
+        return now;
+      });
     }, []),
   );
 
-  // Precedence: a routine the progress engine has already adapted beats the one
-  // generated at signup, which beats a locally clamped draft. Once a measured
-  // re-assessment has moved a frequency, that is the routine the user is on.
-  const routine = useMemo(
-    () => journal.routine ?? data.plan?.routine ?? applySafetyRules(draftRoutine(), intake).routine,
-    [journal.routine, data.plan, intake],
-  );
+  const routine = activeRoutine(journal);
+  const intake = useMemo(() => buildIntake(journal.intake ?? {}), [journal.intake]);
 
   const ctx = useMemo(
     () => ({ startedOn: journal.startedOn, on: date, checkIns: journal.checkIns }),
     [journal.startedOn, journal.checkIns, date],
   );
 
-  const day = useMemo(() => planDay(routine, intake, ctx), [routine, intake, ctx]);
-  const week = useMemo(() => planWeek(routine, intake, ctx), [routine, intake, ctx]);
+  const day = useMemo(
+    () => (routine ? planDay(routine, intake, ctx) : null),
+    [routine, intake, ctx],
+  );
+  const week = useMemo(
+    () => (routine ? planWeek(routine, intake, ctx) : null),
+    [routine, intake, ctx],
+  );
+
+  const onToggle = useCallback(
+    (order: number, total: number) => setJournal(toggleStep(date, time, order, total)),
+    [date, time],
+  );
+  const onFeel = useCallback((feel: SkinFeel) => setJournal(recordCheckIn(date, feel)), [date]);
+
+  // No routine means no plan was ever successfully generated. Say that, and
+  // give the one action that fixes it — never a stand-in routine.
+  if (!day || !week) {
+    return (
+      <Screen contentStyle={{ paddingTop: spacing.section }}>
+        <AppText variant="label" color={colors.primary}>
+          NOT SET UP YET
+        </AppText>
+        <AppText variant="title">You don&apos;t have a routine yet</AppText>
+        <AppText variant="body" color={colors.inkMuted}>
+          Three guided photos and five questions is the whole setup. Everything after that is one
+          tap a day.
+        </AppText>
+        <View style={{ marginTop: spacing.md }}>
+          <PrimaryButton
+            label="Set up my routine"
+            onPress={() => router.push("/onboarding/photo")}
+          />
+        </View>
+      </Screen>
+    );
+  }
 
   const session = time === "AM" ? day.am : day.pm;
   const done = completedSteps(journal, date, time);
   const allDone = session.steps.length > 0 && done.length >= session.steps.length;
   const streak = streakDays(journal, date);
   const feeling = checkInFor(journal, date);
-
-  const onToggle = useCallback(
-    (order: number) => setJournal(toggleStep(date, time, order, session.steps.length)),
-    [date, time, session.steps.length],
-  );
-
-  const onFeel = useCallback((feel: SkinFeel) => setJournal(recordCheckIn(date, feel)), [date]);
+  // The progress engine is the point of the product, and it used to be three
+  // taps deep behind a ghost button. Once a comparison is possible, offer it.
+  const canCompare = sessionCount >= 2;
+  const dueForRecheck =
+    !canCompare && weeksOnRoutine(journal, date) >= RECHECK_AFTER_WEEKS && sessionCount >= 1;
 
   return (
     <Screen contentStyle={{ paddingTop: spacing.lg }}>
@@ -172,7 +192,7 @@ export default function Today() {
               <View key={`${step.category}-${step.order}`}>
                 {i > 0 && <Divider />}
                 <Pressable
-                  onPress={() => onToggle(step.order)}
+                  onPress={() => onToggle(step.order, session.steps.length)}
                   accessibilityRole="checkbox"
                   accessibilityState={{ checked }}
                   accessibilityLabel={`${stepLabel(step)}. ${step.rationale}`}
@@ -223,7 +243,7 @@ export default function Today() {
       )}
 
       <Card>
-        <WeekStrip week={week} today={date} />
+        <WeekStrip week={week} today={date} completed={journal.finished} />
       </Card>
 
       {/* The single question the product asks. One tap, and it is what moves the
@@ -270,12 +290,33 @@ export default function Today() {
         </Card>
       )}
 
+      {/* Only ever offered when a measurement is actually possible. A prompt to
+          re-shoot that we then refuse to measure is just a nag. */}
+      {dueForRecheck && (
+        <Card elevated>
+          <AppText variant="heading">
+            {`${weeksOnRoutine(journal, date)} weeks in. Time to measure.`}
+          </AppText>
+          <AppText variant="caption" color={colors.inkMuted}>
+            One more guided set — same screen flash, same spot — and we can subtract the two and
+            tell you what actually changed, instead of asking you to remember.
+          </AppText>
+          <PrimaryButton
+            label="Take a new set"
+            onPress={() => router.push("/onboarding/photo?mode=recheck")}
+          />
+        </Card>
+      )}
+
       <View style={{ gap: spacing.xs }}>
         <GhostButton
           label={time === "AM" ? "Show tonight instead" : "Show this morning instead"}
           onPress={() => setTime(time === "AM" ? "PM" : "AM")}
         />
-        <GhostButton label="Your full plan" onPress={() => router.push("/plan")} />
+        {canCompare && (
+          <GhostButton label="See what changed" onPress={() => router.push("/compare")} />
+        )}
+        <GhostButton label="Your full plan" tone="quiet" onPress={() => router.push("/plan")} />
       </View>
     </Screen>
   );

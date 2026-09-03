@@ -25,6 +25,7 @@ import {
   listSessions,
   newSessionId,
   processCapture,
+  sweepOrphanSessions,
   sessionPhotoUri,
   writeManifest,
   type CapturedPhoto,
@@ -85,7 +86,13 @@ export default function PhotoCapture() {
   const [stage, setStage] = useState<Stage>("intro");
   const [tone, setTone] = useState<SkinTone | null>(data.skinTone ?? null);
   /** One id for this whole visit, so retakes land in the same session folder. */
-  const [sessionId] = useState(() => newSessionId());
+  const [sessionId] = useState(() => {
+    const id = newSessionId();
+    // Clear out any folder a previous run abandoned mid-capture, so the photo
+    // count on /plan matches what the app can actually use.
+    sweepOrphanSessions(id);
+    return id;
+  });
   /** Last visit's session, if any — source for the ghost-alignment overlay. */
   const [previousSessionId] = useState(() => listSessions()[0]?.id);
   const [photos, setPhotos] = useState<CapturedPhoto[]>([]);
@@ -246,10 +253,30 @@ export default function PhotoCapture() {
               Pore needs the camera to take your photos. Nothing is recorded until you press the
               shutter.
             </AppText>
-            <GhostButton label="Open Settings" onPress={() => Linking.openSettings()} />
+            <PrimaryButton label="Open Settings" onPress={() => Linking.openSettings()} />
           </Card>
         ) : (
           <PrimaryButton label="Start" onPress={begin} disabled={!tone} />
+        )}
+
+        {/* Without this, a permanently denied camera was the end of the product:
+            no photos, no plan, no way past this screen. The pipeline accepts
+            zero images and reports what it could not see, so the honest option
+            is a weaker reading rather than none. */}
+        {mode !== "recheck" && (
+          <Card>
+            <AppText variant="bodyStrong">Rather not take photos?</AppText>
+            <AppText variant="caption" color={colors.inkMuted}>
+              You can still get a routine built from your answers alone. It will be more cautious,
+              and there will be nothing to measure against later — but it is yours, and you can add
+              photos whenever you want.
+            </AppText>
+            <GhostButton
+              label="Continue without photos"
+              tone="quiet"
+              onPress={() => router.push("/onboarding/intake")}
+            />
+          </Card>
         )}
 
         <Pressable

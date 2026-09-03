@@ -1,20 +1,41 @@
-import { router } from "expo-router";
-import { useMemo, useState } from "react";
+/**
+ * The full plan — the reference document behind /today.
+ *
+ * Everything the user might want to check but never has to decide: what the
+ * assessment saw, what it declined to call, the whole AM/PM routine with weekly
+ * frequencies, and every adjustment the safety engine made on their behalf.
+ *
+ * This screen used to invent its contents when the in-memory plan was missing:
+ * a hardcoded routine and three hardcoded "findings" about the user's face,
+ * rendered under "What we noticed". After a restart that was the only state it
+ * ever had. It now reads the on-device record, and when there is nothing there
+ * it says so.
+ */
+import { router, useFocusEffect } from "expo-router";
+import { useCallback, useState } from "react";
 import { Alert, Pressable, View } from "react-native";
 
+import { ACTIVES, type ConcernKey, type ProductCategory, type RoutineStep } from "@pore/shared";
 import {
-  ACTIVES,
-  applySafetyRules,
-  type ConcernKey,
-  type ProductCategory,
-  type Routine,
-  type RoutineStep,
-} from "@pore/shared";
-import { buildIntake } from "@/lib/intake";
-import { deleteJournal, readJournal, recordedDays } from "@/lib/journal";
+  activeRoutine,
+  deleteJournal,
+  eraseRecord,
+  readJournal,
+  recordedDays,
+} from "@/lib/journal";
 import { deleteStoredPhotos, listSessions, storedPhotoCount } from "@/lib/photos";
 import { useOnboarding } from "@/state/onboarding";
-import { AppText, Card, Chip, Divider, GhostButton, Screen, colors, spacing } from "@/theme";
+import {
+  AppText,
+  Card,
+  Chip,
+  Divider,
+  GhostButton,
+  PrimaryButton,
+  Screen,
+  colors,
+  spacing,
+} from "@/theme";
 
 const CATEGORY_LABELS: Record<ProductCategory, string> = {
   cleanser: "Cleanser",
@@ -38,31 +59,6 @@ const CONCERN_LABELS: Record<ConcernKey, string> = {
   irritation_signs: "Signs of irritation",
 };
 
-/** Local fallback draft (over-loaded on purpose so the safety engine acts). */
-function draftRoutine(): Routine {
-  const step = (
-    order: number,
-    category: ProductCategory,
-    active: RoutineStep["active"],
-    frequencyPerWeek: number,
-    rationale: string,
-  ): RoutineStep => ({ order, category, active, frequencyPerWeek, rationale, irritationRisk: "medium" });
-  return {
-    am: [
-      step(1, "cleanser", undefined, 7, "Start clean without stripping your skin."),
-      step(2, "serum", "vitamin_c", 7, "Brightens and helps even out tone over time."),
-      step(3, "moisturizer", undefined, 7, "Locks in hydration and supports your barrier."),
-    ],
-    pm: [
-      step(1, "cleanser", undefined, 7, "Remove the day's oil and sunscreen."),
-      step(2, "exfoliant", "salicylic_acid", 4, "Helps clear pores and reduce breakouts."),
-      step(3, "exfoliant", "glycolic_acid", 4, "Smooths texture and fades marks."),
-      step(4, "treatment", "retinoid", 7, "Boosts cell turnover for texture and marks."),
-    ],
-    notes: ["Patch-test any new active for a few days before full use."],
-  };
-}
-
 /** Plain-language band for a 0..1 confidence, so the number is not the whole story. */
 function confidenceLabel(c: number): string {
   if (c >= 0.75) return "High confidence";
@@ -71,12 +67,28 @@ function confidenceLabel(c: number): string {
 }
 
 export default function Plan() {
-  const { data, update } = useOnboarding();
+  const { update } = useOnboarding();
+  const [journal, setJournal] = useState(() => readJournal());
   const [photoCount, setPhotoCount] = useState(() => storedPhotoCount());
-  const [sessionCount] = useState(() => listSessions().length);
-  const [journalDays, setJournalDays] = useState(() => recordedDays(readJournal()));
+  const [sessionCount, setSessionCount] = useState(() => listSessions().length);
 
-  function confirmEraseJournal() {
+  // These used to be one-shot lazy initialisers, so the counts went stale the
+  // moment the user took a new set or came back from /compare — this screen
+  // stays mounted underneath both.
+  useFocusEffect(
+    useCallback(() => {
+      setJournal(readJournal());
+      setPhotoCount(storedPhotoCount());
+      setSessionCount(listSessions().length);
+    }, []),
+  );
+
+  const routine = activeRoutine(journal);
+  const plan = journal.plan;
+  const assessment = plan?.assessment;
+  const journalDays = recordedDays(journal);
+
+  function confirmEraseRecord() {
     Alert.alert(
       "Erase your routine record?",
       "This removes the tick-offs and skin check-ins stored on this phone. Your routine stays, but it restarts its six-week ramp from today.",
@@ -87,8 +99,7 @@ export default function Plan() {
           style: "destructive",
           onPress: () => {
             try {
-              deleteJournal();
-              setJournalDays(0);
+              setJournal(eraseRecord());
             } catch {
               Alert.alert("Couldn't erase", "Something went wrong removing the record. Try again.");
             }
@@ -100,20 +111,21 @@ export default function Plan() {
 
   function confirmDeletePhotos() {
     Alert.alert(
-      "Delete your photos?",
-      "This removes the photos stored on this phone. Your routine stays.",
+      "Erase your photos?",
+      "This removes the photos stored on this phone. Your routine stays, but there will be nothing to compare a future set against.",
       [
         { text: "Keep them", style: "cancel" },
         {
-          text: "Delete",
+          text: "Erase",
           style: "destructive",
           onPress: () => {
             try {
               deleteStoredPhotos();
               update({ photos: [] });
               setPhotoCount(0);
+              setSessionCount(0);
             } catch {
-              Alert.alert("Couldn't delete", "Something went wrong removing the photos. Try again.");
+              Alert.alert("Couldn't erase", "Something went wrong removing the photos. Try again.");
             }
           },
         },
@@ -121,36 +133,54 @@ export default function Plan() {
     );
   }
 
-  // Prefer the server-generated plan; otherwise run the engine locally so the
-  // screen still demonstrates the full flow offline.
-  const view = useMemo(() => {
-    if (data.plan) {
-      const a = data.plan.assessment;
-      return {
-        concerns: a.findings
-          .filter((f) => f.present)
-          .map((f) => `${CONCERN_LABELS[f.concern]} · ${f.appearanceLevel}`),
-        summary: a.summary,
-        escalate: a.escalation.recommendProfessional,
-        confidence: a.overallConfidence,
-        limitations: a.limitations,
-        photoQuality: a.photoQuality,
-        routine: data.plan.routine,
-        adjustments: data.plan.adjustments,
-      };
-    }
-    const { routine, adjustments } = applySafetyRules(draftRoutine(), buildIntake(data));
-    return {
-      concerns: ["Acne-like breakouts · moderate", "Dark-spot appearance · mild", "Oiliness · noticeable"],
-      summary: "A simple routine built around your skin — with only the steps you actually need.",
-      escalate: false,
-      confidence: null,
-      limitations: [],
-      photoQuality: [],
-      routine,
-      adjustments,
-    };
-  }, [data]);
+  function confirmForgetEverything() {
+    Alert.alert(
+      "Erase everything?",
+      "This removes your routine, your assessment, your photos and your record from this phone. There is no copy anywhere else, so this cannot be undone.",
+      [
+        { text: "Keep my data", style: "cancel" },
+        {
+          text: "Erase everything",
+          style: "destructive",
+          onPress: () => {
+            try {
+              deleteStoredPhotos();
+              deleteJournal();
+              update({ photos: [], plan: undefined });
+              router.replace("/today");
+            } catch {
+              Alert.alert("Couldn't erase", "Something went wrong. Try again.");
+            }
+          },
+        },
+      ],
+    );
+  }
+
+  if (!routine) {
+    return (
+      <Screen contentStyle={{ paddingTop: spacing.section }}>
+        <AppText variant="label" color={colors.primary}>
+          YOUR FULL PLAN
+        </AppText>
+        <AppText variant="title">Nothing here yet</AppText>
+        <AppText variant="body" color={colors.inkMuted}>
+          Once you&apos;ve been through the guided photos and the questions, this is where the full
+          reading and every step of your routine lives.
+        </AppText>
+        <View style={{ marginTop: spacing.md }}>
+          <PrimaryButton
+            label="Set up my routine"
+            onPress={() => router.push("/onboarding/photo")}
+          />
+        </View>
+      </Screen>
+    );
+  }
+
+  const concerns = (assessment?.findings ?? [])
+    .filter((f) => f.present)
+    .map((f) => `${CONCERN_LABELS[f.concern]} · ${f.appearanceLevel}`);
 
   return (
     <Screen contentStyle={{ paddingTop: spacing.lg }}>
@@ -158,38 +188,60 @@ export default function Plan() {
         YOUR FULL PLAN
       </AppText>
       <AppText variant="title">Everything, in one place</AppText>
-      <AppText variant="body" color={colors.inkMuted}>
-        {view.summary}
-      </AppText>
-
-      <Card elevated>
-        <AppText variant="heading">What we noticed</AppText>
-        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: spacing.sm, marginTop: spacing.xs }}>
-          {view.concerns.map((c) => (
-            <Chip key={c} label={c} />
-          ))}
-        </View>
-        <AppText variant="caption" color={colors.inkMuted}>
-          Cosmetic, non-diagnostic appearance only.
+      {assessment ? (
+        <AppText variant="body" color={colors.inkMuted}>
+          {assessment.summary}
         </AppText>
-        {view.confidence !== null ? (
+      ) : null}
+
+      {/* A mock reading is a fabrication. This product's whole claim is that it
+          does not fabricate readings, so when one is a sample, it says so. */}
+      {plan?.mode === "mock" && (
+        <Card>
+          <AppText variant="bodyStrong" color={colors.caution}>
+            This is a sample reading
+          </AppText>
+          <AppText variant="caption" color={colors.inkMuted}>
+            This build isn&apos;t connected to the analysis service, so nothing below was measured
+            from your photos. The routine is still clamped by the same safety rules.
+          </AppText>
+        </Card>
+      )}
+
+      {assessment ? (
+        <Card elevated>
+          <AppText variant="heading">What we noticed</AppText>
+          {concerns.length > 0 ? (
+            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: spacing.sm, marginTop: spacing.xs }}>
+              {concerns.map((c) => (
+                <Chip key={c} label={c} />
+              ))}
+            </View>
+          ) : (
+            <AppText variant="caption" color={colors.ink}>
+              Nothing stood out clearly enough to name. That is a result, not a blank.
+            </AppText>
+          )}
+          <AppText variant="caption" color={colors.inkMuted}>
+            Cosmetic, non-diagnostic appearance only.
+          </AppText>
           <AppText variant="caption" color={colors.primary}>
-            {confidenceLabel(view.confidence)}
-            {view.photoQuality.length > 0
-              ? ` · ${view.photoQuality.filter((p) => p.flags.length === 0).length} of ${view.photoQuality.length} photos passed the quality check`
+            {confidenceLabel(assessment.overallConfidence)}
+            {assessment.photoQuality.length > 0
+              ? ` · ${assessment.photoQuality.filter((p) => p.flags.length === 0).length} of ${assessment.photoQuality.length} photos passed the quality check`
               : ""}
           </AppText>
-        ) : null}
-      </Card>
+        </Card>
+      ) : null}
 
-      {view.limitations.length > 0 && (
+      {assessment && assessment.limitations.length > 0 && (
         <Card>
           <AppText variant="heading">What we couldn&apos;t see clearly</AppText>
           <AppText variant="caption" color={colors.inkMuted}>
             Saying so is more useful than a confident guess.
           </AppText>
           <View style={{ gap: spacing.xs, marginTop: spacing.xs }}>
-            {view.limitations.map((l, i) => (
+            {assessment.limitations.map((l, i) => (
               <AppText key={i} variant="caption" color={colors.ink}>
                 • {l}
               </AppText>
@@ -198,7 +250,7 @@ export default function Plan() {
         </Card>
       )}
 
-      {view.escalate && (
+      {assessment?.escalation.recommendProfessional && (
         <Card>
           <AppText variant="bodyStrong" color={colors.escalate}>
             Worth checking with a professional
@@ -209,8 +261,8 @@ export default function Plan() {
         </Card>
       )}
 
-      <RoutineCard title="Morning" steps={view.routine.am} />
-      <RoutineCard title="Evening" steps={view.routine.pm} />
+      <RoutineCard title="Morning" steps={routine.am} />
+      <RoutineCard title="Evening" steps={routine.pm} />
 
       <Card>
         <AppText variant="caption" color={colors.inkMuted}>
@@ -218,14 +270,13 @@ export default function Plan() {
           do on any given day is worked out for you on Today — you never have to plan a night
           yourself.
         </AppText>
-        <GhostButton label="Back to today" onPress={() => router.replace("/today")} />
       </Card>
 
-      {view.adjustments.length > 0 && (
+      {plan && plan.adjustments.length > 0 && (
         <Card>
           <AppText variant="heading">What Pore adjusted to keep you safe</AppText>
           <View style={{ gap: spacing.xs, marginTop: spacing.xs }}>
-            {view.adjustments.map((a, i) => (
+            {plan.adjustments.map((a, i) => (
               <AppText key={i} variant="caption" color={colors.ink}>
                 • {a.detail}
               </AppText>
@@ -234,23 +285,24 @@ export default function Plan() {
         </Card>
       )}
 
-      {photoCount > 0 && (
-        <Card>
-          <AppText variant="heading">Your photos</AppText>
-          <AppText variant="caption" color={colors.inkMuted}>
-            {photoCount} {photoCount === 1 ? "photo is" : "photos are"} saved on this phone, inside
-            the app. They were never uploaded to photo storage and are not on our servers.
-          </AppText>
-          {sessionCount >= 2 && (
-            <GhostButton label="See what changed" onPress={() => router.push("/compare")} />
-          )}
-          <GhostButton
-            label="Take a new set"
-            onPress={() => router.push("/onboarding/photo?mode=recheck")}
-          />
-          <GhostButton label="Delete my photos" onPress={confirmDeletePhotos} />
-        </Card>
-      )}
+      {/* "Take a new set" used to live inside `photoCount > 0`, so erasing your
+          photos removed the only route back into capture anywhere in the app —
+          permanently orphaning the routine from any future measurement. */}
+      <Card>
+        <AppText variant="heading">Your photos</AppText>
+        <AppText variant="caption" color={colors.inkMuted}>
+          {photoCount > 0
+            ? `${photoCount} ${photoCount === 1 ? "photo is" : "photos are"} saved on this phone, inside the app. They are sent for analysis and never stored on our servers.`
+            : "No photos are saved on this phone. A new set is what lets us measure change instead of guessing at it."}
+        </AppText>
+        <PrimaryButton
+          label={photoCount > 0 ? "Take a new set" : "Take your first set"}
+          onPress={() => router.push("/onboarding/photo?mode=recheck")}
+        />
+        {sessionCount >= 2 && (
+          <GhostButton label="See what changed" onPress={() => router.push("/compare")} />
+        )}
+      </Card>
 
       <Card>
         <AppText variant="heading">Your routine record</AppText>
@@ -259,9 +311,24 @@ export default function Plan() {
             ? "Once you start ticking off steps, this phone keeps a note of what you did and how your skin felt. That record is what lets your routine slow itself down when your skin reacts."
             : `${journalDays} ${journalDays === 1 ? "day" : "days"} recorded on this phone — which steps you did, and how your skin felt. It never leaves your device, and it is what lets your routine slow itself down when your skin reacts.`}
         </AppText>
-        {journalDays > 0 && (
-          <GhostButton label="Erase my routine record" onPress={confirmEraseJournal} />
-        )}
+      </Card>
+
+      {/* Destructive actions, together and visually distinct. They used to be
+          six identical ghost buttons scattered between the retention actions. */}
+      <Card>
+        <AppText variant="heading">Erase my data</AppText>
+        <AppText variant="caption" color={colors.inkMuted}>
+          Everything Pore knows about you is on this phone, so erasing it here erases it entirely.
+        </AppText>
+        <View style={{ gap: spacing.xs, marginTop: spacing.xs }}>
+          {journalDays > 0 && (
+            <GhostButton label="Erase my routine record" tone="danger" onPress={confirmEraseRecord} />
+          )}
+          {photoCount > 0 && (
+            <GhostButton label="Erase my photos" tone="danger" onPress={confirmDeletePhotos} />
+          )}
+          <GhostButton label="Erase everything" tone="danger" onPress={confirmForgetEverything} />
+        </View>
       </Card>
 
       <Card>

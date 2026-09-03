@@ -16,7 +16,7 @@
  */
 import { Image } from "expo-image";
 import { router, useLocalSearchParams } from "expo-router";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ActivityIndicator, View } from "react-native";
 
 import {
@@ -27,9 +27,10 @@ import {
   type ConcernProgress,
   type ProgressReport,
 } from "@pore/shared";
-import { fetchPlan } from "@/lib/api";
+import { PLAN_FAILURE_COPY, fetchPlan } from "@/lib/api";
 import { buildIntake } from "@/lib/intake";
 import {
+  activeRoutine,
   adherenceRate,
   readJournal,
   recordAssessment,
@@ -72,6 +73,9 @@ export default function Compare() {
   const [angle, setAngle] = useState<CaptureAngle>("front");
   const [assessing, setAssessing] = useState(false);
   const [assessError, setAssessError] = useState<string | null>(null);
+  const inFlight = useRef<AbortController | null>(null);
+  /** A re-assessment is two model calls. It runs once per visit, never on a re-render. */
+  const ranOnce = useRef(false);
 
   /**
    * Re-assessment runs here rather than on the capture screen, so capture stays
@@ -81,20 +85,36 @@ export default function Compare() {
    */
   const runReassessment = useCallback(async () => {
     const photos = data.photos ?? [];
-    if (photos.length === 0) return;
+    if (photos.length === 0) {
+      setAssessError(
+        "We don't have the new photos in hand any more — take the set again and we'll measure it.",
+      );
+      return;
+    }
     setAssessing(true);
     setAssessError(null);
+
+    const controller = new AbortController();
+    inFlight.current = controller;
+
     try {
-      const result = await fetchPlan({
-        images: photos.map((p) => ({ data: p.data, mediaType: "image/jpeg" })),
-        intake: buildIntake(data),
-      });
-      if (!result) {
-        setAssessError(
-          "We couldn't reach the assessment service, so your photos are saved but not measured yet. Try again when you're back online.",
-        );
+      // The intake comes from the on-device record, not from onboarding state:
+      // after a restart that state is empty, and re-reading with default
+      // answers would clamp the adapted routine against the wrong person.
+      const stored = readJournal();
+      const outcome = await fetchPlan(
+        {
+          images: photos.map((p) => ({ data: p.data, mediaType: "image/jpeg", quality: p.quality })),
+          intake: buildIntake(stored.intake ?? data),
+        },
+        controller.signal,
+      );
+      if (controller.signal.aborted) return;
+      if (!outcome.ok) {
+        setAssessError(PLAN_FAILURE_COPY[outcome.reason]);
         return;
       }
+      const result = outcome.plan;
       const recorded = recordAssessment({
         sessionId: sessions[0]?.id ?? "current",
         capturedAt: photos[0]?.capturedAt ?? new Date().toISOString(),
@@ -105,7 +125,7 @@ export default function Compare() {
       // `adaptRoutine` proposes against a routine and runs its own safety
       // clamp; re-running it on its own output would step the same active up
       // again, so this must never move into render.
-      const base = recorded.routine ?? data.plan?.routine;
+      const base = activeRoutine(recorded);
       if (recorded.baseline && recorded.latest && base) {
         const measured = compareAssessments(
           recorded.baseline.assessment,
@@ -113,7 +133,7 @@ export default function Compare() {
           { before: recorded.baseline.capturedAt, after: recorded.latest.capturedAt },
         );
         const out = adaptRoutine(base, measured, {
-          intake: buildIntake(data),
+          intake: buildIntake(recorded.intake ?? data),
           weeksOnRoutine: weeksOnRoutine(recorded),
           adherence: adherenceRate(recorded),
         });
@@ -124,13 +144,19 @@ export default function Compare() {
     } catch {
       setAssessError("Something went wrong measuring this set. Your photos are safe — try again.");
     } finally {
-      setAssessing(false);
+      if (!controller.signal.aborted) setAssessing(false);
     }
   }, [data, sessions]);
 
   useEffect(() => {
-    if (mode === "recheck") void runReassessment();
+    if (mode !== "recheck" || ranOnce.current) return;
+    ranOnce.current = true;
+    void runReassessment();
   }, [mode, runReassessment]);
+
+  // Leaving mid-measurement must not leave a request running against a screen
+  // that no longer exists.
+  useEffect(() => () => inFlight.current?.abort(), []);
 
   const { baseline, latest } = journal;
   const report: ProgressReport | null =
@@ -147,6 +173,7 @@ export default function Compare() {
   if (assessing) {
     return (
       <Screen contentStyle={{ paddingTop: spacing.lg }}>
+        <GhostButton label="Back" tone="quiet" onPress={() => router.back()} />
         <AppText variant="label" color={colors.primary}>
           MEASURING
         </AppText>

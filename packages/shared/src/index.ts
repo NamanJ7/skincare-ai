@@ -1,4 +1,5 @@
 export * from "./design";
+export * from "./journal";
 export * from "./legal";
 export * from "./progress";
 export * from "./safety";
