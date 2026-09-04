@@ -22,7 +22,9 @@ export type PlanFailure =
   /** We gave up waiting. */
   | "timeout"
   /** The server answered, and the answer was an error. */
-  | "server";
+  | "server"
+  /** We are asking too often, or the endpoint is saturated. Worth retrying. */
+  | "busy";
 
 export type PlanOutcome = { ok: true; plan: PlanResult } | { ok: false; reason: PlanFailure };
 
@@ -36,6 +38,7 @@ export const PLAN_FAILURE_COPY: Record<PlanFailure, string> = {
     "Reading your skin took longer than expected and we stopped waiting. Your photos are safe — try again.",
   server:
     "Something went wrong on our side while reading your photos. Nothing about your skin was saved. Try again in a moment.",
+  busy: "A lot of routines are being built right now. Give it a minute and try again.",
 };
 
 // Set EXPO_PUBLIC_API_URL (e.g. http://192.168.1.20:3000, your dev machine's LAN
@@ -70,6 +73,10 @@ export async function fetchPlan(input: PlanInput, signal?: AbortSignal): Promise
       body: JSON.stringify(input),
       signal: controller.signal,
     });
+    // 429 is not a failure the user caused and not one they can fix by
+    // changing anything — it just needs a minute, and saying so is different
+    // from "something went wrong on our side".
+    if (res.status === 429) return { ok: false, reason: "busy" };
     if (!res.ok) return { ok: false, reason: "server" };
     return { ok: true, plan: (await res.json()) as PlanResult };
   } catch {

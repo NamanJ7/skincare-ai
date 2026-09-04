@@ -83,6 +83,7 @@ function full(): Journal {
     },
     routine: routine(),
     lastAdaptation: [],
+    reminder: { enabled: true, hour: 20, minute: 30 },
   };
 }
 
@@ -188,5 +189,45 @@ describe("hydrateJournal", () => {
     );
 
     expect(journal.completed).toEqual({ "2026-02-01:PM": [1, 3] });
+  });
+});
+
+describe("hydrateJournal — the evening reminder", () => {
+  it("round-trips a valid reminder", () => {
+    const { journal, repaired } = hydrateJournal(JSON.parse(JSON.stringify(full())), TODAY);
+    expect(repaired).toBe(false);
+    expect(journal.reminder).toEqual({ enabled: true, hour: 20, minute: 30 });
+  });
+
+  // Absent means "never asked" and must stay distinguishable from "asked and
+  // declined" — only the first of those should ever produce a prompt.
+  it("leaves an absent reminder absent, without flagging repair", () => {
+    const { journal, repaired } = hydrateJournal({ startedOn: "2026-01-15" }, TODAY);
+    expect(journal.reminder).toBeUndefined();
+    expect(repaired).toBe(false);
+  });
+
+  it("keeps a reminder the user switched off", () => {
+    const { journal } = hydrateJournal(
+      { reminder: { enabled: false, hour: 21, minute: 0 } },
+      TODAY,
+    );
+    expect(journal.reminder).toEqual({ enabled: false, hour: 21, minute: 0 });
+  });
+
+  // A half-read reminder would fire at an hour nobody chose.
+  it("drops a reminder with an out-of-range or non-integer time", () => {
+    for (const bad of [
+      { enabled: true, hour: 24, minute: 0 },
+      { enabled: true, hour: -1, minute: 0 },
+      { enabled: true, hour: 20, minute: 60 },
+      { enabled: true, hour: 20.5, minute: 0 },
+      { enabled: true, hour: 20 },
+      { enabled: "yes", hour: 20, minute: 0 },
+    ]) {
+      const { journal, repaired } = hydrateJournal({ reminder: bad }, TODAY);
+      expect(journal.reminder).toBeUndefined();
+      expect(repaired).toBe(true);
+    }
   });
 });

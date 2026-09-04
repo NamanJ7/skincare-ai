@@ -17,7 +17,7 @@ import type { IntakeResponse } from "../types/intake";
 import type { PlanResult } from "../types/plan";
 import type { Routine } from "../types/routine";
 import type { SkinCheckIn, SkinFeel } from "../schedule/engine";
-import type { Journal, StoredAssessment } from "./types";
+import type { Journal, ReminderSetting, StoredAssessment } from "./types";
 
 const FEELS: SkinFeel[] = ["calm", "tight", "stinging"];
 /** `YYYY-MM-DD`. Anything else is not a date we can do day arithmetic on. */
@@ -105,6 +105,22 @@ function readIntake(v: unknown): IntakeResponse | undefined {
   return v as unknown as IntakeResponse;
 }
 
+/**
+ * A reminder is dropped whole if any part of it is unreadable. A half-read one
+ * would schedule a notification at an hour the user never chose, which is worse
+ * than not reminding them at all.
+ */
+function readReminder(v: unknown): ReminderSetting | undefined {
+  if (!isObject(v)) return undefined;
+  const { enabled, hour, minute } = v;
+  if (typeof enabled !== "boolean") return undefined;
+  if (typeof hour !== "number" || !Number.isInteger(hour) || hour < 0 || hour > 23) return undefined;
+  if (typeof minute !== "number" || !Number.isInteger(minute) || minute < 0 || minute > 59) {
+    return undefined;
+  }
+  return { enabled, hour, minute };
+}
+
 function readCompleted(v: unknown): Record<string, number[]> {
   if (!isObject(v)) return {};
   const out: Record<string, number[]> = {};
@@ -162,6 +178,9 @@ export function hydrateJournal(raw: unknown, fallbackStartedOn: string): Hydrate
     : [];
   if (raw.finished !== undefined && !Array.isArray(raw.finished)) repaired = true;
 
+  const reminder = readReminder(raw.reminder);
+  dropped(raw.reminder, reminder);
+
   const lastAdaptation = Array.isArray(raw.lastAdaptation)
     ? (raw.lastAdaptation as Journal["lastAdaptation"])
     : undefined;
@@ -180,6 +199,7 @@ export function hydrateJournal(raw: unknown, fallbackStartedOn: string): Hydrate
       latest,
       routine,
       lastAdaptation,
+      reminder,
     },
     repaired,
   };

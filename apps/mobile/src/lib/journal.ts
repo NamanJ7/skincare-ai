@@ -24,6 +24,7 @@ import {
   type PlanResult,
   type ProgressAdjustment,
   type Routine,
+  type ReminderSetting,
   type RoutineTime,
   type SkinFeel,
   type StoredAssessment,
@@ -112,6 +113,27 @@ export function savePlan(intake: IntakeResponse, plan: PlanResult): Journal {
   journal.lastAdaptation = undefined;
   writeJournal(journal);
   return journal;
+}
+
+/** Turn the evening reminder on or off, or move it. */
+export function saveReminder(reminder: ReminderSetting): Journal {
+  const journal = readJournal();
+  journal.reminder = reminder;
+  writeJournal(journal);
+  return journal;
+}
+
+/**
+ * Whether now is the moment to ask about reminders.
+ *
+ * Only after a session the user actually finished, and only if we have never
+ * asked. On iOS the OS prompt is a one-shot: ask during onboarding, before the
+ * product has done anything for them, and it gets denied forever. Asking
+ * straight after the first completed routine means the question arrives while
+ * the thing it is offering to protect is fresh.
+ */
+export function shouldOfferReminder(journal: Journal): boolean {
+  return journal.reminder === undefined && journal.finished.length >= 1;
 }
 
 /** The routine the user is actually on: adapted if there is one, else the plan's. */
@@ -280,4 +302,4 @@ export function deleteJournal(): void {
   if (d.exists) d.delete();
 }
 
-export type { Journal, StoredAssessment };
+export type { Journal, ReminderSetting, StoredAssessment };

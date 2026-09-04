@@ -22,6 +22,21 @@ export interface StoredAssessment {
   assessment: Assessment;
 }
 
+/**
+ * The one reminder the product sends.
+ *
+ * Evening only, because the morning routine happens anyway — you are already at
+ * the sink — and the evening one is the one that gets skipped. A second
+ * notification would be for us, not for the user.
+ */
+export interface ReminderSetting {
+  enabled: boolean;
+  /** Local hour, 0-23. */
+  hour: number;
+  /** Local minute, 0-59. */
+  minute: number;
+}
+
 export interface Journal {
   version: 1;
   /** Date the routine began — the origin the whole ramp is measured from. */
@@ -68,4 +83,12 @@ export interface Journal {
    * same active up a second time. It runs once, when a measurement lands.
    */
   lastAdaptation?: ProgressAdjustment[];
+  /**
+   * The evening reminder, if the user has been asked.
+   *
+   * Absent means "never asked" — which is different from "asked and declined"
+   * (`enabled: false`), because only the first of those should ever produce a
+   * prompt.
+   */
+  reminder?: ReminderSetting;
 }

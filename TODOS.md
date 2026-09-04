@@ -66,11 +66,26 @@ dermatologists usually phrase retinoid introduction, but they are round numbers,
 not measurements. They are deliberately isolated as named constants at the top of
 the module so they can be tuned in one place once there is real adherence data.
 
-### No notification, so the app has to be opened to be useful
-`/today` answers "what do I do right now", but nothing prompts the user to ask.
-A single local notification at the user's chosen evening time is the obvious
-partner to this screen, and it is the one place a reminder is genuinely earned
-rather than growth spam. Needs `expo-notifications`, which is not a dependency yet.
+### ~~No notification, so the app has to be opened to be useful~~ — done
+One evening notification, at a time the user picks from four presets.
+`apps/mobile/src/lib/reminders.ts` holds the whole thing.
+
+Three decisions worth not undoing:
+
+- **Asked after the first *completed* session, never in onboarding**
+  (`shouldOfferReminder`). On iOS the OS prompt is a one-shot; spending it
+  before the product has done anything spends it on a denial.
+- **"No thanks" is stored as `enabled: false`, not left absent**, so the card
+  never returns. Absent means "never asked" and is the only state that prompts.
+- **No streak language, ever.** The body is "Tonight's steps are ready. It takes
+  about two minutes." A notification that punishes a missed night would
+  contradict the deload engine underneath it.
+
+Two known limits. The trigger is a static daily repeat, so it fires whether or
+not the evening session is already ticked off — suppressing that needs a reschedule
+on every app focus, which is real machinery for a small gain. And local
+notifications no longer work in Expo Go on Android (SDK 53+), so this needs a
+development build to test at all.
 
 ### ~~The user cannot see the ramp being held~~ — done
 `rampProgress` now reports `heldByFlare` alongside the week, and the evening
@@ -141,10 +156,22 @@ Two things deliberately left as claims about the future, clearly marked: the
 store badges ("not on the app stores yet") and the paid tiers. A FAQ entry now
 answers "does Pore recommend specific products to buy?" with "not today".
 
-### `apps/web` has no tests
-`packages/shared` is the only package with a test suite. The `/api/plan` input
-validation in `apps/web/app/api/plan/route.ts` is a trust boundary in front of a
-paid endpoint and is currently only covered by manual probes.
+### ~~`apps/web` has no tests~~ — the trust boundary is covered now
+`apps/web` has vitest and 21 tests over the two things guarding a paid endpoint:
+`lib/validateImages.ts` (extracted from the route so it could be tested at all)
+and `lib/rateLimit.ts`. Everything else in `apps/web` is still untested, which is
+fine — it is a marketing site.
+
+### `/api/plan` rate limiting is a speed bump, not a wall
+`lib/rateLimit.ts` counts per-IP requests and concurrent generations **in the
+process**, so on serverless each instance enforces its own limit and a cold
+start resets it. It stops the accidental case — a retry loop, a stuck client, a
+scraper that does not care — and it is the most that can be done without shared
+state. `x-forwarded-for` is also spoofable by anyone talking to the origin
+directly. Before this endpoint carries real traffic, move the counters to
+Redis/KV; `check()` is pure apart from the store it is handed, so only the store
+changes. Real protection means auth on the endpoint, which means an account
+system, which does not exist yet.
 
 ## Landed in the refinement pass, still unverified on hardware
 
@@ -174,3 +201,10 @@ ingredient chips is a wall of jargon to someone who has never used an active.
 The splash is skipped entirely and the hero loop parks on its results frame.
 Verify against the OS setting on both platforms — this is the one behaviour that
 cannot be checked from a bundle.
+
+### The evening reminder
+Needs a development build (Expo Go dropped Android local notifications in SDK
+53+). Check: the permission prompt arrives right after the first finished
+session and not before; declining it never brings the card back; the four time
+presets schedule at the right local hour across a timezone change; and a full
+erase on /plan really does cancel the scheduled notification.

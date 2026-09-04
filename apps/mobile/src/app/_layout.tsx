@@ -5,6 +5,7 @@ import { StatusBar } from "expo-status-bar";
 import { useEffect } from "react";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
+import { configureNotifications } from "@/lib/reminders";
 import { OnboardingProvider } from "@/state/onboarding";
 import { colors } from "@/theme";
 import { fontModules } from "@/theme/fonts";
@@ -13,6 +14,10 @@ import { fontModules } from "@/theme/fonts";
 // system fonts before Fraunces/Inter load.
 SplashScreen.preventAutoHideAsync();
 SplashScreen.setOptions({ fade: true, duration: 300 });
+
+// Decide how a notification behaves if it lands while the app is open. Must be
+// set before one can arrive, so it happens at module scope.
+configureNotifications();
 
 /**
  * A back affordance, and nothing else.

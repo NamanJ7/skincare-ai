@@ -69,8 +69,11 @@ pnpm --filter @pore/mobile ios / android / web
 pnpm --filter @pore/mobile typecheck
 ```
 
-There is no test suite for `apps/web` or `apps/mobile` today — `packages/shared` is the only
-package with tests (vitest), concentrated on the safety engine.
+`packages/shared` (safety, schedule, progress, vision, journal hydration) and `apps/web`
+(`lib/validateImages.ts` and `lib/rateLimit.ts` — the two guards in front of a paid endpoint) have
+vitest suites. `apps/mobile` has none: the logic worth testing there was moved into
+`packages/shared`, which is why `hydrateJournal` lives in the shared package rather than beside the
+file I/O that uses it.
 
 ## Architecture: the plan-generation pipeline
 
@@ -217,4 +220,12 @@ call is listed separately below so a refusal can never be skimmed as a result.
 - `packages/shared` type modules (`types/*.ts`) export types only (`export type *` from the barrel)
   — keep new domain types type-only unless they need runtime values.
 - Env config: `apps/web/.env.example` documents `ANTHROPIC_API_KEY`; unset it locally to exercise
-  the mock pipeline path instead of burning API calls.
+  the mock pipeline path instead of burning API calls. A mock plan carries `mode: "mock"` and `/plan`
+  must keep saying so — a fabricated reading presented as a real one is the one thing this product
+  cannot ship.
+- `/api/plan` is public and unauthenticated in front of two Opus calls, so `lib/rateLimit.ts` caps
+  per-IP requests and concurrent generations. The counters are in-process: a speed bump against
+  accidental abuse, not a security control. Do not describe it as one.
+- The evening reminder (`apps/mobile/src/lib/reminders.ts`) is asked for only after a session the
+  user actually finished, is stored in the journal, and never uses streak language. All three are
+  deliberate; see TODOS.md.

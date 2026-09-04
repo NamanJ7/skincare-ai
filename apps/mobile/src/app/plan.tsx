@@ -22,7 +22,15 @@ import {
   eraseRecord,
   readJournal,
   recordedDays,
+  saveReminder,
 } from "@/lib/journal";
+import {
+  DEFAULT_REMINDER,
+  REMINDER_TIMES,
+  cancelReminder,
+  requestPermission,
+  syncReminder,
+} from "@/lib/reminders";
 import { deleteStoredPhotos, listSessions, storedPhotoCount } from "@/lib/photos";
 import { useOnboarding } from "@/state/onboarding";
 import {
@@ -87,6 +95,33 @@ export default function Plan() {
   const plan = journal.plan;
   const assessment = plan?.assessment;
   const journalDays = recordedDays(journal);
+  const reminder = journal.reminder;
+
+  async function setReminderEnabled(enabled: boolean) {
+    if (!enabled) {
+      const next = saveReminder({ ...(reminder ?? DEFAULT_REMINDER), enabled: false });
+      setJournal(next);
+      await cancelReminder();
+      return;
+    }
+    const granted = await requestPermission();
+    if (!granted) {
+      Alert.alert(
+        "Notifications are off",
+        "Pore can't send the reminder until notifications are turned on for it in your phone's settings.",
+      );
+      return;
+    }
+    const next = saveReminder({ ...(reminder ?? DEFAULT_REMINDER), enabled: true });
+    setJournal(next);
+    await syncReminder(next.reminder);
+  }
+
+  async function setReminderTime(hour: number, minute: number) {
+    const next = saveReminder({ enabled: true, hour, minute });
+    setJournal(next);
+    await syncReminder(next.reminder);
+  }
 
   function confirmEraseRecord() {
     Alert.alert(
@@ -146,6 +181,7 @@ export default function Plan() {
             try {
               deleteStoredPhotos();
               deleteJournal();
+              void cancelReminder();
               update({ photos: [], plan: undefined });
               router.replace("/today");
             } catch {
@@ -303,6 +339,34 @@ export default function Plan() {
           <GhostButton label="See what changed" onPress={() => router.push("/compare")} />
         )}
       </Card>
+
+      {/* Only shown once the user has been asked on Today, so this screen never
+          becomes the place a permission prompt ambushes them. */}
+      {reminder && (
+        <Card>
+          <AppText variant="heading">Evening reminder</AppText>
+          <AppText variant="caption" color={colors.inkMuted}>
+            One notification, in the evening, and nothing else. We never send streak warnings or
+            chase you about a night you skipped — the routine already slows itself down when your
+            skin needs it to.
+          </AppText>
+          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: spacing.xs, marginTop: spacing.xs }}>
+            {REMINDER_TIMES.map((t) => (
+              <Chip
+                key={t.label}
+                label={t.label}
+                selected={reminder.enabled && reminder.hour === t.hour && reminder.minute === t.minute}
+                onPress={() => void setReminderTime(t.hour, t.minute)}
+              />
+            ))}
+          </View>
+          <GhostButton
+            label={reminder.enabled ? "Turn the reminder off" : "Turn the reminder on"}
+            tone={reminder.enabled ? "quiet" : "primary"}
+            onPress={() => void setReminderEnabled(!reminder.enabled)}
+          />
+        </Card>
+      )}
 
       <Card>
         <AppText variant="heading">Your routine record</AppText>

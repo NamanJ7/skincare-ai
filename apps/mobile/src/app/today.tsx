@@ -42,11 +42,19 @@ import {
   completedSteps,
   readJournal,
   recordCheckIn,
+  saveReminder,
+  shouldOfferReminder,
   streakDays,
   toggleStep,
   weeksOnRoutine,
 } from "@/lib/journal";
 import { listSessions } from "@/lib/photos";
+import {
+  DEFAULT_REMINDER,
+  reminderLabel,
+  requestPermission,
+  syncReminder,
+} from "@/lib/reminders";
 import {
   AppText,
   Card,
@@ -97,8 +105,10 @@ export default function Today() {
   // day actually turns over.
   useFocusEffect(
     useCallback(() => {
-      setJournal(readJournal());
+      const fresh = readJournal();
+      setJournal(fresh);
       setSessionCount(listSessions().length);
+      void syncReminder(fresh.reminder);
       const now = todayDate();
       setDate((prev) => {
         if (prev !== now) setTime(currentSession());
@@ -143,6 +153,25 @@ export default function Today() {
     [date],
   );
 
+  /**
+   * The reminder question, answered.
+   *
+   * "Not now" is recorded as a real answer (`enabled: false`) rather than left
+   * absent, so the card never comes back. Being asked twice is how a helpful
+   * offer becomes a nag.
+   */
+  const onReminder = useCallback(async (wanted: boolean) => {
+    selected();
+    if (!wanted) {
+      setJournal(saveReminder({ ...DEFAULT_REMINDER, enabled: false }));
+      return;
+    }
+    const granted = await requestPermission();
+    const setting = { ...DEFAULT_REMINDER, enabled: granted };
+    setJournal(saveReminder(setting));
+    await syncReminder(setting);
+  }, []);
+
   // No routine means no plan was ever successfully generated. Say that, and
   // give the one action that fixes it — never a stand-in routine.
   if (!day || !week) {
@@ -176,6 +205,7 @@ export default function Today() {
   const canCompare = sessionCount >= 2;
   const dueForRecheck =
     !canCompare && weeksOnRoutine(journal, date) >= RECHECK_AFTER_WEEKS && sessionCount >= 1;
+  const offerReminder = shouldOfferReminder(journal);
 
   return (
     <Screen contentStyle={{ paddingTop: spacing.lg }}>
@@ -300,6 +330,26 @@ export default function Today() {
                 </Pressable>
               );
             })}
+          </View>
+        </Card>
+      )}
+
+      {/* Asked once, and only after a session the user actually finished. On
+          iOS the OS prompt is a one-shot, so spending it during onboarding —
+          before the product has done anything — spends it on a denial. */}
+      {offerReminder && (
+        <Card elevated>
+          <AppText variant="heading">Want a nudge in the evening?</AppText>
+          <AppText variant="caption" color={colors.inkMuted}>
+            {`One notification at ${reminderLabel(DEFAULT_REMINDER)}, and nothing else — no streak warnings, no chasing you about a night you skipped. You can change the time or turn it off on your plan.`}
+          </AppText>
+          <View style={{ flexDirection: "row", gap: spacing.xs, marginTop: spacing.xxs }}>
+            <View style={{ flex: 1 }}>
+              <PrimaryButton label="Remind me" onPress={() => void onReminder(true)} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <GhostButton label="No thanks" tone="quiet" onPress={() => void onReminder(false)} />
+            </View>
           </View>
         </Card>
       )}

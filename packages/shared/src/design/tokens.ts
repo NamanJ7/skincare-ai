@@ -64,6 +64,8 @@ export const overlay = {
   onDarkFill: "rgba(255,255,255,0.14)",
   /** Pressed wash for an outlined control on cream. */
   primaryTint: "rgba(50,72,63,0.08)",
+  /** A shape drawn in ink at low opacity — placeholder art, never real content. */
+  inkTint: "rgba(28,28,26,0.10)",
 } as const;
 
 /** 8px spacing base. */
