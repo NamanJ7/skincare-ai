@@ -207,3 +207,48 @@ describe("a gentle routine is left intact (only SPF added)", () => {
     expect(removals).toHaveLength(0);
   });
 });
+
+/**
+ * This rule shipped but never fired: the mobile app hardcoded `allergies: []`
+ * and never asked the question, so the branch was unreachable in production
+ * for its entire life. Onboarding asks now, so it gets a test.
+ */
+describe("listed allergens are removed outright", () => {
+  it("drops an allergen from both sessions and says why", () => {
+    const { routine: out, adjustments } = applySafetyRules(
+      routine(
+        [mk("serum", "vitamin_c"), mk("sunscreen")],
+        [mk("treatment", "retinoid", 3), mk("moisturizer")],
+      ),
+      intake({ allergies: ["vitamin_c", "retinoid"] }),
+    );
+
+    expect(hasActive(out, "vitamin_c")).toBe(false);
+    expect(hasActive(out, "retinoid")).toBe(false);
+    // Removal is never silent — the audit trail is what /plan shows the user.
+    const removals = adjustments.filter((a) => a.rule === "allergy_removed");
+    expect(removals).toHaveLength(2);
+    expect(removals[0]?.detail).toContain("allergy or past reaction");
+  });
+
+  it("leaves inert steps and non-listed actives alone", () => {
+    const { routine: out } = applySafetyRules(
+      routine([mk("cleanser"), mk("serum", "niacinamide")], [mk("moisturizer")]),
+      intake({ allergies: ["retinoid"] }),
+    );
+
+    expect(hasActive(out, "niacinamide")).toBe(true);
+    expect(out.am.some((s) => s.category === "cleanser")).toBe(true);
+  });
+
+  // The SPF guarantee outranks everything, so it must survive the filter even
+  // when the user is allergic to what was in the routine around it.
+  it("still guarantees sunscreen when the allergen filter empties the AM", () => {
+    const { routine: out } = applySafetyRules(
+      routine([mk("serum", "vitamin_c")], [mk("moisturizer")]),
+      intake({ allergies: ["vitamin_c"] }),
+    );
+
+    expect(out.am.some((s) => s.category === "sunscreen")).toBe(true);
+  });
+});

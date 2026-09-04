@@ -16,12 +16,13 @@ import Animated, {
   Extrapolation,
   interpolate,
   useAnimatedStyle,
+  useReducedMotion,
   useSharedValue,
   withRepeat,
   withTiming,
 } from "react-native-reanimated";
 
-import { AppText, colors, radius, spacing } from "@/theme";
+import { AppText, colors, overlay, radius, spacing } from "@/theme";
 
 const LOOP_MS = 6200;
 
@@ -37,15 +38,26 @@ const TRACK_W = INNER_W - spacing.md * 2 - spacing.md * 2; // sheet padding both
 
 export function HeroDemo() {
   const progress = useSharedValue(0);
+  /**
+   * This loops forever on the landing screen with no way to pause it, which is
+   * the single clearest thing on the phone for "reduce motion" to switch off.
+   * Parked at the point in the loop where the results are on screen, so the
+   * still frame still shows what the product does.
+   */
+  const reduceMotion = useReducedMotion();
 
   useEffect(() => {
+    if (reduceMotion) {
+      progress.value = 0.6;
+      return;
+    }
     progress.value = 0;
     progress.value = withRepeat(
       withTiming(1, { duration: LOOP_MS, easing: Easing.linear }),
       -1,
       false,
     );
-  }, []);
+  }, [reduceMotion]);
 
   // --- Scanning phase (0 .. 0.30) -----------------------------------------
   const scanLineStyle = useAnimatedStyle(() => ({
@@ -233,17 +245,25 @@ function FaceSilhouette() {
   );
 }
 
-const tint = "rgba(28,28,26,0.10)";
 
+
+/**
+ * The raw pixel values below are deliberate and are not design-token
+ * violations. This is a *drawing of a phone* — a bezel radius, a notch, a
+ * battery glyph — not app UI. A phone's corner radius has nothing to do with
+ * the radius we give a card, and routing it through `radius.lg` would make both
+ * values wrong the next time either changes. Colours are a different matter and
+ * do come from tokens: those were real duplication.
+ */
 const styles = StyleSheet.create({
   phone: {
     width: PHONE_W,
     height: PHONE_H,
     borderRadius: 44,
-    backgroundColor: "#1C1C1A",
+    backgroundColor: colors.ink,
     padding: BEZEL,
     alignSelf: "center",
-    shadowColor: "#1C1C1A",
+    shadowColor: colors.ink,
     shadowOpacity: 0.18,
     shadowRadius: 28,
     shadowOffset: { width: 0, height: 16 },
@@ -262,7 +282,7 @@ const styles = StyleSheet.create({
     width: PHONE_W * 0.3,
     height: 18,
     borderRadius: 12,
-    backgroundColor: "#1C1C1A",
+    backgroundColor: colors.ink,
     zIndex: 5,
   },
   statusBar: {
@@ -285,7 +305,7 @@ const styles = StyleSheet.create({
   },
   cam: {
     height: CAM_H,
-    backgroundColor: "#E9E3D7",
+    backgroundColor: colors.hairline,
     alignItems: "center",
     justifyContent: "center",
     overflow: "hidden",
@@ -295,14 +315,14 @@ const styles = StyleSheet.create({
     width: INNER_W * 0.4,
     height: INNER_W * 0.5,
     borderRadius: INNER_W * 0.25,
-    backgroundColor: tint,
+    backgroundColor: overlay.inkTint,
   },
   shoulders: {
     width: INNER_W * 0.74,
     height: INNER_W * 0.4,
     borderTopLeftRadius: INNER_W * 0.37,
     borderTopRightRadius: INNER_W * 0.37,
-    backgroundColor: tint,
+    backgroundColor: overlay.inkTint,
     marginTop: 8,
   },
   reticle: {
@@ -348,7 +368,7 @@ const styles = StyleSheet.create({
     paddingTop: spacing.sm,
     paddingBottom: spacing.lg,
     gap: spacing.sm,
-    shadowColor: "#1C1C1A",
+    shadowColor: colors.ink,
     shadowOpacity: 0.08,
     shadowRadius: 16,
     shadowOffset: { width: 0, height: -4 },

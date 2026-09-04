@@ -29,6 +29,11 @@ pnpm workspaces + Turborepo, TypeScript throughout.
     safety-clamped routine's weekly frequencies into "here is what you do tonight".
   - `progress/` — `compareAssessments`/`adaptRoutine`, the deterministic progress engine (see below)
     that measures whether the routine is working and feeds the answer back into it.
+  - `journal/` — the `Journal` type (the on-device record) and `hydrateJournal`, the pure function
+    that turns whatever is on disk into a valid one. It lives here rather than in the app because
+    it is the piece that most needs tests: an unreadable `plan` must cost the user the plan and
+    never their streak, and a partial `intake` is dropped whole rather than half-read into unsafe
+    defaults (the default for `pregnancyOrBreastfeeding` is `false`).
 
 ## Commands
 
@@ -64,8 +69,11 @@ pnpm --filter @pore/mobile ios / android / web
 pnpm --filter @pore/mobile typecheck
 ```
 
-There is no test suite for `apps/web` or `apps/mobile` today — `packages/shared` is the only
-package with tests (vitest), concentrated on the safety engine.
+`packages/shared` (safety, schedule, progress, vision, journal hydration) and `apps/web`
+(`lib/validateImages.ts` and `lib/rateLimit.ts` — the two guards in front of a paid endpoint) have
+vitest suites. `apps/mobile` has none: the logic worth testing there was moved into
+`packages/shared`, which is why `hydrateJournal` lives in the shared package rather than beside the
+file I/O that uses it.
 
 ## Architecture: the plan-generation pipeline
 
@@ -84,7 +92,9 @@ not edge — with `maxDuration: 60` since it makes two model calls):
    guarantees invariants no matter what the model returns:
    - Sunscreen is always present in the AM routine.
    - Pregnancy/breastfeeding strips "avoid" actives and flags "caution" ones.
-   - User-listed allergens are removed.
+   - User-listed allergens are removed. Onboarding asks for these (step 5, over the `ACTIVES` keys
+     the engine can actually act on) — offering an allergy we cannot enforce would read as a
+     promise, so the question is deliberately limited to what this rule covers.
    - Retinoid frequency is clamped to a slow starting cadence (2x/week if sensitivity is high, else
      3x/week).
    - At most one strong exfoliating active (acid/retinoid/benzoyl peroxide) per AM/PM session —
@@ -123,7 +133,9 @@ safety engine — it is code, not a prompt:
   (6). Gentle steps and SPF run at full frequency from day one.
 - A week only advances the ramp if the user reported nothing worse than `calm` during it. A week
   with no check-ins at all counts as calm — the product asks for feedback, it doesn't punish
-  silence.
+  silence. `rampProgress` reports *that* a week was held as well as which week it is, and the
+  evening session carries a `ramp_held` note: holding silently left users plateaued with a strip
+  that would not move and no reason on screen. Only the most recent completed week counts.
 - A `stinging` report **deloads** the routine for 3 days (two `tight` reports inside 5 days for 2
   days): strong actives are pulled, barrier steps stay.
 
@@ -134,9 +146,27 @@ headline the user can't account for is worse than no headline. Extend
 `packages/shared/src/schedule/engine.test.ts` when changing any of this.
 
 State lives in `apps/mobile/src/lib/journal.ts` — an on-device JSON file holding the routine start
-date, per-session tick-offs, and the one-tap skin check-ins. It never leaves the phone, it is
-disclosed in the privacy content (`packages/shared/src/legal/content.ts`), and `/plan` must keep
-offering a way to erase it.
+date, the intake answers, the generated plan, per-session tick-offs, the one-tap skin check-ins,
+both assessments, and any adapted routine. It never leaves the phone, it is disclosed in the privacy
+content (`packages/shared/src/legal/content.ts`), and `/plan` must keep offering a way to erase it.
+
+**The journal owns anything committed; `state/onboarding.tsx` owns only answers in flight.** This is
+load-bearing. That context is in-memory, so before the plan was persisted a cold start lost the
+routine, the assessment and the intake — and both `/today` and `/plan` filled the gap rather than
+admitting it, each with a private hardcoded `draftRoutine()` and, on `/plan`, three hardcoded
+"findings" about the user's face. That was the app's default state on every launch after the first,
+and because `buildIntake` fills defaults it also silently recomputed routines with
+`pregnancyOrBreastfeeding: false`. Never reintroduce a fallback routine: when there is no plan, say
+so. `activeRoutine(journal)` is the single accessor (adapted routine, else the plan's), and
+`savePlan` resets `startedOn` so a re-onboard does not inherit an old ramp origin. Note that
+`eraseRecord()` — the "erase my routine record" path — deliberately keeps `intake` and `plan`,
+because the copy promises the routine survives.
+
+`fetchPlan` (`apps/mobile/src/lib/api.ts`) returns a discriminated outcome, never `null`: "no API
+URL", "offline", "timeout" and "server" are four different things to tell a user, and it has a 45s
+deadline so a stalled request cannot spin forever. A failed generation must never navigate onward as
+if it succeeded. `PlanResult` is a shared type (`packages/shared/src/types/plan.ts`) because the
+mobile client persists the wire shape verbatim.
 
 `apps/mobile/src/app/today.tsx` is the primary surface and shows **only the current session**;
 `/plan` holds the full assessment and routine as a reference document. Keep it that way — the
@@ -190,4 +220,12 @@ call is listed separately below so a refusal can never be skimmed as a result.
 - `packages/shared` type modules (`types/*.ts`) export types only (`export type *` from the barrel)
   — keep new domain types type-only unless they need runtime values.
 - Env config: `apps/web/.env.example` documents `ANTHROPIC_API_KEY`; unset it locally to exercise
-  the mock pipeline path instead of burning API calls.
+  the mock pipeline path instead of burning API calls. A mock plan carries `mode: "mock"` and `/plan`
+  must keep saying so — a fabricated reading presented as a real one is the one thing this product
+  cannot ship.
+- `/api/plan` is public and unauthenticated in front of two Opus calls, so `lib/rateLimit.ts` caps
+  per-IP requests and concurrent generations. The counters are in-process: a speed bump against
+  accidental abuse, not a security control. Do not describe it as one.
+- The evening reminder (`apps/mobile/src/lib/reminders.ts`) is asked for only after a session the
+  user actually finished, is stored in the journal, and never uses streak language. All three are
+  deliberate; see TODOS.md.

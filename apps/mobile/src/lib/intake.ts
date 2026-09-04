@@ -11,7 +11,9 @@ export function buildIntake(data: OnboardingData): IntakeResponse {
     skinType: data.skinType ?? "combination",
     sensitivity: data.sensitivity ?? "medium",
     currentProducts: [],
-    allergies: [],
+    // Asked in onboarding. Every key here is one `applySafetyRules` can act on,
+    // so a listed allergen is removed from the routine outright.
+    allergies: data.allergies ?? [],
     budget: "medium",
     fragrancePreference: "no_preference",
     pregnancyOrBreastfeeding: data.pregnancyOrBreastfeeding ?? false,

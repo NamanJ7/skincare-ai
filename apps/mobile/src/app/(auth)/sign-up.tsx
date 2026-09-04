@@ -3,7 +3,7 @@ import { useState } from "react";
 import { Pressable, View } from "react-native";
 
 import { LegalAgreement } from "@/components/legal/LegalLinks";
-import { AppText, GhostButton, PrimaryButton, Screen, TextField, colors, spacing } from "@/theme";
+import { AppText, Card, PrimaryButton, Screen, TextField, colors, spacing } from "@/theme";
 
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -12,8 +12,10 @@ export default function SignUp() {
   const [password, setPassword] = useState("");
   const valid = EMAIL.test(email.trim()) && password.length >= 6;
 
-  // Increment 1 stub: no backend yet. Real Supabase email/Apple/Google sign-up
-  // replaces this in Increment 2. For now any valid-looking input continues.
+  // No backend yet, so this creates nothing. The copy used to promise "save
+  // your skin scans and routine, and track your progress over time" — an
+  // account, a server and a sync, none of which exist. What is actually true is
+  // better for this product anyway, so it says that instead.
   function onContinue() {
     router.push("/onboarding/age");
   }
@@ -23,7 +25,8 @@ export default function SignUp() {
       <View style={{ gap: spacing.xs }}>
         <AppText variant="title">Create your account</AppText>
         <AppText variant="body" color={colors.inkMuted}>
-          Save your skin scans and routine, and track your progress over time.
+          Your routine, your photos and your record all stay on this phone. Nothing is uploaded to
+          an account.
         </AppText>
       </View>
 
@@ -47,15 +50,24 @@ export default function SignUp() {
         <PrimaryButton label="Create account" onPress={onContinue} disabled={!valid} />
       </View>
 
-      <View style={{ gap: spacing.sm, marginTop: spacing.sm }}>
-        <AppText variant="caption" color={colors.inkMuted} style={{ textAlign: "center" }}>
-          or continue with
+      <Card>
+        <AppText variant="caption" color={colors.inkMuted}>
+          Accounts aren&apos;t switched on yet, so this doesn&apos;t create one — it just gets you
+          to the setup. When sign-in does land, it will be so you can move to a new phone, never so
+          we can hold your photos.
         </AppText>
-        <GhostButton label="Continue with Apple" onPress={onContinue} />
-        <GhostButton label="Continue with Google" onPress={onContinue} />
-      </View>
+      </Card>
 
-      <Pressable onPress={() => router.replace("/sign-in")} style={{ marginTop: spacing.md }}>
+      <Pressable
+        onPress={() => router.replace("/sign-in")}
+        accessibilityRole="link"
+        accessibilityLabel="Already have an account? Log in"
+        hitSlop={8}
+        style={({ pressed }) => [
+          { minHeight: 44, justifyContent: "center", marginTop: spacing.xs },
+          pressed && { opacity: 0.6 },
+        ]}
+      >
         <AppText variant="caption" color={colors.inkMuted} style={{ textAlign: "center" }}>
           Already have an account?{" "}
           <AppText variant="caption" color={colors.primary}>

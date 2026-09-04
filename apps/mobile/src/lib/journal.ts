@@ -1,66 +1,37 @@
 /**
- * The routine journal — what the user actually did, and how their skin felt.
+ * The routine journal — what the user was told to do, what they actually did,
+ * and how their skin felt.
  *
- * This is the memory that makes the cadence engine reactive instead of static.
- * It lives entirely on this device, in the app's own document directory, next
- * to the photos and under the same promise: nothing here is uploaded.
+ * This is the only memory the product has. It lives entirely on this device, in
+ * the app's own document directory, next to the photos and under the same
+ * promise: nothing here is uploaded.
  *
- * Storage is deliberately dumb (one small JSON file, synchronous reads) and
- * every write is best-effort. Losing a check-off should never break a session —
- * the worst case is the user re-taps a step.
+ * This module is deliberately only I/O and small queries. The interesting part
+ * — turning whatever is on disk into a valid `Journal` — is a pure function in
+ * `@pore/shared` (`hydrateJournal`), where it is tested.
+ *
+ * Storage is dumb on purpose (one small JSON file, synchronous reads) and every
+ * write is best-effort. Losing a check-off should never break a session — the
+ * worst case is the user re-taps a step.
  */
 import { Directory, File, Paths } from "expo-file-system";
 import {
+  emptyJournal,
+  hydrateJournal,
   today,
-  type Assessment,
+  type IntakeResponse,
+  type Journal,
+  type PlanResult,
   type ProgressAdjustment,
   type Routine,
+  type ReminderSetting,
   type RoutineTime,
-  type SkinCheckIn,
   type SkinFeel,
+  type StoredAssessment,
 } from "@pore/shared";
 
 const DIR_NAME = "journal";
 const FILE_NAME = "journal.json";
-
-interface Journal {
-  version: 1;
-  /** Date the routine began — the origin the whole ramp is measured from. */
-  startedOn: string;
-  /** `"YYYY-MM-DD:PM"` → step orders the user has checked off. */
-  completed: Record<string, number[]>;
-  /** `"YYYY-MM-DD:PM"` for sessions completed end to end. Drives the streak. */
-  finished: string[];
-  checkIns: SkinCheckIn[];
-  /**
-   * The first assessment, kept forever — it is the zero the whole product
-   * measures against. Nothing overwrites it but a full erase.
-   */
-  baseline?: StoredAssessment;
-  /** The most recent re-assessment. Two points is the whole comparison. */
-  latest?: StoredAssessment;
-  /**
-   * The routine as it stands after any progress adaptation. Absent until the
-   * first re-assessment, at which point it takes over from the plan the server
-   * generated at signup.
-   */
-  routine?: Routine;
-  /**
-   * What the progress engine changed at the last re-assessment, and why.
-   *
-   * Stored rather than recomputed on render: `adaptRoutine` is a proposal
-   * against a routine, so running it again on its own output would step the
-   * same active up a second time. It runs once, when a measurement lands.
-   */
-  lastAdaptation?: ProgressAdjustment[];
-}
-
-/** One capture session's blind assessment, tagged with when it was taken. */
-export interface StoredAssessment {
-  sessionId: string;
-  capturedAt: string;
-  assessment: Assessment;
-}
 
 function sessionKey(date: string, time: RoutineTime): string {
   return `${date}:${time}`;
@@ -74,38 +45,36 @@ function file(): File {
   return new File(dir(), FILE_NAME);
 }
 
-function empty(): Journal {
-  return { version: 1, startedOn: today(), completed: {}, finished: [], checkIns: [] };
-}
-
 /**
  * Read the journal, creating it on first run.
  *
  * The first read is what sets `startedOn`, so the ramp starts the day the user
  * first opens their routine rather than at some arbitrary epoch.
+ *
+ * A file we could only partly read is repaired immediately. The old behaviour
+ * was to return an empty journal and leave the bad file in place, which meant
+ * the user's streak and baseline appeared to vanish on every subsequent read,
+ * forever, with no error anywhere.
  */
 export function readJournal(): Journal {
   try {
     const f = file();
     if (!f.exists) {
-      const fresh = empty();
+      const fresh = emptyJournal(today());
       writeJournal(fresh);
       return fresh;
     }
-    const parsed = JSON.parse(f.textSync()) as Partial<Journal>;
-    return {
-      version: 1,
-      startedOn: parsed.startedOn ?? today(),
-      completed: parsed.completed ?? {},
-      finished: parsed.finished ?? [],
-      checkIns: parsed.checkIns ?? [],
-      baseline: parsed.baseline,
-      latest: parsed.latest,
-      routine: parsed.routine,
-      lastAdaptation: parsed.lastAdaptation,
-    };
+    let raw: unknown;
+    try {
+      raw = JSON.parse(f.textSync()) as unknown;
+    } catch {
+      raw = "unparseable";
+    }
+    const { journal, repaired } = hydrateJournal(raw, today());
+    if (repaired) writeJournal(journal);
+    return journal;
   } catch {
-    return empty();
+    return emptyJournal(today());
   }
 }
 
@@ -120,6 +89,56 @@ function writeJournal(journal: Journal): void {
   } catch {
     // A dropped write costs one re-tap, never the session.
   }
+}
+
+/**
+ * Commit the plan generated at signup, along with the answers it was built
+ * from.
+ *
+ * Both are needed: the safety engine re-runs against the intake on every
+ * render, so a stored routine without its intake would be recomputed from
+ * defaults — including `pregnancyOrBreastfeeding: false`.
+ *
+ * Writing a plan also resets `startedOn`. The ramp is measured from that date,
+ * and a user who erased their record and started again would otherwise inherit
+ * the old origin and land on week 4 of a brand new routine.
+ */
+export function savePlan(intake: IntakeResponse, plan: PlanResult): Journal {
+  const journal = readJournal();
+  journal.intake = intake;
+  journal.plan = plan;
+  journal.startedOn = today();
+  // A new plan supersedes any adaptation made against the old one.
+  journal.routine = undefined;
+  journal.lastAdaptation = undefined;
+  writeJournal(journal);
+  return journal;
+}
+
+/** Turn the evening reminder on or off, or move it. */
+export function saveReminder(reminder: ReminderSetting): Journal {
+  const journal = readJournal();
+  journal.reminder = reminder;
+  writeJournal(journal);
+  return journal;
+}
+
+/**
+ * Whether now is the moment to ask about reminders.
+ *
+ * Only after a session the user actually finished, and only if we have never
+ * asked. On iOS the OS prompt is a one-shot: ask during onboarding, before the
+ * product has done anything for them, and it gets denied forever. Asking
+ * straight after the first completed routine means the question arrives while
+ * the thing it is offering to protect is fresh.
+ */
+export function shouldOfferReminder(journal: Journal): boolean {
+  return journal.reminder === undefined && journal.finished.length >= 1;
+}
+
+/** The routine the user is actually on: adapted if there is one, else the plan's. */
+export function activeRoutine(journal: Journal): Routine | undefined {
+  return journal.routine ?? journal.plan?.routine;
 }
 
 /** Step orders already checked off for a session. */
@@ -147,7 +166,8 @@ export function toggleStep(
     ? current.filter((o) => o !== order)
     : [...current, order].sort((a, b) => a - b);
 
-  journal.completed[key] = next;
+  if (next.length > 0) journal.completed[key] = next;
+  else delete journal.completed[key];
   const complete = totalSteps > 0 && next.length >= totalSteps;
   journal.finished = journal.finished.filter((k) => k !== key);
   if (complete) journal.finished.push(key);
@@ -258,10 +278,28 @@ export function recordedDays(journal: Journal): number {
   return days.size;
 }
 
-/** Wipe the journal — the "forget me" path, alongside deleting the photos. */
+/**
+ * Erase what the user *did* — tick-offs, check-ins, and every assessment — while
+ * keeping the routine they are on.
+ *
+ * This is what "erase my routine record" has always promised ("your routine
+ * stays, but it restarts its six-week ramp from today"). It became a real
+ * distinction once the plan moved into this file: a blanket delete would now
+ * take the routine with it and quietly make the promise false.
+ */
+export function eraseRecord(): Journal {
+  const previous = readJournal();
+  const fresh = emptyJournal(today());
+  fresh.intake = previous.intake;
+  fresh.plan = previous.plan;
+  writeJournal(fresh);
+  return fresh;
+}
+
+/** Wipe everything — the "forget me" path, alongside deleting the photos. */
 export function deleteJournal(): void {
   const d = dir();
   if (d.exists) d.delete();
 }
 
-export type { Journal };
+export type { Journal, ReminderSetting, StoredAssessment };

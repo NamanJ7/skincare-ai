@@ -66,18 +66,32 @@ dermatologists usually phrase retinoid introduction, but they are round numbers,
 not measurements. They are deliberately isolated as named constants at the top of
 the module so they can be tuned in one place once there is real adherence data.
 
-### No notification, so the app has to be opened to be useful
-`/today` answers "what do I do right now", but nothing prompts the user to ask.
-A single local notification at the user's chosen evening time is the obvious
-partner to this screen, and it is the one place a reminder is genuinely earned
-rather than growth spam. Needs `expo-notifications`, which is not a dependency yet.
+### ~~No notification, so the app has to be opened to be useful~~ — done
+One evening notification, at a time the user picks from four presets.
+`apps/mobile/src/lib/reminders.ts` holds the whole thing.
 
-### The user cannot see the ramp being held
-`rampWeekFor` silently declines to advance a week the user reported irritation in.
-That is the right behaviour and it is tested, but the UI never says it happened —
-so a user who plateaus at week 2 has no idea why. There was a `ramp_held`
-`ScheduleNote` id sketched for this and removed rather than left dead; it wants
-reinstating with real copy and a test.
+Three decisions worth not undoing:
+
+- **Asked after the first *completed* session, never in onboarding**
+  (`shouldOfferReminder`). On iOS the OS prompt is a one-shot; spending it
+  before the product has done anything spends it on a denial.
+- **"No thanks" is stored as `enabled: false`, not left absent**, so the card
+  never returns. Absent means "never asked" and is the only state that prompts.
+- **No streak language, ever.** The body is "Tonight's steps are ready. It takes
+  about two minutes." A notification that punishes a missed night would
+  contradict the deload engine underneath it.
+
+Two known limits. The trigger is a static daily repeat, so it fires whether or
+not the evening session is already ticked off — suppressing that needs a reschedule
+on every app focus, which is real machinery for a small gain. And local
+notifications no longer work in Expo Go on Android (SDK 53+), so this needs a
+development build to test at all.
+
+### ~~The user cannot see the ramp being held~~ — done
+`rampProgress` now reports `heldByFlare` alongside the week, and the evening
+session carries a `ramp_held` note explaining it. Only the most recent completed
+week counts, so a flare five weeks ago is not offered as an explanation for
+tonight. Covered by `schedule/engine.test.ts`.
 
 ### `/today` is verified by static render only
 The screen typechecks and renders through `expo export --platform web`, which is
@@ -128,12 +142,69 @@ lands as honesty or as the app looking broken. That second one is the whole bet.
 
 ## Housekeeping
 
-### Marketing and app parity
-Onboarding is now photo-first, which matches `apps/web/components/sections/HowItWorks.tsx`
-and `FeatureCards.tsx`. Check no other marketing copy still describes an order
-the app no longer uses.
+### ~~Marketing and app parity~~ — done, and it was worse than an ordering problem
+The site sold two features that did not exist anywhere: a "product shelf" (listed
+as a *free-tier* feature in `lib/pricing.ts`) and "smarter product guidance" with
+a routine-fit signal. It also said mobile was "coming soon" while a complete Expo
+app sat in this repo, depicted a web dashboard with a "My shelf" tab, and
+described "a picture" when the app takes three under a controlled illuminant.
+All of it now describes what actually ships — capture as an instrument, the
+deterministic clamp, the pacing, and a comparison the product refuses to fake.
+`packages/shared/src/types/product.ts` was imported by nothing and is deleted.
 
-### `apps/web` has no tests
-`packages/shared` is the only package with a test suite. The `/api/plan` input
-validation in `apps/web/app/api/plan/route.ts` is a trust boundary in front of a
-paid endpoint and is currently only covered by manual probes.
+Two things deliberately left as claims about the future, clearly marked: the
+store badges ("not on the app stores yet") and the paid tiers. A FAQ entry now
+answers "does Pore recommend specific products to buy?" with "not today".
+
+### ~~`apps/web` has no tests~~ — the trust boundary is covered now
+`apps/web` has vitest and 21 tests over the two things guarding a paid endpoint:
+`lib/validateImages.ts` (extracted from the route so it could be tested at all)
+and `lib/rateLimit.ts`. Everything else in `apps/web` is still untested, which is
+fine — it is a marketing site.
+
+### `/api/plan` rate limiting is a speed bump, not a wall
+`lib/rateLimit.ts` counts per-IP requests and concurrent generations **in the
+process**, so on serverless each instance enforces its own limit and a cold
+start resets it. It stops the accidental case — a retry loop, a stuck client, a
+scraper that does not care — and it is the most that can be done without shared
+state. `x-forwarded-for` is also spoofable by anyone talking to the origin
+directly. Before this endpoint carries real traffic, move the counters to
+Redis/KV; `check()` is pure apart from the store it is handed, so only the store
+changes. Real protection means auth on the endpoint, which means an account
+system, which does not exist yet.
+
+## Landed in the refinement pass, still unverified on hardware
+
+Everything below typechecks, has unit tests where it is deterministic, and
+bundles through `expo export --platform web`. None of it has been in a hand.
+
+### Haptics
+`apps/mobile/src/lib/feedback.ts` wraps `expo-haptics` (new dependency, pinned to
+the SDK 56 line). Attached to: ticking a step, finishing a session (a heavier
+success), every `Chip` selection (in the primitive, not at the call sites), and
+the capture quality gate passing vs rejecting — those two look identical at arm's
+length with the screen lighting your face and mean opposite things. Confirm the
+session-complete success does not feel like a reward loop.
+
+### Native headers
+`_layout.tsx` turns the platform header on per-route, chevron only, because four
+screens had no back affordance and the ones that did hand-rolled it. Check the
+header does not crowd the screens that open at `spacing.section`, and that the
+camera and landing stay full-bleed.
+
+### The allergy step
+Onboarding is five questions now, not four. The fifth needs a real look: whether
+"Nothing I know of" reads as a valid answer rather than a skip, and whether nine
+ingredient chips is a wall of jargon to someone who has never used an active.
+
+### Reduce-motion
+The splash is skipped entirely and the hero loop parks on its results frame.
+Verify against the OS setting on both platforms — this is the one behaviour that
+cannot be checked from a bundle.
+
+### The evening reminder
+Needs a development build (Expo Go dropped Android local notifications in SDK
+53+). Check: the permission prompt arrives right after the first finished
+session and not before; declining it never brings the card back; the four time
+presets schedule at the right local hour across a timezone change; and a full
+erase on /plan really does cancel the scheduled notification.

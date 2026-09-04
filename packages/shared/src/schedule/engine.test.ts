@@ -10,6 +10,7 @@ import {
   daysBetween,
   planDay,
   planWeek,
+  rampProgress,
   rampWeekFor,
   rampedFrequency,
   spreadDays,
@@ -336,5 +337,57 @@ describe("planWeek", () => {
   it("reports how far into the routine each day is", () => {
     const week = planWeek(routine(), intake(), ctx(addDays(START, 9)));
     expect(week.days.map((d) => d.dayIndex)).toEqual([7, 8, 9, 10, 11, 12, 13]);
+  });
+});
+
+/**
+ * The ramp declining to advance is correct and long-tested. What was missing is
+ * that the UI never said it had happened, so a user stuck at week 2 saw a strip
+ * that would not move and no reason for it anywhere.
+ */
+describe("a held ramp explains itself", () => {
+  const flare = (day: number, feel: SkinCheckIn["feel"] = "tight") => ({
+    date: addDays(START, day),
+    feel,
+  });
+
+  it("flags the hold when the week just gone was not calm", () => {
+    // Day 3 of week 0 reported tight, so week 1 never became week 2.
+    const p = rampProgress(ctx(addDays(START, 8), [flare(3)]));
+    expect(p.week).toBe(1);
+    expect(p.heldByFlare).toBe(true);
+  });
+
+  it("does not flag a hold while the skin stays calm", () => {
+    const p = rampProgress(ctx(addDays(START, 8), [flare(3, "calm")]));
+    expect(p.week).toBe(2);
+    expect(p.heldByFlare).toBe(false);
+  });
+
+  // A flare five weeks ago is history, not an explanation for tonight.
+  it("stops flagging once a later week goes by calmly", () => {
+    const p = rampProgress(ctx(addDays(START, 21), [flare(3)]));
+    expect(p.heldByFlare).toBe(false);
+  });
+
+  it("says nothing before the first week is complete", () => {
+    expect(rampProgress(ctx(addDays(START, 3), [flare(1)])).heldByFlare).toBe(false);
+  });
+
+  it("carries a user-facing note on the evening session", () => {
+    // Day 10 is inside a deload-free stretch: the tight report on day 3 is more
+    // than 5 days back, so the only thing left to explain is the hold itself.
+    const day = planDay(routine(), intake(), ctx(addDays(START, 10), [flare(3)]));
+    const held = day.pm.notes.find((n) => n.id === "ramp_held");
+
+    expect(held).toBeDefined();
+    expect(held?.detail).toContain("wasn't calm last week");
+    // One explanation, not two — it must not also appear in the morning.
+    expect(day.am.notes.some((n) => n.id === "ramp_held")).toBe(false);
+  });
+
+  it("stays quiet when the ramp is advancing normally", () => {
+    const day = planDay(routine(), intake(), ctx(addDays(START, 10)));
+    expect(day.pm.notes.some((n) => n.id === "ramp_held")).toBe(false);
   });
 });
