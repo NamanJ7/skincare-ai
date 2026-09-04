@@ -25,7 +25,13 @@ export async function fetchPlan(input: PlanInput): Promise<PlanResult | null> {
       headers: { "content-type": "application/json" },
       body: JSON.stringify(input),
     });
-    if (!res.ok) return null;
+    if (!res.ok) {
+      // The fallback below is deliberate, but it must not be silent: a rejected
+      // request would otherwise render a plausible mock routine with no signal
+      // that the real pipeline refused it.
+      console.warn(`fetchPlan: ${res.status} from /api/plan`, await res.text());
+      return null;
+    }
     return (await res.json()) as PlanResult;
   } catch {
     return null;

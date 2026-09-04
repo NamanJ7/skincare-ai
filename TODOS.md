@@ -137,3 +137,50 @@ the app no longer uses.
 `packages/shared` is the only package with a test suite. The `/api/plan` input
 validation in `apps/web/app/api/plan/route.ts` is a trust boundary in front of a
 paid endpoint and is currently only covered by manual probes.
+
+## Security & cost hardening — deferred items
+
+Recorded during the pre-production hardening pass. The pass itself bounded
+`/api/plan`'s input, rate limited it, stopped it leaking error detail, and closed
+the env-config gaps. These were found in the same audit and deliberately left.
+
+### The parental-consent gate is decorative
+`apps/mobile/src/app/onboarding/consent.tsx:17` collects a parent email from a
+self-declared minor, verifies nothing, emails nobody, persists nothing, and
+proceeds straight to face capture. The comment at `:18-19` already admits it.
+This is a COPPA / GDPR-K exposure on photographs of children, and it is a larger
+legal risk than anything the hardening pass fixed. A real gate needs a verifiable
+consent request to the parent *before* capture, plus a recorded approval — which
+needs the server-side persistence the product does not have yet.
+
+### `/waitlist/confirmed` confirms a waitlist nobody joined
+`apps/web/app/(auth)/signup/page.tsx:43` (and the Google button's `href` at `:138`)
+navigate to `/waitlist/confirmed` without ever touching Tally. The waitlist lives
+entirely in Tally (`lib/tally.ts`, form `LZVOM2`), so a user who fills in the signup
+form is told "You're on the list" by a list that never received their email. Either
+route signup through `openWaitlist()` or change the copy.
+
+### The consent card contradicts the privacy policy
+`consent.tsx:44-45` reads "Photos stay on your phone and are never saved on our
+servers." The second clause is true; the first is not, once `EXPO_PUBLIC_API_URL`
+is set — photos go to Pore's server and on to Anthropic. The formal policy
+(`packages/shared/src/legal/content.ts:87`) discloses this correctly. The in-flow
+card is the one users actually read, so it is the one that has to be right.
+
+### Prompt caching on the two Opus calls
+`ASSESSMENT_SYSTEM` / `ROUTINE_SYSTEM` are static and re-sent every request, so
+`cache_control: { type: "ephemeral" }` on the system block of both `messages.parse`
+calls in `apps/web/lib/pipeline.ts` is the natively-correct caching answer — one
+line each, no dependency. Not done yet because the cache TTL is 5 minutes and an
+app with no users has no two requests inside 5 minutes; today's hit rate is ~0.
+It also silently no-ops below the model's minimum cacheable prefix. **Trigger:**
+add it when traffic is bursty enough that requests land within 5 minutes of each
+other, and verify with `usage.cache_read_input_tokens > 0` rather than assuming.
+
+### The rate limiter is per-instance
+`apps/web/lib/rate-limit.ts` is an in-memory Map. On Vercel that is per-lambda and
+dies with a cold start: it stops a script, not a distributed caller. The durable
+control is the input bound in `IntakeSchema`. Upgrade when there is real traffic:
+Vercel Firewall rate-limit rules (no code) or an Upstash-backed counter (replace
+the body of `rateLimit`, the signature is already the right shape). It keys on a
+caller identity string, so it becomes a user id the day real auth lands.
