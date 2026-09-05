@@ -1,3 +1,4 @@
+import { isConsentApproved } from "@/lib/consent";
 import { generatePlan, type ImageMediaType, type PlanImage, type PlanInput } from "@/lib/pipeline";
 import { PhotoQualitySchema } from "@/lib/schemas";
 
@@ -62,10 +63,17 @@ function validateImages(raw: unknown): { images: PlanImage[] } | { error: string
   return { images };
 }
 
+interface PlanRequestBody extends Partial<PlanInput> {
+  /** Required when intake.age is under 18 -- see lib/consent.ts. The id
+   *  alone isn't enough: it must match the parentEmail the consent request
+   *  was created with, so an unrelated approved request can't be reused. */
+  parentalConsent?: { id?: string; parentEmail?: string };
+}
+
 export async function POST(req: Request) {
-  let body: Partial<PlanInput>;
+  let body: PlanRequestBody;
   try {
-    body = (await req.json()) as Partial<PlanInput>;
+    body = (await req.json()) as PlanRequestBody;
   } catch {
     return Response.json({ error: "Invalid JSON body" }, { status: 400 });
   }
@@ -77,6 +85,22 @@ export async function POST(req: Request) {
   const validated = validateImages(body.images);
   if ("error" in validated) {
     return Response.json({ error: validated.error }, { status: 400 });
+  }
+
+  // Deterministic safety clamp for actives lives in the shared engine; this
+  // is the equivalent code-level guarantee for the photo pipeline itself --
+  // no amount of client-side UI can be trusted to gate it.
+  if (body.intake.age < 18) {
+    const consentId = body.parentalConsent?.id;
+    const parentEmail = body.parentalConsent?.parentEmail;
+    const approved =
+      consentId && parentEmail ? await isConsentApproved(consentId, parentEmail) : false;
+    if (!approved) {
+      return Response.json(
+        { error: "Parental approval is required before running the photo pipeline" },
+        { status: 403 },
+      );
+    }
   }
 
   try {

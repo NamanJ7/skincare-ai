@@ -80,6 +80,10 @@ export default function Intake() {
     const plan = await fetchPlan({
       images: ordered.map((p) => ({ data: p.data, mediaType: "image/jpeg", quality: p.quality })),
       intake: buildIntake({ ...data, ...answers }),
+      parentalConsent:
+        data.parentalConsentId && data.parentEmail
+          ? { id: data.parentalConsentId, parentEmail: data.parentEmail }
+          : undefined,
     });
     if (plan) {
       update({ plan });
