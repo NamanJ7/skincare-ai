@@ -41,7 +41,7 @@ pnpm build            # turbo run build   (web only defines `build`; mobile has 
 pnpm dev              # turbo run dev     (persistent, uncached)
 pnpm lint             # turbo run lint    (web only; eslint-config-next)
 pnpm typecheck        # turbo run typecheck (all three packages: tsc --noEmit)
-pnpm test             # turbo run test    (packages/shared only, via vitest)
+pnpm test             # turbo run test    (packages/shared + apps/web, via vitest)
 ```
 
 Single-package / single-test invocations:
@@ -57,6 +57,7 @@ pnpm --filter @pore/shared typecheck
 pnpm --filter web dev                        # next dev, http://localhost:3000
 pnpm --filter web lint
 pnpm --filter web build
+pnpm --filter web test                       # vitest run (lib/**/*.test.ts)
 
 # mobile (run from apps/mobile, or pnpm --filter @pore/mobile <script>)
 pnpm --filter @pore/mobile start             # expo start
@@ -64,8 +65,9 @@ pnpm --filter @pore/mobile ios / android / web
 pnpm --filter @pore/mobile typecheck
 ```
 
-There is no test suite for `apps/web` or `apps/mobile` today — `packages/shared` is the only
-package with tests (vitest), concentrated on the safety engine.
+`packages/shared` holds the bulk of the tests (vitest), concentrated on the safety engine.
+`apps/web` has one suite, `lib/plan-boundary.test.ts`, covering the `/api/plan` trust boundary
+(`IntakeSchema` and the rate limiter). `apps/mobile` has no tests.
 
 ## Architecture: the plan-generation pipeline
 
@@ -104,7 +106,25 @@ not edge — with `maxDuration: 60` since it makes two model calls):
 
 The mobile app calls the same endpoint via `apps/mobile/src/lib/api.ts` (`fetchPlan`), pointed at
 `EXPO_PUBLIC_API_URL`; if that's unset or the request fails, it falls back to a local demo rather
-than erroring.
+than erroring. That fallback is deliberate but must stay noisy — `fetchPlan` logs the status and
+body on a non-ok response, because a swallowed 4xx otherwise renders a plausible mock routine with
+no sign the real pipeline refused.
+
+### The `/api/plan` gates are a cost boundary, not just a correctness one
+
+`route.ts` runs four gates in this order, and **the order is the protection**: rate limit →
+`content-length` → `IntakeSchema` → `validateImages`. The first two run before `req.json()` so a
+rejected caller never gets a body buffered into memory; a missing `content-length` is a 411 rather
+than an unbounded read. `IntakeSchema` (`lib/schemas.ts`) matters most: the intake is
+`JSON.stringify`'d into *both* Claude prompts, so every free-text field is length- and count-capped
+and the object is `.strict()` — an unbounded intake is an unbounded bill, and rate limiting caps
+only how many requests you pay for, not how much each one costs. `lib/rate-limit.ts` is an
+in-memory Map, so it is per-instance on serverless and is the backstop, not the primary control.
+
+Do not reorder, relax or remove these without reading `lib/plan-boundary.test.ts` first — it
+covers the schema and limiter as units but not the handler's ordering, so a reordering refactor
+will pass the suite while undoing the protection. 500s return a fixed message; the real error is
+logged, never returned.
 
 ## Architecture: the cadence engine
 

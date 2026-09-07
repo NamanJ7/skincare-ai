@@ -133,10 +133,14 @@ Onboarding is now photo-first, which matches `apps/web/components/sections/HowIt
 and `FeatureCards.tsx`. Check no other marketing copy still describes an order
 the app no longer uses.
 
-### `apps/web` has no tests
-`packages/shared` is the only package with a test suite. The `/api/plan` input
-validation in `apps/web/app/api/plan/route.ts` is a trust boundary in front of a
-paid endpoint and is currently only covered by manual probes.
+### `apps/web` route handlers are untested at the HTTP layer
+`apps/web` now has a test suite (`lib/plan-boundary.test.ts`, run by `pnpm test`)
+covering `IntakeSchema` and the rate limiter as units. What is still uncovered is
+the handler itself: the status codes, the `RateLimit-*` / `Retry-After` headers,
+and the ordering of the gates in `app/api/plan/route.ts` were verified by manual
+curl probes, not by a test. A refactor that reorders the gates — say, moving the
+body-size check after `req.json()` — would pass the current suite while undoing
+the protection. `apps/mobile` still has no tests at all.
 
 ## Security & cost hardening — deferred items
 
@@ -184,3 +188,30 @@ control is the input bound in `IntakeSchema`. Upgrade when there is real traffic
 Vercel Firewall rate-limit rules (no code) or an Upstash-backed counter (replace
 the body of `rateLimit`, the signature is already the right shape). It keys on a
 caller identity string, so it becomes a user id the day real auth lands.
+
+### `maxDuration` is 60s and unverified against the deploy target
+`apps/web/app/api/plan/route.ts:8` sets `maxDuration = 60`. Two sequential Opus
+4.8 calls at `max_tokens: 16000` can plausibly exceed that, and the failure mode
+is the expensive one: a gateway timeout *after* both model calls have been paid
+for and after the user has already waited a minute.
+
+Left at 60 because the app is not deployed yet, so there is nothing to measure
+against. The ceiling is plan-dependent and could not be verified from the dev
+container (Vercel's docs are blocked by the egress proxy, and the public
+summaries contradict each other on whether the Hobby ceiling is 60s or 300s).
+Check the real limit in the Vercel dashboard on first deploy and raise it there
+rather than trusting a number written here.
+
+### `metadataBase` points at `pore.skin`, the app is served from `poreai.vercel.app`
+`apps/web/app/layout.tsx:22` sets `metadataBase: new URL("https://pore.skin")`.
+Next resolves every Open Graph image and canonical URL against it, so if the site
+is served from `poreai.vercel.app` and `pore.skin` is not mapped to it, every
+social preview points at a domain that does not serve the assets.
+
+Deliberately not changed: whether `pore.skin` is a domain that is owned and will
+be mapped, or an aspiration, is not knowable from the repo. If it is owned and
+mapped, the current value is already correct and switching it to the Vercel URL
+would be the regression. Decide, then it is a one-line change.
+
+(`components/mockups/DashboardMock.tsx:23` also renders `app.pore.skin`, but that
+is display text inside an illustration of the product, not a resolved URL.)

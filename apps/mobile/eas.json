@@ -12,13 +12,13 @@
       "distribution": "internal",
       "channel": "preview",
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://staging.pore.skin"
+        "EXPO_PUBLIC_API_URL": "https://poreai.vercel.app"
       }
     },
     "production": {
       "channel": "production",
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://pore.skin"
+        "EXPO_PUBLIC_API_URL": "https://poreai.vercel.app"
       }
     }
   },
