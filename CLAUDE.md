@@ -356,8 +356,9 @@ configured in the Tally dashboard, not in code. There is no waitlist API route i
   anywhere else. Mobile imports them directly through `@/theme`. Web is the exception to know about:
   `apps/web/app/globals.css` restates the same values in a Tailwind v4 `@theme` block, so a token
   change means editing **both files**. `tailwindPreset` (`design/tailwind-preset.ts`) is exported but
-  currently consumed by nobody — it's a Tailwind v3-shaped preset left over from the NativeWind plan.
-  Don't assume changing it affects either client.
+  imported by nothing, and it is v3-shaped while web runs Tailwind v4 — so editing it changes neither
+  client today. Whether it is groundwork for a future setup or simply dead is not recorded anywhere:
+  don't delete it assuming it's dead, and don't expect an edit to it to take effect.
 - **Legal copy is legal text.** `packages/shared/src/legal/content.ts` reproduces the pre-launch
   wording verbatim; sentences marked "Disclosure" state facts about how the deployed site actually
   behaves, verified against the code. Restructure freely, **reword never**, and bump
