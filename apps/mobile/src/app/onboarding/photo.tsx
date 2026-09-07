@@ -13,7 +13,7 @@
  */
 import { CameraView, useCameraPermissions, type CameraCapturedPicture } from "expo-camera";
 import { Image } from "expo-image";
-import { router } from "expo-router";
+import { router, useLocalSearchParams } from "expo-router";
 import { useCallback, useRef, useState } from "react";
 import { ActivityIndicator, Linking, Pressable, StyleSheet, View } from "react-native";
 
@@ -77,6 +77,8 @@ type Stage = "intro" | "capturing" | "reviewing";
 
 export default function PhotoCapture() {
   const { data, update } = useOnboarding();
+  /** Set when a returning user started this from Today rather than onboarding. */
+  const { rescan } = useLocalSearchParams<{ rescan?: string }>();
   const [permission, requestPermission] = useCameraPermissions();
   const camera = useRef<CameraView>(null);
 
@@ -185,16 +187,20 @@ export default function PhotoCapture() {
   }
 
   /**
-   * Capture ends here; the plan is generated at the end of intake.
+   * Capture ends here; the plan is generated on the next screen.
    *
    * The photos come first because that is the moment someone decides this
    * product is real, but the assessment still needs the questionnaire answers,
    * so generation waits for them rather than running on defaults.
+   *
+   * A returning user goes to /recheck instead: their answers are already on the
+   * device, and the only one worth asking again is the one that can change and
+   * that the safety engine treats as a hard filter.
    */
   function done() {
     writeManifest(photos, sessionId);
-    update({ photos });
-    router.push("/onboarding/intake");
+    update({ photos, sessionId });
+    router.push(rescan ? "/recheck" : "/onboarding/intake");
   }
 
   // ---------------------------------------------------------------- intro --

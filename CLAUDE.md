@@ -112,15 +112,44 @@ directory, written as versioned JSON with failures treated as non-fatal:
 
 - `apps/mobile/src/lib/photos.ts` — `skin-photos/<sessionId>/` (three JPEGs + `manifest.json`) and
   a top-level `sessions.json` index.
-- `apps/mobile/src/lib/plan.ts` — `plan.json`, holding the generated plan and the `IntakeResponse`
-  behind it. `OnboardingProvider` restores it synchronously on mount, which is what lets
-  `app/index.tsx` route a returning user straight to `/today` on its first render.
+- `apps/mobile/src/lib/plan.ts` — `check-ins/<sessionId>.json`, one record per visit holding that
+  visit's `IntakeResponse` and `PlanResult`. The key is the **same `sessionId` the photos are
+  stored under**: findings and pixels from one visit have to be able to find each other, and that
+  link is what makes progress comparison possible. `loadPlan()` returns the newest and
+  `OnboardingProvider` calls it synchronously on mount, which is what lets `app/index.tsx` route a
+  returning user straight to `/today` on its first render.
 
-Two rules here are load-bearing. Photo base64 is never written to disk — it exists for the
+There is deliberately **no index file** for check-ins. `newSessionId()` is an ISO timestamp with
+`:` and `.` replaced, so filenames sort lexically and the directory listing is the index. This
+avoids the failure mode `sessions.json` already has, where a session can exist on disk while the
+index append that should have announced it failed.
+
+Three rules here are load-bearing. Photo base64 is never written to disk — it exists for the
 duration of one `/api/plan` request, and the privacy copy in `packages/shared/src/legal/content.ts`
-depends on that staying true. And `loadPlan` returns null on anything it cannot fully verify:
-it runs on the launch path, so a half-read plan would either crash every start or put the wrong
-findings in front of the user.
+depends on that staying true. Records live in `check-ins/`, never inside `skin-photos/`, because
+`deleteStoredPhotos()` deletes that whole tree and the app promises deleting your photos leaves
+your routine alone. And the readers return null on anything they cannot fully verify: this runs on
+the launch path, so a half-read plan would either crash every start or put the wrong findings in
+front of the user. Changing the record schema means bumping `VERSION` **and** extending
+`migrateLegacyPlan` — a version bump alone silently discards every existing user's routine.
+
+## Progress comparison
+
+`packages/shared/src/progress/compareAssessments` diffs two check-ins' `Assessment`s. Like the
+safety engine, it is code rather than a prompt: a comparison that answers differently each run
+cannot be tested or explained, and this one produces a sentence about someone's face.
+
+It is built to refuse. It returns `comparable: false` with no changes at all when the check-ins
+are under 28 days apart, were not both shot under `screen_flash` (the only illuminant that is
+comparable across sessions), or when either read was below 0.5 `overallConfidence`; and it marks
+individual concerns `"unclear"` rather than guessing when a finding is missing or low-confidence.
+Vocabulary is `less_visible`/`more_visible`, never "improved"/"worse" — the app describes
+appearance and does not grade the user. Deliberately do **not** feed a previous assessment into
+the next vision call to get this: the model would anchor on its own prior answer and report
+continuity that isn't there, which looks like signal and isn't.
+
+The 28-day floor is shared with `apps/mobile/src/lib/checkin.ts`, which drives the re-scan prompt
+on `/today` — prompting sooner would invite a comparison the engine then declines to make.
 
 ## Conventions
 

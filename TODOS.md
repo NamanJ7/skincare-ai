@@ -54,6 +54,8 @@ Affiliate links in `Product.url` mean the disclosure in
 `packages/shared/src/legal/content.ts` has to be revisited.
 
 ### 2. Daily checklist
+Now also the missing input for progress comparison — see item 3.
+
 Tappable steps on `/today` with a date-keyed log, stored the same way as `plan.json`.
 Do not assign specific weekdays to a 3x/week step — there is no basis for choosing
 Monday, and a wrong-feeling schedule is worse than none; count against
@@ -61,13 +63,24 @@ Monday, and a wrong-feeling schedule is worse than none; count against
 pipeline generates and the UI currently discards. No streaks: a missed day in
 skincare is normal, and a broken streak is how the app gets deleted.
 
-### 3. Re-scan entry point
-`/compare` and the ghost overlay are both built and both unreachable — the only route
-into `/onboarding/photo` is `sign-up → age → (consent) → photo`, so no user can ever
-reach a second session. A "Take new photos" action on `/today` that starts a session
-directly is what makes the work in the last commit visible. Surface it on a cadence
-(~4 weeks, from `listSessions()[0].capturedAt`) rather than permanently, and note that
-only `illuminant: "screen_flash"` captures are comparable across sessions.
+### 3. Re-scan entry point — DONE
+Shipped with check-in memory: `/today` prompts at 28 days, `/onboarding/photo?rescan=1`
+starts a session, `/recheck` re-asks only pregnancy, and `/compare` now renders a
+deterministic findings comparison alongside the photos. Still open from that work:
+
+- **Adherence is the missing input.** `compareAssessments` can say a concern looks less
+  visible; it cannot say whether the routine was followed. "About the same" means
+  something very different at 3 days of use out of 28 than at 25, and right now the
+  comparison cannot tell those apart. The daily checklist below is what fixes it.
+- **The 28-day floor is a guess about biology, not a measurement.** It matches skin
+  turnover and the ramp copy, but nobody has checked whether real users' scans 28 days
+  apart produce readable differences. If they mostly come back "about the same",
+  the floor is too low.
+- **`illuminant` gates the whole feature.** If `flash="screen"` turns out to be a no-op
+  on hardware and `USE_NATIVE_SCREEN_FLASH` is flipped to `false`, every capture becomes
+  `ambient` and `compareAssessments` will correctly but permanently refuse to compare
+  levels. That is the honest behaviour, and it also means the progress feature silently
+  never fires. Verify the flag before relying on it.
 
 ### 4. Paid tier
 Free keeps the first scan, the routine and the checklist — that is the proof the
@@ -101,9 +114,11 @@ photos" card on Today once 2+ sessions exist) shows the newest session against
 the one before it, one angle at a time via a chip row — no session picker, the
 two most recent is the whole feature.
 
-Still needed: a privacy story for keeping more than the latest set on the
-device (`storedPhotoCount`/`deleteStoredPhotos` still treat every session as
-one pool — there's no per-session delete or retention limit yet). The ghost
+Done: per-check-in delete landed with check-in memory — `/history` lists every
+visit and `deleteCheckIn` removes one visit's record and photos together, via
+`deleteSessionPhotos`. There is still no retention limit: history grows without
+bound by design, on the reasoning that auto-pruning would destroy the oldest
+"before" photo, which is the one with the most progress value. The ghost
 overlay itself is unverified on hardware — same caveat as `flash="screen"`
 above: confirm the oval-clipped ghost image actually reads as "line up with
 your last photo" on a real front camera before calling this done-done.

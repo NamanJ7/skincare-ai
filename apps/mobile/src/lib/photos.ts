@@ -178,15 +178,18 @@ export function sessionPhotoUri(sessionId: string, angle: CaptureAngle): string 
   return file.exists ? file.uri : undefined;
 }
 
+function writeSessionIndex(sessions: StoredSession[]): void {
+  const dir = photosDir();
+  if (!dir.exists) dir.create({ intermediates: true });
+  const file = new File(dir, SESSIONS_INDEX);
+  if (file.exists) file.delete();
+  file.create();
+  file.write(JSON.stringify({ version: 1, sessions }));
+}
+
 function appendToSessionIndex(session: StoredSession): void {
   try {
-    const dir = photosDir();
-    if (!dir.exists) dir.create({ intermediates: true });
-    const sessions = [...readSessionIndex(), session];
-    const file = new File(dir, SESSIONS_INDEX);
-    if (file.exists) file.delete();
-    file.create();
-    file.write(JSON.stringify({ version: 1, sessions }));
+    writeSessionIndex([...readSessionIndex(), session]);
   } catch {
     // The index is a convenience for a future session, never a blocker now.
   }
@@ -233,6 +236,22 @@ export function storedPhotoCount(): number {
       .reduce((total, session) => total + session.list().filter((f) => f.name.endsWith(".jpg")).length, 0);
   } catch {
     return 0;
+  }
+}
+
+/**
+ * Remove one session's photos and drop it from the index.
+ *
+ * History accumulates on purpose now, and it is face photos — so a user has to
+ * be able to remove one visit without throwing away the rest.
+ */
+export function deleteSessionPhotos(sessionId: string): void {
+  try {
+    const dir = sessionDir(sessionId);
+    if (dir.exists) dir.delete();
+    writeSessionIndex(readSessionIndex().filter((s) => s.id !== sessionId));
+  } catch {
+    // Best effort, like every other write here.
   }
 }
 

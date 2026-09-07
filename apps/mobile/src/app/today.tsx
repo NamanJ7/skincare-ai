@@ -4,14 +4,16 @@ import { Alert, Pressable, View } from "react-native";
 
 import {
   ACTIVES,
+  CONCERN_LABELS,
   applySafetyRules,
-  type ConcernKey,
   type ProductCategory,
   type Routine,
   type RoutineStep,
 } from "@pore/shared";
+import { CHECK_IN_DAYS, daysUntilCheckIn } from "@/lib/checkin";
 import { buildIntake } from "@/lib/intake";
 import { deleteStoredPhotos, listSessions, storedPhotoCount } from "@/lib/photos";
+import { listCheckIns } from "@/lib/plan";
 import { useOnboarding } from "@/state/onboarding";
 import { AppText, Card, Chip, Divider, GhostButton, Screen, colors, spacing } from "@/theme";
 
@@ -23,18 +25,6 @@ const CATEGORY_LABELS: Record<ProductCategory, string> = {
   sunscreen: "Sunscreen (SPF)",
   exfoliant: "Exfoliant",
   spot_treatment: "Spot treatment",
-};
-
-const CONCERN_LABELS: Record<ConcernKey, string> = {
-  acne_like_breakouts: "Acne-like breakouts",
-  oiliness: "Oiliness",
-  dryness_flaking: "Dryness / flaking",
-  texture_congestion: "Texture & congestion",
-  uneven_tone: "Uneven tone",
-  dark_spot_appearance: "Dark-spot appearance",
-  redness_appearance: "Redness appearance",
-  fine_line_appearance: "Fine-line appearance",
-  irritation_signs: "Signs of irritation",
 };
 
 /**
@@ -77,6 +67,8 @@ export default function Today() {
   const { data, update, reset } = useOnboarding();
   const [photoCount, setPhotoCount] = useState(() => storedPhotoCount());
   const [sessionCount] = useState(() => listSessions().length);
+  const [checkIns] = useState(() => listCheckIns());
+  const dueIn = checkIns[0] ? daysUntilCheckIn(checkIns[0].savedAt) : null;
 
   function confirmDeletePhotos() {
     Alert.alert(
@@ -222,6 +214,32 @@ export default function Today() {
         </Card>
       )}
 
+      {dueIn !== null && (
+        <Card elevated>
+          {dueIn === 0 ? (
+            <>
+              <AppText variant="heading">Time for a check-in</AppText>
+              <AppText variant="caption" color={colors.inkMuted}>
+                It&apos;s been about {CHECK_IN_DAYS} days. New photos let us see what actually
+                changed — we&apos;ll line them up with your last set as you shoot.
+              </AppText>
+              <GhostButton
+                label="Take new photos"
+                onPress={() => router.push("/onboarding/photo?rescan=1")}
+              />
+            </>
+          ) : (
+            <>
+              <AppText variant="heading">Next check-in</AppText>
+              <AppText variant="caption" color={colors.inkMuted}>
+                In {dueIn} {dueIn === 1 ? "day" : "days"}. Skin takes about four weeks to show a
+                change, so there&apos;s not much to see before then.
+              </AppText>
+            </>
+          )}
+        </Card>
+      )}
+
       <RoutineCard title="Morning" steps={view.routine.am} />
       <RoutineCard title="Evening" steps={view.routine.pm} />
 
@@ -247,6 +265,9 @@ export default function Today() {
           </AppText>
           {sessionCount >= 2 && (
             <GhostButton label="Compare progress" onPress={() => router.push("/compare")} />
+          )}
+          {checkIns.length > 0 && (
+            <GhostButton label="Your check-ins" onPress={() => router.push("/history")} />
           )}
           <GhostButton label="Delete my photos" onPress={confirmDeletePhotos} />
         </Card>

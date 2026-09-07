@@ -1,8 +1,8 @@
 /**
  * Onboarding state shared across the intake screens.
  *
- * Seeded from the plan saved on this device, so a returning user keeps their
- * routine and the answers behind it. The read is synchronous (see `loadPlan`),
+ * Seeded from the most recent check-in saved on this device, so a returning user
+ * keeps their routine and the answers behind it. The read is synchronous (see `loadPlan`),
  * which is what lets the landing screen decide where to send someone on its
  * first render instead of flashing a marketing page at an existing user.
  */
@@ -14,6 +14,11 @@ import { clearPlan, loadPlan } from "@/lib/plan";
 
 export type OnboardingData = Partial<IntakeResponse> & {
   parentEmail?: string;
+  /**
+   * The capture session this visit belongs to. Set by the photo screen and read
+   * by whoever saves the plan, so the record is keyed to the photos behind it.
+   */
+  sessionId?: string;
   /**
    * Guided-capture photos. Base64 is held in memory only for the /api/plan
    * request; the JPEGs live in the app's document directory until deleted.
@@ -27,7 +32,7 @@ export type OnboardingData = Partial<IntakeResponse> & {
 interface OnboardingContextValue {
   data: OnboardingData;
   update: (patch: OnboardingData) => void;
-  /** Clear this session AND the saved plan — the user's "start over". */
+  /** Clear this session AND every saved check-in — the user's "start over". */
   reset: () => void;
 }
 
@@ -37,7 +42,7 @@ const OnboardingContext = createContext<OnboardingContextValue | null>(null);
 function restore(): OnboardingData {
   const stored = loadPlan();
   if (!stored) return {};
-  return { ...stored.intake, plan: stored.plan };
+  return { ...stored.intake, sessionId: stored.sessionId, plan: stored.plan };
 }
 
 export function OnboardingProvider({ children }: { children: ReactNode }) {
