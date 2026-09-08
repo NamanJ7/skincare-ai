@@ -96,8 +96,8 @@ pnpm --filter @pore/mobile ios / android / web
 pnpm --filter @pore/mobile typecheck
 ```
 
-Current baseline (keep it here): `pnpm test` → 4 files, 83 tests, all passing (`safety` 12, `vision`
-15, `progress` 21, `schedule` 35). `pnpm typecheck` → clean in all three packages. `pnpm lint` → 0
+Current baseline (keep it here): `pnpm test` → 4 files, 89 tests, all passing (`safety` 12, `vision`
+15, `progress` 21, `schedule` 41). `pnpm typecheck` → clean in all three packages. `pnpm lint` → 0
 errors, 6 pre-existing `no-unused-vars` warnings (`components/ui/Button.tsx`, `lib/mock.ts`). Don't
 let a change add errors; the warnings are known.
 
@@ -314,7 +314,8 @@ onboarding/age         age gate; <16 blocked, <=17 detours through consent
 onboarding/consent     parental-consent email capture (records the address; does not yet verify)
 onboarding/photo       guided 3-angle capture (the big one — ~420 lines, single screen, shared camera mount)
 onboarding/intake      questionnaire; calls fetchPlan at the end, records the progress baseline
-today.tsx              THE primary surface: only the current session, from planDay. One check-in tap.
+today.tsx              THE primary surface: one session at a time, from planDay. One check-in tap.
+                       The week strip navigates days; only today is writable (see above).
 plan.tsx               the reference document — full assessment, routine, safety adjustments, privacy rows
 compare.tsx            the verdict — compareAssessments on two blind assessments, or an honest refusal
 legal/privacy|terms    render the shared LegalDocument
@@ -327,22 +328,26 @@ calibrates the camera, not as one more anonymous questionnaire step.
 
 - **Styling: no NativeWind.** Despite the name, mobile uses React Native `StyleSheet` plus the small
   UI kit in `apps/mobile/src/theme/ui.tsx` (`AppText`, `Screen`, `Card`, `PrimaryButton`,
-  `GhostButton`, `Chip`, `ProgressDots`, `TextField`, `Divider`). `apps/mobile/src/theme/index.ts`
+  `GhostButton`, `Chip`, `ProgressDots`, `TextField`, `Divider`, `Disclosure`). `apps/mobile/src/theme/index.ts`
   re-exports the shared tokens alongside it, so `import { AppText, colors, spacing } from "@/theme"`
   is the one import for both. `src/global.css` is a leftover CSS-variable file, not a Tailwind entry.
 - **Fonts**: React Native can't synthesize weights from one custom family, so `theme/fonts.ts` loads
   8 weight-specific `@expo-google-fonts` faces (deep imports, so Metro bundles only those) and
   `resolveFontFamily(family, weight)` picks the right face. The root layout holds the native splash
   up until fonts are ready.
-- **State**: `src/state/onboarding.tsx` is a single in-memory React context (`OnboardingProvider` /
-  `useOnboarding`) carrying `Partial<IntakeResponse>` + `parentEmail` + `photos` + the generated
-  `plan`. It is still in-memory and dies with the process.
-- **Durable on-device state is two stores, both plain JSON in the app's document directory, both
-  best-effort on write, and neither ever uploaded**: `src/lib/photos.ts` (capture sessions, above)
-  and `src/lib/journal.ts` (`journal.json` — routine start date, per-session tick-offs, skin
-  check-ins, stored assessments and the persisted adaptation). The journal is what makes the cadence
-  engine reactive rather than static. Both are disclosed in the privacy content and both must keep
-  offering erasure — `deleteJournal()` and `deleteStoredPhotos()`, surfaced on `/plan`.
+- **State**: `src/state/onboarding.tsx` is a React context (`OnboardingProvider` / `useOnboarding`)
+  carrying `Partial<IntakeResponse>` + `parentEmail` + `photos` + the generated `plan`. It is
+  **not** in-memory only — it hydrates from `src/lib/profile.ts` synchronously on mount and writes
+  back on every `update`. See the cadence-engine section above for why that is a safety property
+  and not a convenience; do not "simplify" it back to `useState({})`.
+- **Durable on-device state is three stores, all plain JSON in the app's document directory, all
+  best-effort on write, and none ever uploaded**: `src/lib/photos.ts` (capture sessions, above),
+  `src/lib/journal.ts` (`journal.json` — routine start date, per-session tick-offs, skin check-ins,
+  stored assessments and the persisted adaptation) and `src/lib/profile.ts` (`profile.json` — the
+  intake answers and the generated plan). The journal is what makes the cadence engine reactive
+  rather than static; the profile is what keeps the safety engine running against real answers. All
+  three are disclosed in the privacy content and all three must keep offering erasure —
+  `deleteJournal()`, `deleteStoredPhotos()` and `deleteProfile()`, surfaced on `/plan`.
 - `src/lib/intake.ts` (`buildIntake`) fills an `IntakeResponse` from partial onboarding answers with
   sensible defaults, including defaulting `darkMarkProne` from skin tone rather than assuming it of
   everyone.

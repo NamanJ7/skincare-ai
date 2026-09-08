@@ -13,7 +13,34 @@ not match the paper. The regression test in `quality.test.ts` locks in the
 behaviour that matters (a correctly exposed deep-skin capture must not be called
 "too dark"); the numbers around it are still provisional.
 
-### Verify `flash="screen"` on device
+### Verify `flash="screen"` on device — this one gates the progress engine
+**Read this before treating it as a config detail.** The illuminant label is a
+*declaration*, not a measurement. `photo.tsx` sets it from the compile-time
+constant `USE_NATIVE_SCREEN_FLASH` alone; `photos.ts` passes it through
+untouched; and `isMeasurable` in `progress/engine.ts` is
+`flags.length === 0 && illuminant === "screen_flash"` — that label is the *only*
+gate deciding whether two sessions may be subtracted. Nothing cross-checks it,
+even though `scoreFrame` already computes a gray-world illuminant estimate.
+
+So both settings of the flag are currently wrong in different directions:
+
+- `true` (today): if `flash="screen"` is a no-op on the front camera, every photo
+  is ambient-lit but **labelled** `screen_flash`. `/compare` then subtracts two
+  uncontrolled photos and reports a change — the app confabulating progress,
+  which is the one thing this product's design exists to refuse. It fails
+  silently and confidently, the worst available shape.
+- `false`: the app paints its own white overlay for `FLASH_MS`, which is a
+  genuinely controlled illuminant, and then records the shot as `ambient`
+  anyway. Honest, but it means `isMeasurable` never passes and `/compare` can
+  never compare anything at all. The progress feature is dead in that mode.
+
+The device check is five minutes and decides which problem you have. The real
+fix, either way, is to stop trusting a boolean: label the illuminant from
+something observed rather than something intended.
+
+---
+
+
 `apps/mobile/src/app/onboarding/photo.tsx` sets `USE_NATIVE_SCREEN_FLASH = true`.
 `'screen'` is a documented SDK 56 `FlashMode`, but the docs do not describe its
 front-camera behaviour, and it has not been confirmed on hardware. Check on both
