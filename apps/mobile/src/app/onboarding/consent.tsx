@@ -35,6 +35,7 @@ export default function ParentalConsent() {
         autoCapitalize="none"
         autoCorrect={false}
         placeholder="parent@email.com"
+        accessibilityLabel="Parent or guardian's email address"
         placeholderTextColor={colors.inkMuted}
         style={styles.input}
       />

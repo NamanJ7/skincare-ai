@@ -171,26 +171,20 @@ export function checkInFor(journal: Journal, date: string): SkinFeel | undefined
 }
 
 /**
- * Consecutive days ending today on which at least one session was completed.
+ * Sessions completed between two calendar dates, inclusive.
  *
- * Today being unfinished does not break the streak — it has not happened yet.
- * The count starts from yesterday in that case, so the number never drops just
- * because the user opened the app in the morning.
+ * This replaced a consecutive-day streak, which was the one gamified element in
+ * the app and was quietly arguing with the rest of it. The correct thing to do
+ * on a night your skin is stinging is to stop — the cadence engine will pull the
+ * actives for three days by itself — and an unbroken chain punishes exactly that
+ * behaviour. A count over a window rewards showing up without making a skipped
+ * night feel like a loss.
  */
-export function streakDays(journal: Journal, on: string = today()): number {
-  const days = new Set(journal.finished.map((k) => k.split(":")[0]));
-  let count = 0;
-  let cursor = days.has(on) ? on : shiftDay(on, -1);
-  while (days.has(cursor)) {
-    count++;
-    cursor = shiftDay(cursor, -1);
-  }
-  return count;
-}
-
-function shiftDay(date: string, delta: number): string {
-  const [y, m, d] = date.split("-").map(Number);
-  return new Date(Date.UTC(y, m - 1, d + delta)).toISOString().slice(0, 10);
+export function sessionsBetween(journal: Journal, from: string, to: string): number {
+  return journal.finished.filter((key) => {
+    const day = key.split(":")[0] ?? "";
+    return day >= from && day <= to;
+  }).length;
 }
 
 /**

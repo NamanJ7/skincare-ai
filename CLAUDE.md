@@ -97,8 +97,8 @@ pnpm --filter @pore/mobile ios / android / web
 pnpm --filter @pore/mobile typecheck
 ```
 
-Current baseline (keep it here): `pnpm test` → 5 files, 90 tests, all passing (`safety` 12, `vision`
-15, `progress` 21, `schedule` 35, web `plan-boundary` 7). `pnpm typecheck` → clean in all three
+Current baseline (keep it here): `pnpm test` → 5 files, 96 tests, all passing (`safety` 12, `vision`
+15, `progress` 21, `schedule` 41, web `plan-boundary` 7). `pnpm typecheck` → clean in all three
 packages. `pnpm lint` → 0 errors, 6 pre-existing `no-unused-vars` warnings
 (`components/ui/Button.tsx`, `lib/mock.ts`). Don't let a change add errors; the warnings are known.
 
@@ -253,14 +253,38 @@ session that renames itself (a "Recovery night") must always carry a note explai
 headline the user can't account for is worse than no headline. Extend
 `packages/shared/src/schedule/engine.test.ts` when changing any of this.
 
-State lives in `apps/mobile/src/lib/journal.ts` — an on-device JSON file holding the routine start
-date, per-session tick-offs, and the one-tap skin check-ins. It never leaves the phone, it is
-disclosed in the privacy content (`packages/shared/src/legal/content.ts`), and `/plan` must keep
-offering a way to erase it.
+State lives in two on-device JSON files, same shape and same promise — synchronous reads,
+best-effort writes, nothing uploaded, both disclosed in the privacy content
+(`packages/shared/src/legal/content.ts`) and both erasable from `/plan`, which must keep offering
+that:
 
-`apps/mobile/src/app/today.tsx` is the primary surface and shows **only the current session**;
+- `apps/mobile/src/lib/journal.ts` — the routine start date, per-session tick-offs, the one-tap
+  skin check-ins, the baseline/latest assessments and the adapted routine.
+- `apps/mobile/src/lib/profile.ts` — the intake answers and the generated plan.
+  **This one is load-bearing for safety.** Sensitivity, the pregnancy flag, declared allergies and
+  skin tone are collected once and needed on every launch after that; when they lived in React
+  state, a cold start silently re-ran the whole app against `buildIntake({})` defaults, so
+  `applySafetyRules` was doing exactly the right thing to the wrong answers and a pregnant user
+  could be shown a retinoid. `OnboardingProvider` hydrates from it synchronously before anything
+  renders. Base64 photo payloads are never written to it — they exist for one `/api/plan` request.
+
+`apps/mobile/src/lib/reminder.ts` owns the single local daily notification (one per day, hour
+chosen by the user, off switch on `/plan`). Its body deliberately never names tonight's active: a
+`DAILY` trigger fires unchanged, and a check-in can deload the routine and rename the session
+between scheduling and firing, so the banner could contradict the app. `feedback.ts` wraps
+`expo-haptics` for the tick/complete/select moments — best-effort, no-ops off-device.
+
+`apps/mobile/src/app/today.tsx` is the primary surface and shows **one session at a time**;
 `/plan` holds the full assessment and routine as a reference document. Keep it that way — the
 whole point is that the user makes no decisions except the single "how does your skin feel?" tap.
+
+The week strip is the navigation: tapping a day shows it, tapping the day already open flips
+morning/evening. **Only today can be written to.** Journal entries are keyed by calendar date and
+both `adherenceRate` and `rampWeekFor` read back from them, so ticking a future day off would
+advance the ramp on a claim that had not happened. Four things prevent it — `onToggle`/`onFeel`
+return early unless the viewed day is today, the step rows are `disabled`, the check-in card is
+not rendered, and both writes target today's date rather than the viewed one. Preserve all four
+if you touch that screen; any one of them alone is a guard someone can refactor away.
 
 ## Architecture: the progress engine
 
@@ -310,7 +334,8 @@ onboarding/age         age gate; <16 blocked, <=17 detours through consent
 onboarding/consent     parental-consent email capture (records the address; does not yet verify)
 onboarding/photo       guided 3-angle capture (the big one — ~420 lines, single screen, shared camera mount)
 onboarding/intake      questionnaire; calls fetchPlan at the end, records the progress baseline
-today.tsx              THE primary surface: only the current session, from planDay. One check-in tap.
+today.tsx              THE primary surface: one session at a time, from planDay. One check-in tap.
+                       The week strip navigates days; only today is writable (see above).
 plan.tsx               the reference document — full assessment, routine, safety adjustments, privacy rows
 compare.tsx            the verdict — compareAssessments on two blind assessments, or an honest refusal
 legal/privacy|terms    render the shared LegalDocument
@@ -323,22 +348,26 @@ calibrates the camera, not as one more anonymous questionnaire step.
 
 - **Styling: no NativeWind.** Despite the name, mobile uses React Native `StyleSheet` plus the small
   UI kit in `apps/mobile/src/theme/ui.tsx` (`AppText`, `Screen`, `Card`, `PrimaryButton`,
-  `GhostButton`, `Chip`, `ProgressDots`, `TextField`, `Divider`). `apps/mobile/src/theme/index.ts`
+  `GhostButton`, `Chip`, `ProgressDots`, `TextField`, `Divider`, `Disclosure`). `apps/mobile/src/theme/index.ts`
   re-exports the shared tokens alongside it, so `import { AppText, colors, spacing } from "@/theme"`
   is the one import for both. `src/global.css` is a leftover CSS-variable file, not a Tailwind entry.
 - **Fonts**: React Native can't synthesize weights from one custom family, so `theme/fonts.ts` loads
   8 weight-specific `@expo-google-fonts` faces (deep imports, so Metro bundles only those) and
   `resolveFontFamily(family, weight)` picks the right face. The root layout holds the native splash
   up until fonts are ready.
-- **State**: `src/state/onboarding.tsx` is a single in-memory React context (`OnboardingProvider` /
-  `useOnboarding`) carrying `Partial<IntakeResponse>` + `parentEmail` + `photos` + the generated
-  `plan`. It is still in-memory and dies with the process.
-- **Durable on-device state is two stores, both plain JSON in the app's document directory, both
-  best-effort on write, and neither ever uploaded**: `src/lib/photos.ts` (capture sessions, above)
-  and `src/lib/journal.ts` (`journal.json` — routine start date, per-session tick-offs, skin
-  check-ins, stored assessments and the persisted adaptation). The journal is what makes the cadence
-  engine reactive rather than static. Both are disclosed in the privacy content and both must keep
-  offering erasure — `deleteJournal()` and `deleteStoredPhotos()`, surfaced on `/plan`.
+- **State**: `src/state/onboarding.tsx` is a React context (`OnboardingProvider` / `useOnboarding`)
+  carrying `Partial<IntakeResponse>` + `parentEmail` + `photos` + the generated `plan`. It is
+  **not** in-memory only — it hydrates from `src/lib/profile.ts` synchronously on mount and writes
+  back on every `update`. See the cadence-engine section above for why that is a safety property
+  and not a convenience; do not "simplify" it back to `useState({})`.
+- **Durable on-device state is three stores, all plain JSON in the app's document directory, all
+  best-effort on write, and none ever uploaded**: `src/lib/photos.ts` (capture sessions, above),
+  `src/lib/journal.ts` (`journal.json` — routine start date, per-session tick-offs, skin check-ins,
+  stored assessments and the persisted adaptation) and `src/lib/profile.ts` (`profile.json` — the
+  intake answers and the generated plan). The journal is what makes the cadence engine reactive
+  rather than static; the profile is what keeps the safety engine running against real answers. All
+  three are disclosed in the privacy content and all three must keep offering erasure —
+  `deleteJournal()`, `deleteStoredPhotos()` and `deleteProfile()`, surfaced on `/plan`.
 - `src/lib/intake.ts` (`buildIntake`) fills an `IntakeResponse` from partial onboarding answers with
   sensible defaults, including defaulting `darkMarkProne` from skin tone rather than assuming it of
   everyone.

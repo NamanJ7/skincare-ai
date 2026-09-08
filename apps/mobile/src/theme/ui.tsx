@@ -4,7 +4,7 @@
  * marketing site stay consistent. Headlines use the Fraunces serif; body + UI
  * use Inter (loaded in the root layout, resolved per-weight in ./fonts).
  */
-import type { ReactNode, RefObject } from "react";
+import { useState, type ReactNode, type RefObject } from "react";
 import {
   Pressable,
   ScrollView,
@@ -23,6 +23,18 @@ import { resolveFontFamily } from "./fonts";
 
 type TextVariant = keyof typeof typography;
 
+/**
+ * How far display type is allowed to grow.
+ *
+ * Body text scales without a ceiling — that is the whole point of Dynamic Type,
+ * and a paragraph that gets large is still a readable paragraph. Display type is
+ * different: iOS accessibility sizes reach roughly 310%, which turns the 40pt
+ * hero into ~124pt and a headline into something that fills the screen before
+ * the content under it gets a line. Capping the display ramp keeps the hierarchy
+ * intact at every size while still honouring most of the user's preference.
+ */
+const MAX_DISPLAY_SCALE = 1.6;
+
 export function AppText({
   variant = "body",
   color = colors.ink,
@@ -32,6 +44,7 @@ export function AppText({
   const t = typography[variant];
   return (
     <Text
+      maxFontSizeMultiplier={t.family === "display" ? MAX_DISPLAY_SCALE : undefined}
       {...rest}
       style={[
         {
@@ -104,6 +117,10 @@ export function PrimaryButton({
     <Pressable
       onPress={onPress}
       disabled={disabled}
+      accessibilityRole="button"
+      // Disabled is currently signalled only by dimming to 45% opacity, which
+      // is invisible to a screen reader.
+      accessibilityState={{ disabled }}
       style={({ pressed }) => [
         styles.btn,
         { backgroundColor: pressed ? colors.primaryPress : colors.primary },
@@ -119,7 +136,11 @@ export function PrimaryButton({
 
 export function GhostButton({ label, onPress }: { label: string; onPress?: () => void }) {
   return (
-    <Pressable onPress={onPress} style={({ pressed }) => [styles.ghost, pressed && styles.ghostPressed]}>
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      style={({ pressed }) => [styles.ghost, pressed && styles.ghostPressed]}
+    >
       <AppText variant="bodyStrong" color={colors.primary}>
         {label}
       </AppText>
@@ -127,32 +148,82 @@ export function GhostButton({ label, onPress }: { label: string; onPress?: () =>
   );
 }
 
+/**
+ * A pill. Used two ways, and the difference matters to a screen reader.
+ *
+ * With `onPress` it is a control — a goal, a skin type, an allergen, a reminder
+ * hour — and announces as a button that is or isn't selected. Without `onPress`
+ * it is a read-only tag (the "what we noticed" concerns on /plan), and renders
+ * as a plain View: announcing a tappable button that does nothing is worse than
+ * announcing nothing at all.
+ *
+ * `role` is not decoration. A chip that picks one of several options is a
+ * radio; one that toggles independently is a checkbox; `button` is the fallback
+ * for a chip that just does something. Getting this right is what makes the
+ * selected state audible at all — `aria-selected` is not a valid attribute on
+ * `role="button"`, and react-native-web has no handler for the
+ * `accessibilityState` object, so a button-role chip conveys nothing about
+ * whether it is chosen. `radio` and `checkbox` carry `checked`, which both
+ * platforms and the DOM understand. This mirrors what today.tsx already does by
+ * hand for the step rows and the skin check-in.
+ */
 export function Chip({
   label,
   selected = false,
   tone = "primary",
+  role = "button",
   onPress,
 }: {
   label: string;
   selected?: boolean;
   /** Selected fill: deep green ("primary") or soft lavender ("lavender"). */
   tone?: "primary" | "lavender";
+  /** "radio" for pick-one groups, "checkbox" for independent toggles. */
+  role?: "button" | "radio" | "checkbox";
+  /** Omit for a display-only tag. Its presence is what makes this a control. */
   onPress?: () => void;
 }) {
   const selectedStyle = tone === "lavender" ? styles.chipSelectedLavender : styles.chipSelected;
   const selectedTextColor = tone === "lavender" ? colors.accentInk : colors.onPrimary;
+  const style = [styles.chip, selected ? selectedStyle : styles.chipDefault];
+  const text = (
+    <AppText variant="caption" color={selected ? selectedTextColor : colors.ink}>
+      {label}
+    </AppText>
+  );
+
+  if (!onPress) return <View style={style}>{text}</View>;
+
   return (
-    <Pressable onPress={onPress} style={[styles.chip, selected ? selectedStyle : styles.chipDefault]}>
-      <AppText variant="caption" color={selected ? selectedTextColor : colors.ink}>
-        {label}
-      </AppText>
+    <Pressable
+      onPress={onPress}
+      accessibilityRole={role}
+      accessibilityState={role === "button" ? { selected } : { checked: selected }}
+      // react-native-web ignores accessibilityState entirely, so the DOM needs
+      // the aria attribute spelled out. Harmless on native, where the prop above
+      // is what counts.
+      aria-checked={role === "button" ? undefined : selected}
+      style={style}
+    >
+      {text}
     </Pressable>
   );
 }
 
+/**
+ * Step position, as dots. The dots carry real information — which of five
+ * onboarding questions you are on — and were three silent Views, so a screen
+ * reader user had no way to know how much was left. Labelled as one unit rather
+ * than per-dot; "Step 3 of 5" is the fact, and five separate announcements are
+ * noise.
+ */
 export function ProgressDots({ count, index }: { count: number; index: number }) {
   return (
-    <View style={styles.dots}>
+    <View
+      style={styles.dots}
+      accessible
+      accessibilityLabel={`Step ${index + 1} of ${count}`}
+    >
       {Array.from({ length: count }).map((_, i) => (
         <View key={i} style={[styles.dot, i === index ? styles.dotActive : styles.dotInactive]} />
       ))}
@@ -174,6 +245,9 @@ export function TextField({
       ) : null}
       <TextInput
         placeholderTextColor={colors.inkMuted}
+        // The visible label is a sibling Text, so nothing associates the two.
+        // Spread `rest` after this so a call site can still pass its own.
+        accessibilityLabel={label}
         {...rest}
         style={[styles.field, style]}
       />
@@ -184,6 +258,103 @@ export function TextField({
 export function Divider() {
   return <View style={styles.divider} />;
 }
+
+/**
+ * A section that opens.
+ *
+ * /plan carries the only user-visible trace of the three engines — the
+ * assessment's per-concern confidence, what it could not see, and every
+ * SafetyAdjustment. All of it matters and almost none of it is wanted on first
+ * look, which is exactly the shape progressive disclosure is for.
+ *
+ * There is no height animation on purpose. Measuring and tweening a variable
+ * body is a pile of machinery whose entire payoff is a slide, and skipping it
+ * also skips the reduced-motion question. Mounting the children when open is the
+ * whole job.
+ *
+ * The state has to be announced, not just drawn: a chevron that rotates tells a
+ * sighted user everything and a screen-reader user nothing. That is the same
+ * failure the accessibility pass just fixed everywhere else.
+ */
+export function Disclosure({
+  title,
+  summary,
+  defaultOpen = false,
+  children,
+}: {
+  title: string;
+  /** One line under the title, visible whether or not the section is open. */
+  summary?: string;
+  defaultOpen?: boolean;
+  children: ReactNode;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <View style={styles.card}>
+      <Pressable
+        onPress={() => setOpen((o) => !o)}
+        accessibilityRole="button"
+        accessibilityState={{ expanded: open }}
+        // react-native-web has no handler for the accessibilityState object, so
+        // the DOM needs this spelled out. Harmless on native.
+        aria-expanded={open}
+        style={({ pressed }) => [styles.disclosureHeader, pressed && { opacity: 0.6 }]}
+      >
+        <View style={styles.flex}>
+          <AppText variant="heading">{title}</AppText>
+          {summary ? (
+            <AppText variant="caption" color={colors.inkMuted}>
+              {summary}
+            </AppText>
+          ) : null}
+        </View>
+        <Chevron open={open} />
+      </Pressable>
+      {open ? <View style={styles.disclosureBody}>{children}</View> : null}
+    </View>
+  );
+}
+
+/**
+ * Two rules meeting at a point, rotated. Same reasoning as CheckCircle's tick:
+ * no icon dependency, crisp at any size, exactly the brand green. Decorative —
+ * the header that owns it carries the role and the expanded state.
+ */
+function Chevron({ open }: { open: boolean }) {
+  const rule = {
+    position: "absolute" as const,
+    width: 9,
+    height: 1.5,
+    borderRadius: 1,
+    backgroundColor: colors.primary,
+  };
+  return (
+    <View
+      accessible={false}
+      importantForAccessibility="no"
+      style={{ width: 16, height: 16, justifyContent: "center", alignItems: "center" }}
+    >
+      <View
+        style={[rule, { left: 0, transform: [{ rotate: open ? "-45deg" : "45deg" }] }]}
+      />
+      <View
+        style={[rule, { right: 0, transform: [{ rotate: open ? "45deg" : "-45deg" }] }]}
+      />
+    </View>
+  );
+}
+
+/**
+ * Minimum comfortable touch target, in points.
+ *
+ * The chip already reached exactly this by arithmetic — 12pt of padding either
+ * side of a 20pt line-height — which meant it sat on the threshold by accident,
+ * with nothing in the code saying that was the intent. Any later padding tweak
+ * or type-scale change would have dropped it under without a word. Stated
+ * explicitly here so it has to be broken on purpose. Matches the floors already
+ * hand-written into today.tsx.
+ */
+const TAP_TARGET = 44;
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.canvas },
@@ -209,6 +380,7 @@ const styles = StyleSheet.create({
     borderRadius: radius.pill,
     paddingVertical: spacing.md,
     paddingHorizontal: spacing.lg,
+    minHeight: TAP_TARGET,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -217,6 +389,7 @@ const styles = StyleSheet.create({
     borderRadius: radius.pill,
     paddingVertical: spacing.md,
     paddingHorizontal: spacing.lg,
+    minHeight: TAP_TARGET,
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 1,
@@ -227,6 +400,8 @@ const styles = StyleSheet.create({
     borderRadius: radius.pill,
     paddingVertical: spacing.sm,
     paddingHorizontal: spacing.md,
+    minHeight: TAP_TARGET,
+    justifyContent: "center",
     borderWidth: 1,
   },
   chipDefault: { backgroundColor: colors.surface, borderColor: colors.hairline },
@@ -248,4 +423,12 @@ const styles = StyleSheet.create({
   dotActive: { backgroundColor: colors.primary, width: 20 },
   dotInactive: { backgroundColor: colors.hairline },
   divider: { height: 1, backgroundColor: colors.hairline },
+  disclosureHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: spacing.md,
+    minHeight: TAP_TARGET,
+  },
+  disclosureBody: { gap: spacing.md, marginTop: spacing.xs },
 });

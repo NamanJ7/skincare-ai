@@ -226,6 +226,7 @@ export default function PhotoCapture() {
                 key={t.key}
                 label={t.label}
                 tone="lavender"
+                role="radio"
                 selected={tone === t.key}
                 onPress={() => setTone(t.key)}
               />
