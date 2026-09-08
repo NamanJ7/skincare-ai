@@ -23,6 +23,18 @@ import { resolveFontFamily } from "./fonts";
 
 type TextVariant = keyof typeof typography;
 
+/**
+ * How far display type is allowed to grow.
+ *
+ * Body text scales without a ceiling — that is the whole point of Dynamic Type,
+ * and a paragraph that gets large is still a readable paragraph. Display type is
+ * different: iOS accessibility sizes reach roughly 310%, which turns the 40pt
+ * hero into ~124pt and a headline into something that fills the screen before
+ * the content under it gets a line. Capping the display ramp keeps the hierarchy
+ * intact at every size while still honouring most of the user's preference.
+ */
+const MAX_DISPLAY_SCALE = 1.6;
+
 export function AppText({
   variant = "body",
   color = colors.ink,
@@ -32,6 +44,7 @@ export function AppText({
   const t = typography[variant];
   return (
     <Text
+      maxFontSizeMultiplier={t.family === "display" ? MAX_DISPLAY_SCALE : undefined}
       {...rest}
       style={[
         {

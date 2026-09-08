@@ -1,6 +1,6 @@
 import { router } from "expo-router";
 import { useState, type ReactNode } from "react";
-import { ActivityIndicator, View } from "react-native";
+import { ActivityIndicator, Pressable, View } from "react-native";
 
 import { ACTIVES, type ActiveKey, type Sensitivity, type SkinGoal, type SkinType } from "@pore/shared";
 import { fetchPlan } from "@/lib/api";
@@ -9,7 +9,7 @@ import { recordAssessment } from "@/lib/journal";
 import { CAPTURE_STEPS, listSessions, type CapturedPhoto } from "@/lib/photos";
 import { REMINDER_HOURS, enableReminder, formatHour } from "@/lib/reminder";
 import { useOnboarding } from "@/state/onboarding";
-import { AppText, Chip, GhostButton, PrimaryButton, ProgressDots, Screen, colors, spacing } from "@/theme";
+import { AppText, Chip, GhostButton, PrimaryButton, ProgressDots, Screen, colors, radius, spacing } from "@/theme";
 
 const GOALS: { key: SkinGoal; label: string }[] = [
   { key: "acne", label: "Acne / breakouts" },
@@ -197,7 +197,13 @@ export default function Intake() {
         <Question title="How sensitive is your skin?" subtitle="This is the biggest factor in keeping your routine safe.">
           <View style={{ gap: spacing.sm }}>
             {SENSITIVITY.map((s) => (
-              <Chip key={s.key} label={`${s.label} — ${s.hint}`} role="radio" selected={sensitivity === s.key} onPress={() => setSensitivity(s.key)} />
+              <OptionRow
+                key={s.key}
+                label={s.label}
+                hint={s.hint}
+                selected={sensitivity === s.key}
+                onPress={() => setSensitivity(s.key)}
+              />
             ))}
           </View>
         </Question>
@@ -270,6 +276,59 @@ function Question({ title, subtitle, children }: { title: string; subtitle?: str
       ) : null}
       <View style={{ marginTop: spacing.sm }}>{children}</View>
     </View>
+  );
+}
+
+/**
+ * A full-width choice with a line of explanation under it.
+ *
+ * The sensitivity question is the one place an option needs a sentence — it is
+ * the single biggest safety lever in the intake and "Somewhat" alone tells the
+ * user nothing. That sentence used to be crammed into a `Chip`, which is a pill
+ * built for two or three words: it wrapped awkwardly at the default text size
+ * and turned into a paragraph in a lozenge above it. A row is the right shape
+ * for a label plus a hint, and it grows down instead of sideways.
+ */
+function OptionRow({
+  label,
+  hint,
+  selected,
+  onPress,
+}: {
+  label: string;
+  hint: string;
+  selected: boolean;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="radio"
+      accessibilityState={{ checked: selected }}
+      aria-checked={selected}
+      accessibilityLabel={`${label}. ${hint}`}
+      style={({ pressed }) => [
+        {
+          minHeight: 56,
+          justifyContent: "center",
+          gap: spacing.xxs,
+          paddingVertical: spacing.sm,
+          paddingHorizontal: spacing.md,
+          borderRadius: radius.lg,
+          borderWidth: 1,
+          borderColor: selected ? colors.primary : colors.hairline,
+          backgroundColor: selected ? colors.primary : colors.surface,
+        },
+        pressed && { opacity: 0.7 },
+      ]}
+    >
+      <AppText variant="bodyStrong" color={selected ? colors.onPrimary : colors.ink}>
+        {label}
+      </AppText>
+      <AppText variant="caption" color={selected ? "rgba(255,255,255,0.8)" : colors.inkMuted}>
+        {hint}
+      </AppText>
+    </Pressable>
   );
 }
 

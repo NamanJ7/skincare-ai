@@ -254,9 +254,17 @@ chosen by the user, off switch on `/plan`). Its body deliberately never names to
 between scheduling and firing, so the banner could contradict the app. `feedback.ts` wraps
 `expo-haptics` for the tick/complete/select moments — best-effort, no-ops off-device.
 
-`apps/mobile/src/app/today.tsx` is the primary surface and shows **only the current session**;
+`apps/mobile/src/app/today.tsx` is the primary surface and shows **one session at a time**;
 `/plan` holds the full assessment and routine as a reference document. Keep it that way — the
 whole point is that the user makes no decisions except the single "how does your skin feel?" tap.
+
+The week strip is the navigation: tapping a day shows it, tapping the day already open flips
+morning/evening. **Only today can be written to.** Journal entries are keyed by calendar date and
+both `adherenceRate` and `rampWeekFor` read back from them, so ticking a future day off would
+advance the ramp on a claim that had not happened. Four things prevent it — `onToggle`/`onFeel`
+return early unless the viewed day is today, the step rows are `disabled`, the check-in card is
+not rendered, and both writes target today's date rather than the viewed one. Preserve all four
+if you touch that screen; any one of them alone is a guard someone can refactor away.
 
 ## Architecture: the progress engine
 

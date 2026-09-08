@@ -207,27 +207,26 @@ What is still untested is the bet itself: whether "we couldn't measure this"
 reads as integrity or as the app looking broken. That needs people, not code.
 
 ### Dynamic Type
-`AppText` sets fixed `fontSize` from tokens against fixed-height layouts (56px
-step rows, a 26px `CheckCircle`, 10px week-strip dots, and the new 44pt
-`TAP_TARGET` floors). At 150-200% Dynamic Type this breaks. The worst offender is
-the sensitivity step in `onboarding/intake.tsx`, which puts "Somewhat - Some
-products sting or make me red" inside a single pill `Chip`; it wants to become a
-two-line option row rather than a pill. The `WeekStrip` is the other one — seven
-fixed-width columns with no wrap.
+Done, and smaller than it was written up to be. A re-audit found four of the
+claimed breakages were not breakages at all: `minHeight: 56` on the step rows is
+a floor and grows; `CheckCircle` and `ProgressDots` contain no text; `Chip` sits
+in a `flexWrap` container and the pill grows; and the `WeekStrip` letters are
+single characters — a 14pt glyph at 200% is 28pt in a column that is ~39pt wide
+on the narrowest phone.
 
-Held back deliberately: this changes layout on two screens, and how bad it
-actually is at 200% is much better judged on a device than in a diff.
+Two were real and are fixed:
 
-Screen-reader semantics are **done** — every primitive in `theme/ui.tsx` now
-carries a role, and selection state travels as `checked` on `radio`/`checkbox`
-chips. Note for anyone extending this: react-native-web has no handler for the
-`accessibilityState` object at all (it reads `aria-*` props directly), and
-`aria-selected` is not valid on `role="button"`, so a button-role chip conveys
-nothing about being chosen on either the DOM or in an audit. Use `radio` for
-pick-one groups and `checkbox` for independent toggles.
+- The sensitivity step packed "Somewhat - Some products sting or make me red"
+  into one `Chip`. A pill is built for two or three words. It is now an
+  `OptionRow` — a full-width label with the hint under it, growing downward
+  rather than sideways — which was a design bug at 100% too, not only at 200%.
+- Display type had no ceiling. iOS accessibility sizes reach roughly 310%, which
+  turns the 40pt hero into ~124pt. `AppText` now caps the display ramp at 1.6x
+  and leaves body, caption and label uncapped, since a large paragraph is still
+  a readable paragraph and a screen-filling headline is not.
 
-`CheckCircle` already honours `useReducedMotion`; nothing else in the app animates
-yet, but anything added in the `/plan` rework must.
+What is still unverified is the same thing as everywhere else: nobody has turned
+the slider up on a real device and looked.
 
 ### Not proposed, on purpose
 A product/SKU catalog. `packages/shared/src/types/product.ts` defines `Product`
