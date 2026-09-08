@@ -171,7 +171,7 @@ export const ARTICLES: Article[] = [
       },
       {
         type: "quote",
-        text: "Simplify your shelf instead of constantly adding to it.",
+        text: "Do less to your skin, more consistently.",
       },
       {
         type: "paragraph",
