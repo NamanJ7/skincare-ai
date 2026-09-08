@@ -119,6 +119,12 @@ directory, written as versioned JSON with failures treated as non-fatal:
   `OnboardingProvider` calls it synchronously on mount, which is what lets `app/index.tsx` route a
   returning user straight to `/today` on its first render.
 
+- `apps/mobile/src/lib/routineLog.ts` — `routine-log.json`, local calendar dates mapped to the
+  step keys completed in each AM/PM session. It sits at the document root, outside both
+  `check-ins/` and `skin-photos/`: deleting one check-in must not erase the record of days the
+  routine was actually done. The logic is all in `@pore/shared` (`progress/adherence`); this file
+  only reads and writes.
+
 There is deliberately **no index file** for check-ins. `newSessionId()` is an ISO timestamp with
 `:` and `.` replaced, so filenames sort lexically and the directory listing is the index. This
 avoids the failure mode `sessions.json` already has, where a session can exist on disk while the
@@ -150,6 +156,24 @@ continuity that isn't there, which looks like signal and isn't.
 
 The 28-day floor is shared with `apps/mobile/src/lib/checkin.ts`, which drives the re-scan prompt
 on `/today` — prompting sooner would invite a comparison the engine then declines to make.
+
+## Adherence
+
+`packages/shared/src/progress/adherence.ts` is the routine log's logic: `stepKey`, local-date
+keys, rolling-window counts, and `daysLoggedBetween`.
+
+Two rules are load-bearing and both are easy to get wrong:
+
+- **Step identity is `category:active`, never the index or `order`.** `renumber()` in the safety
+  engine reassigns both whenever a step is dropped or moved, so an index-keyed log would silently
+  start describing a different product after a re-check.
+- **Date keys are local, never `toISOString().slice(0,10)`.** That is UTC, so a PM routine done at
+  10pm west of Greenwich would be filed under tomorrow. Day arithmetic goes through the `Date`
+  constructor rather than subtracting 24h in ms, because DST days are 23 or 25 hours long.
+
+Adherence is rendered **next to** a progress comparison and never fed into one. `compareAssessments`
+takes no adherence argument and must not: the app cannot observe that a routine caused a change, and
+letting log data soften a `more_visible` result would manufacture exactly that claim.
 
 ## Conventions
 

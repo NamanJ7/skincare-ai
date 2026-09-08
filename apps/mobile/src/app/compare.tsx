@@ -16,12 +16,14 @@ import { View } from "react-native";
 import {
   CONCERN_LABELS,
   compareAssessments,
+  daysLoggedBetween,
   type CaptureAngle,
   type ChangeDirection,
   type ProgressReport,
 } from "@pore/shared";
 import { CAPTURE_STEPS, listSessions, sessionPhotoUri } from "@/lib/photos";
 import { listCheckIns, loadCheckIn } from "@/lib/plan";
+import { loadLog } from "@/lib/routineLog";
 import { AppText, Card, Chip, Divider, GhostButton, Screen, colors, radius, spacing } from "@/theme";
 
 const DIRECTION_LABEL: Record<ChangeDirection, string> = {
@@ -37,19 +39,28 @@ function directionColor(d: ChangeDirection): string {
   return colors.ink;
 }
 
+interface CompareView {
+  report: ProgressReport;
+  /** Days the routine was logged across the span, as context — never as cause. */
+  adherence: { daysLogged: number; totalDays: number };
+}
+
 /** Compare the two most recent check-ins, when there are two to compare. */
-function buildReport(): ProgressReport | null {
+function buildView(): CompareView | null {
   const checkIns = listCheckIns();
   if (checkIns.length < 2) return null;
   const newer = loadCheckIn(checkIns[0]!.sessionId);
   const older = loadCheckIn(checkIns[1]!.sessionId);
   if (!newer || !older) return null;
-  return compareAssessments(
-    older.plan.assessment,
-    older.savedAt,
-    newer.plan.assessment,
-    newer.savedAt,
-  );
+  return {
+    report: compareAssessments(
+      older.plan.assessment,
+      older.savedAt,
+      newer.plan.assessment,
+      newer.savedAt,
+    ),
+    adherence: daysLoggedBetween(loadLog(), older.savedAt, newer.savedAt),
+  };
 }
 
 function formatDate(iso: string): string {
@@ -59,7 +70,7 @@ function formatDate(iso: string): string {
 export default function Compare() {
   const [sessions] = useState(() => listSessions());
   const [angle, setAngle] = useState<CaptureAngle>("front");
-  const report = useMemo(buildReport, []);
+  const view = useMemo(buildView, []);
 
   if (sessions.length < 2) {
     return (
@@ -84,15 +95,21 @@ export default function Compare() {
       </AppText>
       <AppText variant="title">Then and now</AppText>
 
-      {report && (
+      {view && (
         <Card elevated>
           <AppText variant="heading">What changed</AppText>
           <AppText variant="caption" color={colors.inkMuted}>
-            {report.summary}
+            {view.report.summary}
           </AppText>
-          {report.comparable && report.changes.length > 0 && (
+          {view.report.comparable && view.adherence.totalDays > 0 && (
+            <AppText variant="caption" color={colors.primary}>
+              You logged your routine on {view.adherence.daysLogged} of the{" "}
+              {view.adherence.totalDays} days in between.
+            </AppText>
+          )}
+          {view.report.comparable && view.report.changes.length > 0 && (
             <View style={{ gap: spacing.xs, marginTop: spacing.xs }}>
-              {report.changes.map((c, i) => (
+              {view.report.changes.map((c, i) => (
                 <View key={c.concern} style={{ gap: spacing.xxs }}>
                   {i > 0 && <Divider />}
                   <View

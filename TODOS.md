@@ -53,25 +53,32 @@ optional free-text `location` — either add one or ship single-region and say s
 Affiliate links in `Product.url` mean the disclosure in
 `packages/shared/src/legal/content.ts` has to be revisited.
 
-### 2. Daily checklist
-Now also the missing input for progress comparison — see item 3.
+### 2. Daily checklist — DONE
+Tappable steps on `/today` writing to `routine-log.json`, rolling 7-day counts against
+`frequencyPerWeek`, `rampSchedule` finally rendered, an over-use note on strong actives,
+and the adherence line on `/compare`. No streaks and no assigned weekdays, both on
+purpose. Open from that work:
 
-Tappable steps on `/today` with a date-keyed log, stored the same way as `plan.json`.
-Do not assign specific weekdays to a 3x/week step — there is no basis for choosing
-Monday, and a wrong-feeling schedule is worse than none; count against
-`frequencyPerWeek` instead ("2 of 3 this week"). Render `rampSchedule`, which the
-pipeline generates and the UI currently discards. No streaks: a missed day in
-skincare is normal, and a broken streak is how the app gets deleted.
+- **Reminders are the untouched retention lever.** A checklist only works if people
+  remember it exists, and nothing currently brings them back daily. Deliberately deferred
+  rather than forgotten: it needs `expo-notifications`, a permission prompt, and OS-level
+  scheduling, and a notification for a habit nobody has yet mostly converts silence into
+  an uninstall. Revisit once there is any evidence people return on their own.
+- **No backfill.** You can only tick today. Retroactive logging invites guessing, and
+  guessed adherence is worse than none when it renders next to a progress claim.
+- **The log is never pruned.** Tens of KB a year, read synchronously at launch. Fine for
+  a long time, not forever.
 
 ### 3. Re-scan entry point — DONE
 Shipped with check-in memory: `/today` prompts at 28 days, `/onboarding/photo?rescan=1`
 starts a session, `/recheck` re-asks only pregnancy, and `/compare` now renders a
 deterministic findings comparison alongside the photos. Still open from that work:
 
-- **Adherence is the missing input.** `compareAssessments` can say a concern looks less
-  visible; it cannot say whether the routine was followed. "About the same" means
-  something very different at 3 days of use out of 28 than at 25, and right now the
-  comparison cannot tell those apart. The daily checklist below is what fixes it.
+- **Adherence is context, not cause — keep it that way.** `/compare` now shows how many
+  days the routine was logged across the span, beside the comparison. It is deliberately
+  not an input to `compareAssessments`, and it should stay that way: the app cannot
+  observe that a routine caused a change, and wiring the log into the direction calls
+  would manufacture that claim.
 - **The 28-day floor is a guess about biology, not a measurement.** It matches skin
   turnover and the ramp copy, but nobody has checked whether real users' scans 28 days
   apart produce readable differences. If they mostly come back "about the same",
@@ -136,6 +143,14 @@ no key, in front of two paid Opus calls, with `EXPO_PUBLIC_API_URL` shipped in t
 client bundle. `body.intake` is checked for presence and passed through otherwise
 unvalidated. This needs a rate limit before any real traffic — it is the thing that
 turns a launch into a bill.
+
+### Every rationale reasons over preferences nobody chose
+`apps/web/lib/prompts.ts:33` instructs the model to "reflect the user's budget and
+fragrance preference in your rationale". `apps/mobile/src/lib/intake.ts` hardcodes
+`budget: "medium"` and `fragrancePreference: "no_preference"` — literal values, not `??`
+defaults, with no `data.` reference. So every routine explains itself in terms of a budget
+and a fragrance stance the user never expressed. Either collect them or stop claiming to
+use them. Belongs with the product shelf, which is what would make those fields real.
 
 ### `apps/web` has no tests
 `packages/shared` is the only package with a test suite. The `/api/plan` input

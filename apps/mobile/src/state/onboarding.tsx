@@ -11,6 +11,7 @@ import type { IntakeResponse } from "@pore/shared";
 import type { PlanResult } from "@/lib/api";
 import type { CapturedPhoto } from "@/lib/photos";
 import { clearPlan, loadPlan } from "@/lib/plan";
+import { clearLog } from "@/lib/routineLog";
 
 export type OnboardingData = Partial<IntakeResponse> & {
   parentEmail?: string;
@@ -53,6 +54,8 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
       update: (patch) => setData((prev) => ({ ...prev, ...patch })),
       reset: () => {
         clearPlan();
+        // A routine you deleted should not leave its adherence behind.
+        clearLog();
         setData({});
       },
     }),

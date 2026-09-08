@@ -6,16 +6,24 @@ import {
   ACTIVES,
   CONCERN_LABELS,
   applySafetyRules,
+  countInWindow,
+  dateKey,
+  isDone,
+  stepKey,
+  toggleStep,
   type ProductCategory,
   type Routine,
+  type RoutineLog,
   type RoutineStep,
+  type RoutineTime,
 } from "@pore/shared";
 import { CHECK_IN_DAYS, daysUntilCheckIn } from "@/lib/checkin";
 import { buildIntake } from "@/lib/intake";
 import { deleteStoredPhotos, listSessions, storedPhotoCount } from "@/lib/photos";
 import { listCheckIns } from "@/lib/plan";
+import { loadLog, saveLog } from "@/lib/routineLog";
 import { useOnboarding } from "@/state/onboarding";
-import { AppText, Card, Chip, Divider, GhostButton, Screen, colors, spacing } from "@/theme";
+import { AppText, Card, Chip, Divider, GhostButton, Screen, colors, radius, spacing } from "@/theme";
 
 const CATEGORY_LABELS: Record<ProductCategory, string> = {
   cleanser: "Cleanser",
@@ -69,6 +77,14 @@ export default function Today() {
   const [sessionCount] = useState(() => listSessions().length);
   const [checkIns] = useState(() => listCheckIns());
   const dueIn = checkIns[0] ? daysUntilCheckIn(checkIns[0].savedAt) : null;
+  const [log, setLog] = useState<RoutineLog>(loadLog);
+
+  /** Tick or untick a step for today, and persist it. */
+  function toggle(time: RoutineTime, key: string) {
+    const next = toggleStep(log, dateKey(), time, key);
+    setLog(next);
+    saveLog(next);
+  }
 
   function confirmDeletePhotos() {
     Alert.alert(
@@ -240,8 +256,20 @@ export default function Today() {
         </Card>
       )}
 
-      <RoutineCard title="Morning" steps={view.routine.am} />
-      <RoutineCard title="Evening" steps={view.routine.pm} />
+      <RoutineCard
+        title="Morning"
+        time="AM"
+        steps={view.routine.am}
+        log={view.demo ? null : log}
+        onToggle={toggle}
+      />
+      <RoutineCard
+        title="Evening"
+        time="PM"
+        steps={view.routine.pm}
+        log={view.demo ? null : log}
+        onToggle={toggle}
+      />
 
       {view.adjustments.length > 0 && (
         <Card>
@@ -307,27 +335,130 @@ export default function Today() {
   );
 }
 
-function RoutineCard({ title, steps }: { title: string; steps: RoutineStep[] }) {
+/** An empty or filled circle. Not a checkbox glyph — it has to read at a glance. */
+function Tick({ done }: { done: boolean }) {
+  return (
+    <View
+      style={{
+        width: 22,
+        height: 22,
+        borderRadius: radius.pill,
+        borderWidth: 2,
+        borderColor: done ? colors.primary : colors.hairline,
+        backgroundColor: done ? colors.primary : "transparent",
+        alignItems: "center",
+        justifyContent: "center",
+      }}
+    >
+      {done ? (
+        <AppText variant="caption" color={colors.onPrimary}>
+          ✓
+        </AppText>
+      ) : null}
+    </View>
+  );
+}
+
+function RoutineCard({
+  title,
+  time,
+  steps,
+  log,
+  onToggle,
+}: {
+  title: string;
+  time: RoutineTime;
+  steps: RoutineStep[];
+  /** Null in demo mode — an example routine is not something to tick off. */
+  log: RoutineLog | null;
+  onToggle: (time: RoutineTime, key: string) => void;
+}) {
   return (
     <Card elevated>
       <AppText variant="heading">{title}</AppText>
       <View style={{ gap: spacing.sm, marginTop: spacing.xs }}>
-        {steps.map((s, i) => (
-          <View key={`${s.category}-${i}`} style={{ gap: spacing.xs }}>
-            {i > 0 && <Divider />}
-            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
-              <AppText variant="bodyStrong">
-                {s.order}. {s.active ? ACTIVES[s.active].label : CATEGORY_LABELS[s.category]}
+        {steps.map((s, i) => {
+          const key = stepKey(s);
+          const daily = s.frequencyPerWeek >= 7;
+          const done = log ? isDone(log, dateKey(), time, key) : false;
+          const thisWeek = log ? countInWindow(log, key, time, new Date()) : 0;
+          // Only for actives the safety engine caps. Nobody needs a note about
+          // using moisturizer too often.
+          const overusing =
+            log !== null &&
+            !daily &&
+            s.active !== undefined &&
+            ACTIVES[s.active].isStrongActive &&
+            thisWeek > s.frequencyPerWeek;
+
+          const body = (
+            <View style={{ gap: spacing.xs }}>
+              {i > 0 && <Divider />}
+              <View
+                style={{
+                  flexDirection: "row",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  gap: spacing.sm,
+                  minHeight: log ? 44 : undefined,
+                }}
+              >
+                <View
+                  style={{
+                    flexDirection: "row",
+                    alignItems: "center",
+                    gap: spacing.sm,
+                    flexShrink: 1,
+                  }}
+                >
+                  {log ? <Tick done={done} /> : null}
+                  <AppText variant="bodyStrong" style={{ flexShrink: 1 }}>
+                    {s.order}. {s.active ? ACTIVES[s.active].label : CATEGORY_LABELS[s.category]}
+                  </AppText>
+                </View>
+                <AppText variant="caption" color={colors.primary}>
+                  {daily
+                    ? "Daily"
+                    : log
+                      ? `${thisWeek} of ${s.frequencyPerWeek} · last 7 days`
+                      : `${s.frequencyPerWeek}x / week`}
+                </AppText>
+              </View>
+              <AppText variant="caption" color={colors.inkMuted}>
+                {s.rationale}
               </AppText>
-              <AppText variant="caption" color={colors.primary}>
-                {s.frequencyPerWeek >= 7 ? "Daily" : `${s.frequencyPerWeek}x / week`}
-              </AppText>
+              {s.rampSchedule ? (
+                <AppText variant="caption" color={colors.primary}>
+                  {s.rampSchedule}
+                </AppText>
+              ) : null}
+              {overusing ? (
+                <AppText variant="caption" color={colors.escalate}>
+                  Logged {thisWeek} times in 7 days — this one is planned for{" "}
+                  {s.frequencyPerWeek}. More often isn&apos;t faster, and it&apos;s the usual
+                  way skin gets irritated.
+                </AppText>
+              ) : null}
             </View>
-            <AppText variant="caption" color={colors.inkMuted}>
-              {s.rationale}
-            </AppText>
-          </View>
-        ))}
+          );
+
+          // The log key is semantic and can legitimately repeat (two plain
+          // cleansers); React's must not.
+          const rowKey = `${key}-${i}`;
+          if (!log) return <View key={rowKey}>{body}</View>;
+          return (
+            <Pressable
+              key={rowKey}
+              onPress={() => onToggle(time, key)}
+              accessibilityRole="checkbox"
+              accessibilityState={{ checked: done }}
+              accessibilityLabel={`${s.active ? ACTIVES[s.active].label : CATEGORY_LABELS[s.category]}, ${title}`}
+              style={({ pressed }) => (pressed ? { opacity: 0.6 } : undefined)}
+            >
+              {body}
+            </Pressable>
+          );
+        })}
       </View>
     </Card>
   );
