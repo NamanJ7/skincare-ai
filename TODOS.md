@@ -290,15 +290,39 @@ Recorded during the pre-production hardening pass. The pass itself bounded
 `/api/plan`'s input, rate limited it, stopped it leaking error detail, and closed
 the env-config gaps. These were found in the same audit and deliberately left.
 
-### The parental-consent gate is decorative
-`apps/mobile/src/app/onboarding/consent.tsx:17` collects a parent email from a
-self-declared minor, verifies nothing, emails nobody, persists nothing, and
-proceeds straight to face capture. The comment at `:18-19` already admits it.
-This is a COPPA / GDPR-K exposure on photographs of children, and it is a larger
-legal risk than anything the hardening pass fixed. A real gate needs a verifiable
-consent request to the parent *before* capture, plus a recorded approval — which
-needs the server-side persistence the product does not have yet.
+### Parental consent — done, with two limits worth naming
+`apps/mobile/src/app/onboarding/consent.tsx` now runs a real exchange: the app
+asks `/api/consent/request` to email the parent a signed link, the parent opens
+`/consent/approve` and presses approve, the server reveals a 6-character code
+derived from the same secret, and the teen enters it. `onboarding/photo.tsx`
+refuses to mount the camera unless `data.parentalConsent` is set, and that field
+is written in exactly one place, after the server confirms. State lives in
+HMAC-signed tokens (`apps/web/lib/consent.ts`), so this needed no database.
 
+The whole path fails closed: a missing `CONSENT_SECRET`, an unconfigured mailer,
+an expired or forged token and a wrong code all leave the field unset and the
+camera shut. `lib/consent.test.ts` covers each of those.
+
+Two limits, both deliberate:
+
+- **The consent record is on-device only.** It sits in `profile.json` next to
+  the other answers. Nothing is written server-side, so if a regulator or a
+  parent later asks you to *prove* consent was given, there is no trail to show
+  — and clearing app data clears the record. An auditable trail needs the
+  datastore this repo does not have, and would mean storing a parent's address
+  on your servers, which is a new breach surface and another privacy-policy
+  change.
+- **Email confirmation is not "verifiable parental consent" in the strictest
+  sense.** It proves someone with access to that mailbox approved. It does not
+  prove they are the parent, and a determined teen can supply their own address.
+  Stronger methods (card check, ID) exist and are what US COPPA demands for
+  under-13 — not the population here, since under-16 is blocked outright, but
+  get this reviewed by a lawyer against GDPR Art. 8, the UK Age Appropriate
+  Design Code and the US state minor-privacy laws before launch.
+
+Also still true: `CONSENT_SECRET`, `RESEND_API_KEY` and `CONSENT_EMAIL_FROM`
+must be set in the deployment or no minor can ever finish onboarding. That is
+the intended failure direction, but it will look like a bug if nobody sets them.
 ### `/waitlist/confirmed` confirms a waitlist nobody joined
 `apps/web/app/(auth)/signup/page.tsx:43` (and the Google button's `href` at `:138`)
 navigate to `/waitlist/confirmed` without ever touching Tally. The waitlist lives

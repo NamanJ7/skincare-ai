@@ -33,7 +33,7 @@ export const LEGAL_CONTACT_EMAIL = "reachporeai@gmail.com";
  * Revision date shown on both documents. There was no prior value in the
  * repo — bump this whenever any string in this file changes.
  */
-export const LEGAL_LAST_UPDATED = "August 2026";
+export const LEGAL_LAST_UPDATED = "September 2026";
 
 /** Badge copy. Both documents still describe themselves as placeholders. */
 const PRE_LAUNCH = "Pre-launch draft";
@@ -56,9 +56,12 @@ export const PRIVACY_POLICY: LegalDocument = {
         },
         {
           // Disclosure. Fields come from the onboarding screens in
-          // apps/mobile/src/app/onboarding and types/intake.ts.
+          // apps/mobile/src/app/onboarding and types/intake.ts. The parent
+          // address is sent to our email provider (onboarding/consent.tsx ->
+          // /api/consent/request -> lib/consent-email.ts) and, once approval
+          // completes, only a masked form is kept on the device.
           kind: "paragraph",
-          text: "In the Pore app you tell us your age, your skin goals and concerns, how sensitive your skin is, any ingredient allergies, and whether you are pregnant or breastfeeding. If you are 17 or younger we also ask for a parent or guardian's email address.",
+          text: "In the Pore app you tell us your age, your skin goals and concerns, how sensitive your skin is, any ingredient allergies, and whether you are pregnant or breastfeeding. If you are 17 or younger we also ask for a parent or guardian's email address, and we send that address one message asking them to approve. We do not keep the address after that: your device stores only a masked version of it alongside the date approval was given.",
         },
         {
           // Disclosure. state/onboarding.tsx holds this in a plain useState
@@ -149,10 +152,12 @@ export const PRIVACY_POLICY: LegalDocument = {
       title: "Age requirements",
       blocks: [
         {
-          // Disclosure. apps/mobile/src/app/onboarding/age.tsx blocks under
-          // 16 and routes 16-17 to the parental consent screen.
+          // Disclosure. onboarding/age.tsx blocks under 16 and routes 16-17
+          // to consent; onboarding/photo.tsx refuses to open the camera until
+          // data.parentalConsent is set, which only happens after the server
+          // has verified the code from the approval email.
           kind: "paragraph",
-          text: "Pore is for ages 16 and up. If you are 17 or younger, Pore asks for a parent or guardian's email address so they can approve your use of the app.",
+          text: "Pore is for ages 16 and up. If you are 17 or younger, Pore emails a parent or guardian a link asking them to approve. They approve and read you back a short code, and Pore will not take any photos until that code has been entered and checked. The link stops working after 24 hours.",
         },
       ],
     },
@@ -209,10 +214,11 @@ export const TERMS_OF_USE: LegalDocument = {
       title: "Eligibility",
       blocks: [
         {
-          // Disclosure. Mirrors the gate in onboarding/age.tsx: under 16 is
-          // blocked outright, 16-17 is routed to parental consent.
+          // Disclosure. Mirrors the gate in onboarding/age.tsx and the camera
+          // guard in onboarding/photo.tsx: under 16 is blocked outright, and
+          // 16-17 cannot capture photos until verified approval is recorded.
           kind: "paragraph",
-          text: "Pore is for ages 16 and up. If you are 17 or younger, you need a parent or guardian's approval to use the app.",
+          text: "Pore is for ages 16 and up. If you are 17 or younger, a parent or guardian must approve before Pore will take any photos of you.",
         },
       ],
     },

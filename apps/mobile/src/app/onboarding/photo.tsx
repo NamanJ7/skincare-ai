@@ -79,6 +79,19 @@ export default function PhotoCapture() {
   const { data, update } = useOnboarding();
   /** "recheck" when this is a return visit rather than first-run onboarding. */
   const { mode } = useLocalSearchParams<{ mode?: string }>();
+
+  /**
+   * The consent enforcement point, and the reason the flow is safe.
+   *
+   * onboarding/consent routes here on success, but a route is not a guarantee:
+   * this screen is reachable by deep link, by back-navigation, and by the
+   * "recheck" entry on /today. So the check lives where the camera is, and it
+   * is a positive test for a recorded approval rather than an absence of a
+   * block — an unset field, a cleared profile and a failed exchange all land in
+   * the same place, which is "no camera".
+   */
+  const needsConsent = typeof data.age === "number" && data.age <= 17;
+  const consentBlocked = needsConsent && !data.parentalConsent;
   const [permission, requestPermission] = useCameraPermissions();
   const camera = useRef<CameraView>(null);
 
@@ -200,6 +213,26 @@ export default function PhotoCapture() {
     // the verdict, which runs the blind re-assessment and measures the change.
     if (mode === "recheck") router.replace("/compare?mode=recheck");
     else router.push("/onboarding/intake");
+  }
+
+  // ------------------------------------------------------- consent gate --
+  // Before any stage, including the camera itself. Placed ahead of every other
+  // branch so no path renders a CameraView without a recorded approval.
+  if (consentBlocked) {
+    return (
+      <Screen contentStyle={{ paddingTop: spacing.section }}>
+        <AppText variant="title">A parent needs to approve first</AppText>
+        <AppText variant="body" color={colors.inkMuted}>
+          Since you&apos;re under 18, Pore can&apos;t take photos until a parent or guardian has
+          approved. It takes a minute: we email them a link, they approve, and they read you back a
+          short code.
+        </AppText>
+        <PrimaryButton
+          label="Get approval"
+          onPress={() => router.replace("/onboarding/consent")}
+        />
+      </Screen>
+    );
   }
 
   // ---------------------------------------------------------------- intro --

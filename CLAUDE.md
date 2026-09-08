@@ -97,15 +97,17 @@ pnpm --filter @pore/mobile ios / android / web
 pnpm --filter @pore/mobile typecheck
 ```
 
-Current baseline (keep it here): `pnpm test` → 5 files, 96 tests, all passing (`safety` 12, `vision`
-15, `progress` 21, `schedule` 41, web `plan-boundary` 7). `pnpm typecheck` → clean in all three
-packages. `pnpm lint` → 0 errors, 6 pre-existing `no-unused-vars` warnings
-(`components/ui/Button.tsx`, `lib/mock.ts`). Don't let a change add errors; the warnings are known.
+Current baseline (keep it here): `pnpm test` → 6 files, 106 tests, all passing (`safety` 12,
+`vision` 15, `progress` 21, `schedule` 41, web `plan-boundary` 7, web `consent` 10). `pnpm
+typecheck` → clean in all three packages. `pnpm lint` → 0 errors, 6 pre-existing `no-unused-vars`
+warnings (`components/ui/Button.tsx`, `lib/mock.ts`). Don't let a change add errors; the warnings
+are known.
 
-`packages/shared` holds the bulk of the tests. `apps/web` has one suite,
-`lib/plan-boundary.test.ts`, covering the `/api/plan` trust boundary (`IntakeSchema` and the rate
-limiter) — the handler's own status codes, headers and gate ordering are still only covered by
-manual probes (tracked in `TODOS.md`). `apps/mobile` has none.
+`packages/shared` holds the bulk of the tests. `apps/web` has two suites, both on trust boundaries:
+`lib/plan-boundary.test.ts` (`/api/plan` — `IntakeSchema` and the rate limiter) and
+`lib/consent.test.ts` (the parental-consent tokens and codes, including every fail-closed path).
+Neither covers the route handlers' own status codes, headers or gate ordering — those are still
+manual probes only, tracked in `TODOS.md`. `apps/mobile` has none.
 
 ## Architecture: the plan-generation pipeline
 
@@ -178,6 +180,45 @@ schedule, with or without a reachable API.
 That fallback is deliberate but must stay **noisy**: `fetchPlan` logs the status and body on a
 non-ok response before returning `null`. A swallowed 4xx otherwise renders a plausible mock routine
 with no sign the real pipeline refused it, which is indistinguishable from working software.
+
+## Architecture: parental consent (16-17)
+
+`apps/web/lib/consent.ts` + `app/api/consent/{request,approve,verify}` +
+`app/consent/approve` + `apps/mobile/src/app/onboarding/consent.tsx`.
+
+Under-16 is blocked outright in `onboarding/age.tsx`. 16-17 must have a parent approve before the
+camera opens, and that approval is real: the app asks the server to email the parent a signed link,
+the parent presses approve, the server reveals a 6-character code, and the teen types it back.
+
+**There is no database, so the flow carries its state in an HMAC-signed token.** `issueToken`
+signs `{emailHash, age, issuedAt, expiresAt}` with `CONSENT_SECRET`; `codeFor` derives the code
+from that same token and secret, so nothing needs storing between the two requests. The parent's
+address is hashed into the token, never carried in it, so a leaked link cannot harvest addresses.
+
+Three properties hold this up. Do not remove any of them without replacing it:
+
+1. **It fails closed, everywhere.** A missing or short `CONSENT_SECRET`, an unconfigured mailer, an
+   expired token, a forged signature and a wrong code all end at "not approved". `readToken` and
+   `verifyCode` return null/false rather than throwing past the caller, and `sendConsentEmail`
+   throws in production when unconfigured. The bug this replaced was a gate that let people through
+   when the check never ran; a second fail-open gate would be no better.
+2. **The camera is guarded, not just the route.** `onboarding/photo.tsx` checks
+   `data.parentalConsent` before any stage renders, because that screen is reachable by deep link,
+   by back-navigation and from the "recheck" entry on `/today`. Routing alone is not a gate.
+   `parentalConsent` is written in exactly one place — `onboarding/consent.tsx`, after the server
+   confirms.
+3. **Revealing the code is a POST, never a GET.** Mail scanners and link-preview bots fetch every
+   URL in an email; if opening the link exposed the code, a scanner would approve on the parent's
+   behalf. `/consent/approve` renders a button, and only the button's POST returns the code.
+
+Required env (`apps/web/.env.example`): `CONSENT_SECRET` (32+ chars), `RESEND_API_KEY`,
+`CONSENT_EMAIL_FROM`, and `CONSENT_APP_ORIGIN` in production. With them unset no minor can finish
+onboarding — intended, but it looks like a bug if nobody sets them. Outside production the approve
+URL is logged instead of emailed so the flow is testable without an account.
+
+`lib/consent.test.ts` covers the fail-closed paths specifically. The consent record is stored
+on-device only (`profile.json`), which means there is no server-side audit trail — see `TODOS.md`
+for that limit and for why email confirmation is not the strictest form of verifiable consent.
 
 ## Architecture: guided capture (the other half)
 
