@@ -85,20 +85,18 @@ export default function Compare() {
     setAssessing(true);
     setAssessError(null);
     try {
-      const result = await fetchPlan({
+      const outcome = await fetchPlan({
         images: photos.map((p) => ({ data: p.data, mediaType: "image/jpeg" })),
         intake: buildIntake(data),
       });
-      if (!result) {
-        setAssessError(
-          "We couldn't reach the assessment service, so your photos are saved but not measured yet. Try again when you're back online.",
-        );
+      if (!outcome.ok) {
+        setAssessError(`${outcome.error.message} Your photos are saved either way.`);
         return;
       }
       const recorded = recordAssessment({
         sessionId: sessions[0]?.id ?? "current",
         capturedAt: photos[0]?.capturedAt ?? new Date().toISOString(),
-        assessment: result.assessment,
+        assessment: outcome.plan.assessment,
       });
 
       // Measure, then adapt — once, here, at the moment the reading lands.
