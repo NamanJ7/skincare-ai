@@ -97,8 +97,8 @@ pnpm --filter @pore/mobile ios / android / web
 pnpm --filter @pore/mobile typecheck
 ```
 
-Current baseline (keep it here): `pnpm test` → 6 files, 106 tests, all passing (`safety` 12,
-`vision` 15, `progress` 21, `schedule` 41, web `plan-boundary` 7, web `consent` 10). `pnpm
+Current baseline (keep it here): `pnpm test` → 6 files, 112 tests, all passing (`safety` 12,
+`vision` 21, `progress` 21, `schedule` 41, web `plan-boundary` 7, web `consent` 10). `pnpm
 typecheck` → clean in all three packages. `pnpm lint` → 0 errors, 6 pre-existing `no-unused-vars`
 warnings (`components/ui/Button.tsx`, `lib/mock.ts`). Don't let a change add errors; the warnings
 are known.
@@ -339,10 +339,18 @@ session gets its own blind `Assessment` from the ordinary `/api/plan` call — w
 previous session exists — and `compareAssessments` subtracts the two in code. Preserve that
 blindness; it is the whole credibility of the feature.
 
-- **Comparability gate.** A photo only counts if the capture gate passed it *and* it was shot under
-  `screen_flash`. Ambient light is not repeatable, so an ambient set can be displayed but never
-  subtracted. With no measurable angle in common the engine reports nothing and says why. The
+- **Comparability gate.** A photo only counts if the capture gate passed it *and* its illuminant
+  came back `screen_flash`. Ambient light is not repeatable, so an ambient set can be displayed but
+  never subtracted. With no measurable angle in common the engine reports nothing and says why. The
   refusal is the feature — this is why capture was built as an instrument.
+
+  **That label is measured, not declared** (`classifyIlluminant` in `vision/quality.ts`). Capture
+  takes an ambient reference frame before applying any of its own light and compares mean luma; the
+  label says whether our light actually dominated, not whether we asked for it. Those come apart in
+  daylight, where a screen flash contributes nothing measurable. It used to be a compile-time
+  constant that this gate trusted completely — do not reintroduce anything that sets the illuminant
+  without measuring it, and keep the bias toward `ambient`: a wrong `ambient` costs a comparison, a
+  wrong `screen_flash` invents one.
 - `AppearanceLevel` is ordinal, so bands subtract. A concern either assessment was unsure about
   (confidence < 0.6) is returned as `not_comparable`, never folded into the result.
 - `adaptRoutine` turns the measurement into a routine change, and **always returns through
