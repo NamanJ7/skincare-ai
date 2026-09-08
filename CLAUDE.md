@@ -42,7 +42,7 @@ pnpm's symlinked store. Don't "fix" that back to symlinks.
   `./progress` subpath — those three are reachable from the root barrel only).
   - `design/` — color/spacing/radius/typography/shadow tokens (`tokens.ts`) plus a Tailwind preset.
   - `types/` — the domain model (`IntakeResponse`, `Routine`/`RoutineStep`, `Assessment`,
-    `PhotoQuality`, product types).
+    `PhotoQuality`).
   - `safety/` — `applySafetyRules`, the deterministic routine-safety engine, and the `ACTIVES`
     ingredient metadata table + `activeRelevanceScore` it runs against.
   - `schedule/` — `planDay`/`planWeek`, the deterministic cadence engine (see below) that turns a
@@ -96,14 +96,16 @@ pnpm --filter @pore/mobile ios / android / web
 pnpm --filter @pore/mobile typecheck
 ```
 
-Current baseline (keep it here): `pnpm test` → 4 files, 95 tests, all passing (`safety` 12, `vision`
-21, `progress` 21, `schedule` 41). `pnpm typecheck` → clean in all three packages. `pnpm lint` → 0
-errors, 6 pre-existing `no-unused-vars` warnings (`components/ui/Button.tsx`, `lib/mock.ts`). Don't
-let a change add errors; the warnings are known.
+Current baseline (keep it here): `pnpm test` → 6 files, 116 tests, all passing — `packages/shared`
+95 (`safety` 12, `vision` 21, `progress` 21, `schedule` 41) and `apps/web` 21 (`validateImages` 11,
+`rateLimit` 10). `pnpm typecheck` → clean in all three packages. `pnpm lint` → 0 errors, 6
+pre-existing `no-unused-vars` warnings (`components/ui/Button.tsx`, `lib/mock.ts`). Don't let a
+change add errors; the warnings are known.
 
-`packages/shared` is the only package with tests. `apps/web` and `apps/mobile` have none — notably
-the `/api/plan` input validation, which is a trust boundary in front of a paid endpoint (tracked in
-`TODOS.md`).
+`apps/web`'s tests cover only the two guards in front of the paid endpoint — `lib/validateImages.ts`
+and `lib/rateLimit.ts` — and that is the intended scope: the rest of that app is a marketing site.
+`apps/mobile` has no tests; the logic there worth testing belongs in `packages/shared`, which is why
+the pure parts of capture measurement live in `vision/` rather than beside the camera.
 
 ## Architecture: the plan-generation pipeline
 
@@ -111,10 +113,27 @@ the `/api/plan` input validation, which is a trust boundary in front of a paid e
 `POST /api/plan` (`apps/web/app/api/plan/route.ts`, Node runtime — the Anthropic SDK needs Node,
 not edge — with `maxDuration: 60` since it makes two model calls).
 
-**The route is a trust boundary and is explicit about it.** `validateImages` caps the request at 3
-images and ~8MB decoded each, rejects `data:` URI prefixes, allowlists media types, and parses
-client-supplied `quality` through `PhotoQualitySchema` rather than trusting it. Each rule returns
-its own message — "invalid request" tells a legitimate client nothing. Keep that property.
+**The route is a trust boundary and is explicit about it.** `validateImages` (`apps/web/lib/validateImages.ts`,
+extracted from the route so it can be tested) caps the request at 3 images and ~8MB decoded each,
+rejects `data:` URI prefixes, allowlists media types, and parses client-supplied `quality` through
+`PhotoQualitySchema` rather than trusting it. The size check reads the base64 string length *before*
+allocating anything — allocating first is how a size limit becomes the denial of service. Each rule
+returns its own message; "invalid request" tells a legitimate client nothing. Keep both properties.
+
+**It is also rate limited** (`apps/web/lib/rateLimit.ts`): 5 requests per IP per 10 minutes and 4
+concurrent generations, because the endpoint is public, unauthenticated, and makes two Opus calls per
+request. Be accurate about what that is — **the counters live in the process**, so on serverless each
+instance enforces its own limit and a cold start resets it, and `x-forwarded-for` is spoofable by
+anyone reaching the origin directly. It stops a retry loop or a careless scraper. It is **not a
+security control** and must not be described as one; real protection needs auth on the endpoint.
+When this takes real traffic, move the counters to Redis/KV — `check()` is pure apart from the store
+it is handed, so only the store changes. 500s return a generic message and log the detail: SDK errors
+carry key state and internal paths.
+
+One consequence the server cannot fix: `fetchPlan` collapses every outcome to `null`, so the mobile
+client cannot tell a 429 from anything else and `onboarding/intake.tsx` proceeds regardless. A
+throttled user is silently handed no plan. That was already true of every other failure; the limiter
+adds one more route to it. See `TODOS.md`.
 
 1. **Vision assessment** — up to 3 photos + intake JSON go to Claude (`client.messages.parse` with a
    Zod `output_config.format`, model `claude-opus-4-8`) using `ASSESSMENT_SYSTEM`, producing a
