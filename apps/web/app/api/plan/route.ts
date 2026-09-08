@@ -1,5 +1,6 @@
-import { generatePlan, type ImageMediaType, type PlanImage, type PlanInput } from "@/lib/pipeline";
-import { PhotoQualitySchema } from "@/lib/schemas";
+import { generatePlan, type ImageMediaType, type PlanImage } from "@/lib/pipeline";
+import { IntakeSchema, PhotoQualitySchema } from "@/lib/schemas";
+import { clientKey, rateLimit } from "@/lib/rate-limit";
 
 // The Anthropic SDK needs the Node runtime (not edge); two Opus calls can take
 // a while, so give the function room.
@@ -8,8 +9,16 @@ export const maxDuration = 60;
 
 /** The guided capture takes three shots; anything more is not a real client. */
 const MAX_IMAGES = 3;
-/** ~8MB of decoded image bytes. Base64 inflates by 4/3. */
-const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
+/**
+ * ~1MB of decoded image bytes per shot. Base64 inflates by 4/3, so three shots at
+ * the cap plus intake stay under the ~4.5MB request body Vercel will accept — the
+ * per-image and whole-body limits have to agree with the platform or a real user
+ * gets an opaque platform 413 instead of the messages below. Real captures are
+ * 200-400KB (resized to 1280px at 0.75 quality in apps/mobile/src/lib/photos.ts).
+ */
+const MAX_IMAGE_BYTES = 1024 * 1024;
+/** Whole-body ceiling, checked before anything is read into memory. */
+const MAX_BODY_BYTES = 4.5 * 1024 * 1024;
 const ALLOWED_MEDIA_TYPES: ImageMediaType[] = [
   "image/jpeg",
   "image/png",
@@ -63,31 +72,83 @@ function validateImages(raw: unknown): { images: PlanImage[] } | { error: string
 }
 
 export async function POST(req: Request) {
-  let body: Partial<PlanInput>;
-  try {
-    body = (await req.json()) as Partial<PlanInput>;
-  } catch {
-    return Response.json({ error: "Invalid JSON body" }, { status: 400 });
+  // 1. Rate limit before anything else — a rejected caller should cost us nothing.
+  const key = clientKey(req);
+  const limit = rateLimit(key);
+  const limitHeaders = {
+    "RateLimit-Limit": String(limit.limit),
+    "RateLimit-Remaining": String(limit.remaining),
+    "RateLimit-Reset": String(limit.reset),
+  };
+  if (!limit.ok) {
+    // Without this line, abuse of a paid endpoint is invisible until the bill arrives.
+    console.warn(`/api/plan rate limited: ${key} (limit ${limit.limit}/10min)`);
+    return Response.json(
+      { error: "Too many requests. Please wait a few minutes and try again." },
+      {
+        status: 429,
+        headers: { ...limitHeaders, "Retry-After": String(limit.retryAfter) },
+      },
+    );
   }
 
-  if (!body.intake) {
-    return Response.json({ error: "Missing `intake`" }, { status: 400 });
+  // 2. Size-check the body before req.json() pulls it into memory. A missing
+  //    content-length is rejected rather than trusted: both real clients always
+  //    set it, and Vercel's platform cap does not exist under `next dev`.
+  const declaredLength = req.headers.get("content-length");
+  if (declaredLength === null) {
+    return Response.json({ error: "`content-length` is required" }, { status: 411, headers: limitHeaders });
+  }
+  const bodyBytes = Number(declaredLength);
+  if (!Number.isFinite(bodyBytes) || bodyBytes < 0) {
+    return Response.json({ error: "`content-length` is malformed" }, { status: 400, headers: limitHeaders });
+  }
+  if (bodyBytes > MAX_BODY_BYTES) {
+    return Response.json(
+      { error: `Request body exceeds the ${MAX_BODY_BYTES / (1024 * 1024)}MB limit` },
+      { status: 413, headers: limitHeaders },
+    );
+  }
+
+  let body: { intake?: unknown; images?: unknown };
+  try {
+    body = (await req.json()) as { intake?: unknown; images?: unknown };
+  } catch {
+    return Response.json({ error: "Invalid JSON body" }, { status: 400, headers: limitHeaders });
+  }
+
+  // 3. The intake is stringified into both prompts, so it is parsed, not trusted.
+  const intake = IntakeSchema.safeParse(body.intake);
+  if (!intake.success) {
+    const issue = intake.error.issues[0];
+    // Root-level issues (an unrecognized key, a non-object) carry an empty path.
+    const path = issue?.path.join(".");
+    const field = path ? `intake.${path}` : "intake";
+    return Response.json(
+      { error: `${field}: ${issue?.message ?? "is invalid"}` },
+      { status: 400, headers: limitHeaders },
+    );
   }
 
   const validated = validateImages(body.images);
   if ("error" in validated) {
-    return Response.json({ error: validated.error }, { status: 400 });
+    return Response.json({ error: validated.error }, { status: 400, headers: limitHeaders });
   }
 
   try {
     const result = await generatePlan({
       images: validated.images,
-      intake: body.intake,
+      intake: intake.data,
     });
-    return Response.json(result);
+    return Response.json(result, { headers: limitHeaders });
   } catch (err) {
+    // Log the real error; return a fixed message. Anthropic SDK errors carry
+    // request ids, model names and upstream detail that a caller has no business
+    // seeing.
     console.error("/api/plan failed:", err);
-    const message = err instanceof Error ? err.message : "Unknown error";
-    return Response.json({ error: message }, { status: 500 });
+    return Response.json(
+      { error: "Could not generate a plan right now. Please try again." },
+      { status: 500, headers: limitHeaders },
+    );
   }
 }

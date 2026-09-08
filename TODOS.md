@@ -280,7 +280,109 @@ Onboarding is now photo-first, which matches `apps/web/components/sections/HowIt
 and `FeatureCards.tsx`. Check no other marketing copy still describes an order
 the app no longer uses.
 
-### `apps/web` has no tests
-`packages/shared` is the only package with a test suite. The `/api/plan` input
-validation in `apps/web/app/api/plan/route.ts` is a trust boundary in front of a
-paid endpoint and is currently only covered by manual probes.
+### `apps/web` route handlers are untested at the HTTP layer
+`apps/web` now has a test suite (`lib/plan-boundary.test.ts`, run by `pnpm test`)
+covering `IntakeSchema` and the rate limiter as units. What is still uncovered is
+the handler itself: the status codes, the `RateLimit-*` / `Retry-After` headers,
+and the ordering of the gates in `app/api/plan/route.ts` were verified by manual
+curl probes, not by a test. A refactor that reorders the gates — say, moving the
+body-size check after `req.json()` — would pass the current suite while undoing
+the protection. `apps/mobile` still has no tests at all.
+
+## Security & cost hardening — deferred items
+
+Recorded during the pre-production hardening pass. The pass itself bounded
+`/api/plan`'s input, rate limited it, stopped it leaking error detail, and closed
+the env-config gaps. These were found in the same audit and deliberately left.
+
+### Parental consent — done, with two limits worth naming
+`apps/mobile/src/app/onboarding/consent.tsx` now runs a real exchange: the app
+asks `/api/consent/request` to email the parent a signed link, the parent opens
+`/consent/approve` and presses approve, the server reveals a 6-character code
+derived from the same secret, and the teen enters it. `onboarding/photo.tsx`
+refuses to mount the camera unless `data.parentalConsent` is set, and that field
+is written in exactly one place, after the server confirms. State lives in
+HMAC-signed tokens (`apps/web/lib/consent.ts`), so this needed no database.
+
+The whole path fails closed: a missing `CONSENT_SECRET`, an unconfigured mailer,
+an expired or forged token and a wrong code all leave the field unset and the
+camera shut. `lib/consent.test.ts` covers each of those.
+
+Two limits, both deliberate:
+
+- **The consent record is on-device only.** It sits in `profile.json` next to
+  the other answers. Nothing is written server-side, so if a regulator or a
+  parent later asks you to *prove* consent was given, there is no trail to show
+  — and clearing app data clears the record. An auditable trail needs the
+  datastore this repo does not have, and would mean storing a parent's address
+  on your servers, which is a new breach surface and another privacy-policy
+  change.
+- **Email confirmation is not "verifiable parental consent" in the strictest
+  sense.** It proves someone with access to that mailbox approved. It does not
+  prove they are the parent, and a determined teen can supply their own address.
+  Stronger methods (card check, ID) exist and are what US COPPA demands for
+  under-13 — not the population here, since under-16 is blocked outright, but
+  get this reviewed by a lawyer against GDPR Art. 8, the UK Age Appropriate
+  Design Code and the US state minor-privacy laws before launch.
+
+Also still true: `CONSENT_SECRET`, `RESEND_API_KEY` and `CONSENT_EMAIL_FROM`
+must be set in the deployment or no minor can ever finish onboarding. That is
+the intended failure direction, but it will look like a bug if nobody sets them.
+### `/waitlist/confirmed` confirms a waitlist nobody joined
+`apps/web/app/(auth)/signup/page.tsx:43` (and the Google button's `href` at `:138`)
+navigate to `/waitlist/confirmed` without ever touching Tally. The waitlist lives
+entirely in Tally (`lib/tally.ts`, form `LZVOM2`), so a user who fills in the signup
+form is told "You're on the list" by a list that never received their email. Either
+route signup through `openWaitlist()` or change the copy.
+
+### The consent card contradicts the privacy policy
+`consent.tsx:44-45` reads "Photos stay on your phone and are never saved on our
+servers." The second clause is true; the first is not, once `EXPO_PUBLIC_API_URL`
+is set — photos go to Pore's server and on to Anthropic. The formal policy
+(`packages/shared/src/legal/content.ts:87`) discloses this correctly. The in-flow
+card is the one users actually read, so it is the one that has to be right.
+
+### Prompt caching on the two Opus calls
+`ASSESSMENT_SYSTEM` / `ROUTINE_SYSTEM` are static and re-sent every request, so
+`cache_control: { type: "ephemeral" }` on the system block of both `messages.parse`
+calls in `apps/web/lib/pipeline.ts` is the natively-correct caching answer — one
+line each, no dependency. Not done yet because the cache TTL is 5 minutes and an
+app with no users has no two requests inside 5 minutes; today's hit rate is ~0.
+It also silently no-ops below the model's minimum cacheable prefix. **Trigger:**
+add it when traffic is bursty enough that requests land within 5 minutes of each
+other, and verify with `usage.cache_read_input_tokens > 0` rather than assuming.
+
+### The rate limiter is per-instance
+`apps/web/lib/rate-limit.ts` is an in-memory Map. On Vercel that is per-lambda and
+dies with a cold start: it stops a script, not a distributed caller. The durable
+control is the input bound in `IntakeSchema`. Upgrade when there is real traffic:
+Vercel Firewall rate-limit rules (no code) or an Upstash-backed counter (replace
+the body of `rateLimit`, the signature is already the right shape). It keys on a
+caller identity string, so it becomes a user id the day real auth lands.
+
+### `maxDuration` is 60s and unverified against the deploy target
+`apps/web/app/api/plan/route.ts:8` sets `maxDuration = 60`. Two sequential Opus
+4.8 calls at `max_tokens: 16000` can plausibly exceed that, and the failure mode
+is the expensive one: a gateway timeout *after* both model calls have been paid
+for and after the user has already waited a minute.
+
+Left at 60 because the app is not deployed yet, so there is nothing to measure
+against. The ceiling is plan-dependent and could not be verified from the dev
+container (Vercel's docs are blocked by the egress proxy, and the public
+summaries contradict each other on whether the Hobby ceiling is 60s or 300s).
+Check the real limit in the Vercel dashboard on first deploy and raise it there
+rather than trusting a number written here.
+
+### `metadataBase` points at `pore.skin`, the app is served from `poreai.vercel.app`
+`apps/web/app/layout.tsx:22` sets `metadataBase: new URL("https://pore.skin")`.
+Next resolves every Open Graph image and canonical URL against it, so if the site
+is served from `poreai.vercel.app` and `pore.skin` is not mapped to it, every
+social preview points at a domain that does not serve the assets.
+
+Deliberately not changed: whether `pore.skin` is a domain that is owned and will
+be mapped, or an aspiration, is not knowable from the repo. If it is owned and
+mapped, the current value is already correct and switching it to the Vercel URL
+would be the regression. Decide, then it is a one-line change.
+
+(`components/mockups/DashboardMock.tsx:23` also renders `app.pore.skin`, but that
+is display text inside an illustration of the product, not a resolved URL.)

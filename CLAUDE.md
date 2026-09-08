@@ -70,7 +70,7 @@ pnpm build            # turbo run build     (web only defines `build`; mobile/sh
 pnpm dev              # turbo run dev       (persistent, uncached)
 pnpm lint             # turbo run lint      (web only; eslint-config-next flat config)
 pnpm typecheck        # turbo run typecheck (all three packages: tsc --noEmit)
-pnpm test             # turbo run test      (packages/shared only, via vitest)
+pnpm test             # turbo run test      (packages/shared + apps/web, via vitest)
 ```
 
 Single-package / single-test invocations:
@@ -89,6 +89,7 @@ pnpm --filter @pore/shared typecheck
 pnpm --filter web dev                        # next dev, http://localhost:3000
 pnpm --filter web lint
 pnpm --filter web build
+pnpm --filter web test                       # vitest run (lib/**/*.test.ts)
 
 # mobile (run from apps/mobile, or pnpm --filter @pore/mobile <script>)
 pnpm --filter @pore/mobile start             # expo start
@@ -96,14 +97,17 @@ pnpm --filter @pore/mobile ios / android / web
 pnpm --filter @pore/mobile typecheck
 ```
 
-Current baseline (keep it here): `pnpm test` → 4 files, 95 tests, all passing (`safety` 12, `vision`
-21, `progress` 21, `schedule` 41). `pnpm typecheck` → clean in all three packages. `pnpm lint` → 0
-errors, 6 pre-existing `no-unused-vars` warnings (`components/ui/Button.tsx`, `lib/mock.ts`). Don't
-let a change add errors; the warnings are known.
+Current baseline (keep it here): `pnpm test` → 6 files, 112 tests, all passing (`safety` 12,
+`vision` 21, `progress` 21, `schedule` 41, web `plan-boundary` 7, web `consent` 10). `pnpm
+typecheck` → clean in all three packages. `pnpm lint` → 0 errors, 6 pre-existing `no-unused-vars`
+warnings (`components/ui/Button.tsx`, `lib/mock.ts`). Don't let a change add errors; the warnings
+are known.
 
-`packages/shared` is the only package with tests. `apps/web` and `apps/mobile` have none — notably
-the `/api/plan` input validation, which is a trust boundary in front of a paid endpoint (tracked in
-`TODOS.md`).
+`packages/shared` holds the bulk of the tests. `apps/web` has two suites, both on trust boundaries:
+`lib/plan-boundary.test.ts` (`/api/plan` — `IntakeSchema` and the rate limiter) and
+`lib/consent.test.ts` (the parental-consent tokens and codes, including every fail-closed path).
+Neither covers the route handlers' own status codes, headers or gate ordering — those are still
+manual probes only, tracked in `TODOS.md`. `apps/mobile` has none.
 
 ## Architecture: the plan-generation pipeline
 
@@ -111,10 +115,24 @@ the `/api/plan` input validation, which is a trust boundary in front of a paid e
 `POST /api/plan` (`apps/web/app/api/plan/route.ts`, Node runtime — the Anthropic SDK needs Node,
 not edge — with `maxDuration: 60` since it makes two model calls).
 
-**The route is a trust boundary and is explicit about it.** `validateImages` caps the request at 3
-images and ~8MB decoded each, rejects `data:` URI prefixes, allowlists media types, and parses
-client-supplied `quality` through `PhotoQualitySchema` rather than trusting it. Each rule returns
-its own message — "invalid request" tells a legitimate client nothing. Keep that property.
+**The route is a cost boundary, not just a correctness one, and the gate ORDER is the protection.**
+`route.ts` runs four gates: rate limit → `content-length` → `IntakeSchema` → `validateImages`. The
+first two run before `req.json()`, so a rejected caller never gets a body buffered into memory, and
+a missing `content-length` is a 411 rather than an unbounded read. `IntakeSchema` (`lib/schemas.ts`)
+matters most: the intake is `JSON.stringify`'d into *both* Claude prompts, so every free-text field
+is length- and count-capped and the object is `.strict()`. An unbounded intake is an unbounded bill
+— rate limiting caps only how many requests you pay for, not how much each one costs, and
+`lib/rate-limit.ts` is an in-memory Map (per-instance on serverless), so it is the backstop, not the
+primary control. `validateImages` then caps the request at 3 images and 1MB decoded each (sized so
+three at the cap still fit under Vercel's ~4.5MB body limit), rejects `data:` URI prefixes,
+allowlists media types, and parses client-supplied `quality` through `PhotoQualitySchema` rather
+than trusting it.
+
+Each rule returns its own message — "invalid request" tells a legitimate client nothing. Keep that
+property. 500s return a fixed message; the real error is logged, never returned. Do not reorder,
+relax or remove any of this without reading `lib/plan-boundary.test.ts` first: it covers the schema
+and limiter as units but not the handler's ordering, so a reordering refactor passes the suite while
+quietly undoing the protection.
 
 1. **Vision assessment** — up to 3 photos + intake JSON go to Claude (`client.messages.parse` with a
    Zod `output_config.format`, model `claude-opus-4-8`) using `ASSESSMENT_SYSTEM`, producing a
@@ -158,6 +176,49 @@ The mobile app calls the same endpoint via `apps/mobile/src/lib/api.ts` (`fetchP
 three-step chain — the journal's persisted (adapted) routine, else the generated plan, else its own
 local draft through `applySafetyRules` — so the app always has a real, safety-clamped routine to
 schedule, with or without a reachable API.
+
+That fallback is deliberate but must stay **noisy**: `fetchPlan` logs the status and body on a
+non-ok response before returning `null`. A swallowed 4xx otherwise renders a plausible mock routine
+with no sign the real pipeline refused it, which is indistinguishable from working software.
+
+## Architecture: parental consent (16-17)
+
+`apps/web/lib/consent.ts` + `app/api/consent/{request,approve,verify}` +
+`app/consent/approve` + `apps/mobile/src/app/onboarding/consent.tsx`.
+
+Under-16 is blocked outright in `onboarding/age.tsx`. 16-17 must have a parent approve before the
+camera opens, and that approval is real: the app asks the server to email the parent a signed link,
+the parent presses approve, the server reveals a 6-character code, and the teen types it back.
+
+**There is no database, so the flow carries its state in an HMAC-signed token.** `issueToken`
+signs `{emailHash, age, issuedAt, expiresAt}` with `CONSENT_SECRET`; `codeFor` derives the code
+from that same token and secret, so nothing needs storing between the two requests. The parent's
+address is hashed into the token, never carried in it, so a leaked link cannot harvest addresses.
+
+Three properties hold this up. Do not remove any of them without replacing it:
+
+1. **It fails closed, everywhere.** A missing or short `CONSENT_SECRET`, an unconfigured mailer, an
+   expired token, a forged signature and a wrong code all end at "not approved". `readToken` and
+   `verifyCode` return null/false rather than throwing past the caller, and `sendConsentEmail`
+   throws in production when unconfigured. The bug this replaced was a gate that let people through
+   when the check never ran; a second fail-open gate would be no better.
+2. **The camera is guarded, not just the route.** `onboarding/photo.tsx` checks
+   `data.parentalConsent` before any stage renders, because that screen is reachable by deep link,
+   by back-navigation and from the "recheck" entry on `/today`. Routing alone is not a gate.
+   `parentalConsent` is written in exactly one place — `onboarding/consent.tsx`, after the server
+   confirms.
+3. **Revealing the code is a POST, never a GET.** Mail scanners and link-preview bots fetch every
+   URL in an email; if opening the link exposed the code, a scanner would approve on the parent's
+   behalf. `/consent/approve` renders a button, and only the button's POST returns the code.
+
+Required env (`apps/web/.env.example`): `CONSENT_SECRET` (32+ chars), `RESEND_API_KEY`,
+`CONSENT_EMAIL_FROM`, and `CONSENT_APP_ORIGIN` in production. With them unset no minor can finish
+onboarding — intended, but it looks like a bug if nobody sets them. Outside production the approve
+URL is logged instead of emailed so the flow is testable without an account.
+
+`lib/consent.test.ts` covers the fail-closed paths specifically. The consent record is stored
+on-device only (`profile.json`), which means there is no server-side audit trail — see `TODOS.md`
+for that limit and for why email confirmation is not the strictest form of verifiable consent.
 
 ## Architecture: guided capture (the other half)
 
@@ -319,7 +380,7 @@ Expo Router, file-based under `apps/mobile/src/app`. `@/*` maps to `src/*`, `@/a
 index.tsx              splash animation -> landing -> sign-up / sign-in
 (auth)/sign-up|sign-in  STUB: no backend. Any valid-looking input routes on. Real auth is a later increment.
 onboarding/age         age gate; <16 blocked, <=17 detours through consent
-onboarding/consent     parental-consent email capture (records the address; does not yet verify)
+onboarding/consent     REAL parental consent: emails the parent, they approve, teen enters the code
 onboarding/photo       guided 3-angle capture (the big one — ~420 lines, single screen, shared camera mount)
 onboarding/intake      questionnaire; calls fetchPlan at the end, records the progress baseline
 today.tsx              THE primary surface: one session at a time, from planDay. One check-in tap.
@@ -344,7 +405,7 @@ calibrates the camera, not as one more anonymous questionnaire step.
   `resolveFontFamily(family, weight)` picks the right face. The root layout holds the native splash
   up until fonts are ready.
 - **State**: `src/state/onboarding.tsx` is a React context (`OnboardingProvider` / `useOnboarding`)
-  carrying `Partial<IntakeResponse>` + `parentEmail` + `photos` + the generated `plan`. It is
+  carrying `Partial<IntakeResponse>` + `photos` + `parentalConsent` + the generated `plan`. It is
   **not** in-memory only — it hydrates from `src/lib/profile.ts` synchronously on mount and writes
   back on every `update`. See the cadence-engine section above for why that is a safety property
   and not a convenience; do not "simplify" it back to `useState({})`.
