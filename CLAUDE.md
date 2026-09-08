@@ -380,7 +380,7 @@ Expo Router, file-based under `apps/mobile/src/app`. `@/*` maps to `src/*`, `@/a
 index.tsx              splash animation -> landing -> sign-up / sign-in
 (auth)/sign-up|sign-in  STUB: no backend. Any valid-looking input routes on. Real auth is a later increment.
 onboarding/age         age gate; <16 blocked, <=17 detours through consent
-onboarding/consent     parental-consent email capture (records the address; does not yet verify)
+onboarding/consent     REAL parental consent: emails the parent, they approve, teen enters the code
 onboarding/photo       guided 3-angle capture (the big one — ~420 lines, single screen, shared camera mount)
 onboarding/intake      questionnaire; calls fetchPlan at the end, records the progress baseline
 today.tsx              THE primary surface: one session at a time, from planDay. One check-in tap.
@@ -405,7 +405,7 @@ calibrates the camera, not as one more anonymous questionnaire step.
   `resolveFontFamily(family, weight)` picks the right face. The root layout holds the native splash
   up until fonts are ready.
 - **State**: `src/state/onboarding.tsx` is a React context (`OnboardingProvider` / `useOnboarding`)
-  carrying `Partial<IntakeResponse>` + `parentEmail` + `photos` + the generated `plan`. It is
+  carrying `Partial<IntakeResponse>` + `photos` + `parentalConsent` + the generated `plan`. It is
   **not** in-memory only — it hydrates from `src/lib/profile.ts` synchronously on mount and writes
   back on every `update`. See the cadence-engine section above for why that is a safety property
   and not a convenience; do not "simplify" it back to `useState({})`.
