@@ -36,9 +36,9 @@ export function DashboardMock({ className = "" }: { className?: string }) {
           <nav className="mt-6 space-y-1.5">
             {[
               { label: "Today", active: true },
-              { label: "My shelf", active: false },
+              { label: "Plan", active: false },
               { label: "Progress", active: false },
-              { label: "Guidance", active: false },
+              { label: "Compare", active: false },
             ].map((item) => (
               <div
                 key={item.label}

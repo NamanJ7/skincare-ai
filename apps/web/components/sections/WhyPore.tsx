@@ -5,12 +5,12 @@ import { DashboardMock } from "../mockups/DashboardMock";
 import { CheckIcon } from "../ui/icons";
 
 const BENEFITS = [
-  "Start with a guided picture of your face",
-  "Build a routine you can actually stick to",
-  "Understand ingredients before combining them",
-  "Track what your skin responds to over time",
-  "Simplify your shelf instead of constantly adding products",
-  "Get guidance designed around your routine, not trends",
+  "Three guided photos, shot under your screen's own light",
+  "A routine clamped by rules that are code, not a prompt",
+  "One strong active a day, spaced out for you",
+  "Only tonight's session on screen — you never plan a night",
+  "One tap a day is the whole ask, and it sets next week's pace",
+  "A comparison that says \"we can't tell\" rather than inventing one",
 ];
 
 export function WhyPore() {

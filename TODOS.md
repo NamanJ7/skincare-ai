@@ -280,7 +280,35 @@ Onboarding is now photo-first, which matches `apps/web/components/sections/HowIt
 and `FeatureCards.tsx`. Check no other marketing copy still describes an order
 the app no longer uses.
 
-### `apps/web` has no tests
-`packages/shared` is the only package with a test suite. The `/api/plan` input
-validation in `apps/web/app/api/plan/route.ts` is a trust boundary in front of a
-paid endpoint and is currently only covered by manual probes.
+### ~~`apps/web` has no tests~~ — the trust boundary is covered now
+`apps/web` has vitest and 21 tests over the two things guarding a paid endpoint:
+`lib/validateImages.ts` (extracted from the route so it could be tested at all)
+and `lib/rateLimit.ts`. Everything else in `apps/web` is still untested, which is
+fine — it is a marketing site.
+
+### `/api/plan` rate limiting is a speed bump, not a wall
+`lib/rateLimit.ts` counts per-IP requests (5 per 10 minutes) and concurrent
+generations (4) **in the process**, so on serverless each instance enforces its
+own limit and a cold start resets it. `x-forwarded-for` is also spoofable by
+anyone talking to the origin directly. It stops the accidental case — a retry
+loop, a stuck client, a scraper that does not care — and it is the most that can
+be done without shared state. Before this endpoint carries real traffic, move
+the counters to Redis/KV; `check()` is pure apart from the store it is handed,
+so only the store changes. Real protection means auth on the endpoint, which
+means an account system that does not exist yet.
+
+### The mobile client cannot see a 429 — fix this next
+**This is a prerequisite the rate limiter created, and it is the highest-value
+mobile change outstanding.** `fetchPlan` in `apps/mobile/src/lib/api.ts` returns
+`null` for every outcome — no API URL, offline, 400, 500, and now 429 — and
+`onboarding/intake.tsx` proceeds regardless of whether a plan came back. So a
+throttled user finishes the questionnaire and is silently handed no routine,
+with nothing on screen saying why.
+
+That was already true for every other failure; the limiter just adds one more
+way to reach it. The fix is to make `fetchPlan` return a discriminated outcome
+(`ok` / `unconfigured` / `offline` / `timeout` / `server` / `busy`), give it an
+`AbortController` deadline so a stalled request cannot spin forever, and stop
+`intake.tsx` navigating onward on failure. There is a working implementation of
+exactly this in the abandoned branch at `801a832` (`apps/mobile/src/lib/api.ts`)
+if it is useful as a starting point.

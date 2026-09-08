@@ -6,20 +6,20 @@ const STEPS = [
   {
     n: "1",
     icon: <CameraIcon size={22} />,
-    title: "Take a picture of your face",
-    body: "Start with a guided face photo so Pore can understand visible skin cues before it asks about goals, preferences, and routine.",
+    title: "Three guided photos",
+    body: "Straight on, then each side. Your screen lights your face, so all three are taken under the same light and can be compared to the next set weeks later.",
   },
   {
     n: "2",
     icon: <LeafIcon size={22} />,
-    title: "Add your products",
-    body: "Build your shelf and let Pore understand what is already in your routine.",
+    title: "Five questions",
+    body: "Goals, skin type, how reactive your skin is, pregnancy, and anything that has reacted badly before. That last one is removed from your routine outright.",
   },
   {
     n: "3",
     icon: <ChartIcon size={22} />,
-    title: "Follow, track, and adjust",
-    body: "Get a clear routine, log your progress, and receive guidance as your skin changes.",
+    title: "One thing to do tonight",
+    body: "Pore works out which steps land on which day and shows you only those. The single question it asks back — how does your skin feel — is what sets next week's pace.",
   },
 ];
 
@@ -29,7 +29,7 @@ export function HowItWorks() {
       <Reveal>
         <SectionHeading
           eyebrow="How it works"
-          title="A better skincare routine starts with your face photo."
+          title="Three photos, five questions, and one thing to do tonight."
         />
       </Reveal>
 
