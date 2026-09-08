@@ -48,6 +48,7 @@ import {
   Card,
   Divider,
   GhostButton,
+  PrimaryButton,
   Screen,
   colors,
   radius,
@@ -70,36 +71,17 @@ const FEELS: { feel: SkinFeel; label: string }[] = [
   { feel: "stinging", label: "Stinging" },
 ];
 
-/** Same over-loaded draft the plan screen uses, so the engine has work to do. */
-function draftRoutine(): Routine {
-  const step = (
-    order: number,
-    category: ProductCategory,
-    active: RoutineStep["active"],
-    frequencyPerWeek: number,
-    rationale: string,
-  ): RoutineStep => ({ order, category, active, frequencyPerWeek, rationale, irritationRisk: "medium" });
-  return {
-    am: [
-      step(1, "cleanser", undefined, 7, "Start clean without stripping your skin."),
-      step(2, "serum", "vitamin_c", 7, "Brightens and helps even out tone over time."),
-      step(3, "moisturizer", undefined, 7, "Locks in hydration and supports your barrier."),
-    ],
-    pm: [
-      step(1, "cleanser", undefined, 7, "Remove the day's oil and sunscreen."),
-      step(2, "exfoliant", "salicylic_acid", 4, "Helps clear pores and reduce breakouts."),
-      step(3, "exfoliant", "glycolic_acid", 4, "Smooths texture and fades marks."),
-      step(4, "treatment", "retinoid", 7, "Boosts cell turnover for texture and marks."),
-    ],
-    notes: ["Patch-test any new active for a few days before full use."],
-  };
-}
-
 function stepLabel(step: RoutineStep): string {
   return step.active ? ACTIVES[step.active].short : CATEGORY_LABELS[step.category];
 }
 
-export default function Today() {
+/**
+ * The routine screen proper. Split from the entry component below because the
+ * cadence hooks need a routine to run against, and a hook cannot sit behind a
+ * conditional — so the "is there a routine at all?" question has to be answered
+ * before this component mounts.
+ */
+function TodaySession({ routine }: { routine: Routine }) {
   const { data } = useOnboarding();
   const [journal, setJournal] = useState(() => readJournal());
   const [time, setTime] = useState<RoutineTime>(() => currentSession());
@@ -123,14 +105,6 @@ export default function Today() {
       setTime(currentSession());
       setViewingDate(todayDate());
     }, []),
-  );
-
-  // Precedence: a routine the progress engine has already adapted beats the one
-  // generated at signup, which beats a locally clamped draft. Once a measured
-  // re-assessment has moved a frequency, that is the routine the user is on.
-  const routine = useMemo(
-    () => journal.routine ?? data.plan?.routine ?? applySafetyRules(draftRoutine(), intake).routine,
-    [journal.routine, data.plan, intake],
   );
 
   const ctx = useMemo(
@@ -373,4 +347,48 @@ export default function Today() {
       </View>
     </Screen>
   );
+}
+
+/**
+ * What the screen shows when there is no routine to show.
+ *
+ * Reachable when plan generation failed, or the record was erased. This screen
+ * used to synthesise a hardcoded sample routine in that case — two acids and a
+ * daily retinoid — and present it as the user's own, which turned every failure
+ * upstream into a silent one. Naming the gap and offering the way forward beats
+ * inventing content.
+ */
+function NoRoutineYet() {
+  return (
+    <Screen contentStyle={{ paddingTop: spacing.lg }}>
+      <AppText variant="label" color={colors.primary}>
+        NOT READY YET
+      </AppText>
+      <AppText variant="title">Your routine isn&apos;t built</AppText>
+      <AppText variant="body" color={colors.inkMuted}>
+        We don&apos;t have a finished plan for you on this phone. Three photos and a few questions
+        is all it takes, and we&apos;ll keep the answers you already gave.
+      </AppText>
+      <PrimaryButton label="Build my routine" onPress={() => router.push("/onboarding/photo")} />
+    </Screen>
+  );
+}
+
+/**
+ * Precedence: a routine the progress engine has already adapted beats the one
+ * generated at signup. There is deliberately no third fallback.
+ */
+export default function Today() {
+  const { data } = useOnboarding();
+  const [journal, setJournal] = useState(() => readJournal());
+
+  useFocusEffect(
+    useCallback(() => {
+      setJournal(readJournal());
+    }, []),
+  );
+
+  const routine = journal.routine ?? data.plan?.routine;
+  if (!routine) return <NoRoutineYet />;
+  return <TodaySession routine={routine} />;
 }
