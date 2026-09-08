@@ -29,6 +29,7 @@ import {
   writeManifest,
   type CapturedPhoto,
 } from "@/lib/photos";
+import { measureCapture } from "@/lib/photoQuality";
 import { useOnboarding } from "@/state/onboarding";
 import {
   AppText,
@@ -43,16 +44,22 @@ import {
 } from "@/theme";
 
 /**
- * Whether to use the camera's native `flash="screen"` mode.
+ * How long the white overlay stays up before the shutter fires.
  *
- * `'screen'` is a documented SDK 56 FlashMode, but the docs do not describe its
- * front-camera behaviour, so this must be confirmed on a real device. If it
- * turns out to be a no-op, flip this to false: the app then paints its own
- * white overlay for FLASH_MS around the shot and records the photo as
- * ambient-lit, which is honest rather than a silently broken claim.
+ * The app paints its own light rather than using the camera's `flash="screen"`
+ * mode, and that is a deliberate trade. `'screen'` is documented (and on iOS
+ * maps to Retina Flash, which is brighter than a plain white View), but the
+ * comparability claim this product makes needs an *ambient reference frame* to
+ * measure against — and there is no way to capture one while the camera is in a
+ * flash mode without toggling a prop mid-shutter and hoping the change lands.
+ * Painting the light ourselves keeps the capture path linear and lets us
+ * measure whether it actually worked.
+ *
+ * If device testing shows the overlay is too weak — captures classifying
+ * `ambient` indoors, so `/compare` rarely has anything to compare — the fix is
+ * to raise the display to full brightness for the duration of the flash
+ * (`expo-brightness`), not to go back to claiming light we did not verify.
  */
-const USE_NATIVE_SCREEN_FLASH = true;
-/** How long the fallback white overlay stays up before the shutter fires. */
 const FLASH_MS = 260;
 
 /**
@@ -130,12 +137,37 @@ export default function PhotoCapture() {
     setBusy(true);
     setError(null);
 
+    /**
+     * The ambient reference: one frame with none of our light on it, taken
+     * moments before the real one. Its mean luma is what `processCapture`
+     * measures the lit frame against to decide whether the illuminant was
+     * actually controlled.
+     *
+     * `skipProcessing` keeps it cheap — it skips the orientation pass, which
+     * costs nothing here because a mean over a centre crop does not care which
+     * way up the frame is. A failure leaves this NaN, and the classifier reads
+     * that as `ambient`: we lose a comparison rather than inventing one.
+     */
+    let referenceLuma = Number.NaN;
+    try {
+      const reference = await camera.current.takePictureAsync({ skipProcessing: true });
+      if (reference) {
+        const measured = await measureCapture(
+          reference.uri,
+          reference.width,
+          reference.height,
+          tone,
+        );
+        referenceLuma = measured.metrics.meanLuma;
+      }
+    } catch {
+      // No reference. Handled by the classifier, not by pretending.
+    }
+
     let picture: CameraCapturedPicture | undefined;
     try {
-      if (!USE_NATIVE_SCREEN_FLASH) {
-        setFlashing(true);
-        await new Promise((r) => setTimeout(r, FLASH_MS));
-      }
+      setFlashing(true);
+      await new Promise((r) => setTimeout(r, FLASH_MS));
       picture = await camera.current.takePictureAsync({ quality: 0.9, exif: true });
     } catch {
       setError("Couldn't take that photo — try again");
@@ -157,7 +189,7 @@ export default function PhotoCapture() {
         picture,
         step.angle,
         tone,
-        USE_NATIVE_SCREEN_FLASH ? "screen_flash" : "ambient",
+        referenceLuma,
         sessionId,
         force,
       );
@@ -295,7 +327,7 @@ export default function PhotoCapture() {
           mirror
           animateShutter={false}
           autofocus="on"
-          flash={USE_NATIVE_SCREEN_FLASH ? "screen" : "off"}
+          flash="off"
           onCameraReady={() => setReady(true)}
           onMountError={(e) => setMountError(e.message)}
         />
