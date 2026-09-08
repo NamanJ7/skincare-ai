@@ -34,6 +34,9 @@ export default function AgeGate() {
         onChangeText={(t) => setValue(t.replace(/[^0-9]/g, "").slice(0, 3))}
         keyboardType="number-pad"
         placeholder="Age"
+        // Placeholder-only field: the question is a heading, not a label, so
+        // nothing associates the two for a screen reader.
+        accessibilityLabel="Your age"
         placeholderTextColor={colors.inkMuted}
         style={styles.input}
         maxLength={3}
