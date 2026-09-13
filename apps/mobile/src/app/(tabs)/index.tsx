@@ -3,7 +3,7 @@
  * how the journey is going, and when the next check-in happens.
  */
 import { router } from "expo-router";
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import { StyleSheet, View } from "react-native";
 
 import { AdjustmentCard } from "@/components/AdjustmentCard";
@@ -24,14 +24,20 @@ import { scanAccess } from "@/lib/gate";
 import { deriveJourney } from "@/lib/journey";
 import {
   periodComplete,
+  routineStepInstances,
   shiftKey,
-  stepKey,
   todayKey,
   weekDays,
   type WeekDay,
 } from "@/lib/log";
 import { scanEntryHref } from "@/lib/nav";
 import { routineFor } from "@/lib/plan";
+import {
+  resolvedSchedule,
+  routineFingerprint,
+  scheduledStepInstances,
+} from "@/lib/routine-schedule";
+import { routineSessionExpired } from "@/lib/routine-session";
 import { deriveSkinStatus, type SkinStatusResult } from "@/lib/skin-status";
 import { redFlags } from "@/lib/trends";
 import { useCheckIns } from "@/state/check-ins";
@@ -94,7 +100,7 @@ function dateFromKey(value: string): Date {
 export default function TodayTab() {
   const colors = useThemeColors();
   const { data } = useOnboarding();
-  const { dayLog, streak, log, toggle } = useRoutineLog();
+  const { dayLog, streak, log, toggle, ensureSchedule } = useRoutineLog();
   const { checkIns, latest, due, daysUntilDue } = useCheckIns();
   const { history } = useScanHistory();
   const { entitlement } = useEntitlement();
@@ -107,9 +113,37 @@ export default function TodayTab() {
     [data, log.revision, today],
   );
   const currentDay = dayLog(today);
-  const period = activePeriod(now.getHours(), periodComplete(currentDay?.am));
-  const steps = routine[period];
-  const done = currentDay?.[period]?.done ?? [];
+  const defaultPeriod = activePeriod(
+    now.getHours(),
+    periodComplete(currentDay?.am),
+  );
+  const fingerprint = routineFingerprint(routine, data.profileRevision ?? 0);
+  const schedule = resolvedSchedule(log.schedule, fingerprint, today);
+  useEffect(() => {
+    void ensureSchedule(fingerprint, today);
+  }, [ensureSchedule, fingerprint, today]);
+  const resumable =
+    log.activeSession &&
+    log.activeSession.routineFingerprint === fingerprint &&
+    !routineSessionExpired(log.activeSession, now)
+      ? log.activeSession
+      : undefined;
+  const period = resumable?.period ?? defaultPeriod;
+  const routineDate = resumable?.date ?? today;
+  const allInstances = routineStepInstances(routine[period]);
+  const steps = resumable
+    ? allInstances.filter((item) => resumable.stepKeys.includes(item.key))
+    : scheduledStepInstances(routine, period, schedule, today);
+  const done = dayLog(routineDate)?.[period]?.done ?? [];
+  const scheduledRoutine = {
+    ...routine,
+    am: scheduledStepInstances(routine, "am", schedule, today).map(
+      (item) => item.step,
+    ),
+    pm: scheduledStepInstances(routine, "pm", schedule, today).map(
+      (item) => item.step,
+    ),
+  };
 
   const currentAssessment = isCurrentScanAnalysis(data)
     ? data.plan?.assessment
@@ -128,7 +162,7 @@ export default function TodayTab() {
     today,
     log,
     latestCheckIn: latest,
-    routine,
+    routine: scheduledRoutine,
     escalated: flags.escalate,
     dismissedKinds,
     period,
@@ -225,11 +259,11 @@ export default function TodayTab() {
           period={period}
           steps={steps}
           done={done}
-          onToggle={(step, index, willCompletePeriod) => {
-            const key = stepKey(step);
+          onToggle={(item, willCompletePeriod) => {
+            const key = item.key;
             track("routine_step_toggled", {
               period,
-              step_index: index + 1,
+              step_index: item.index + 1,
               checked: !done.includes(key),
               surface: "today",
             });
@@ -240,8 +274,25 @@ export default function TodayTab() {
                 surface: "today",
               });
             }
-            toggle(period, key, steps.length);
+            void toggle(
+              period,
+              key,
+              steps.length,
+              routineDate,
+              steps.map((candidate) => candidate.key),
+            );
           }}
+          startRoutineLabel={
+            resumable
+              ? "Resume routine"
+              : `Start ${period === "am" ? "morning" : "evening"} routine`
+          }
+          onStartRoutine={() =>
+            router.push({
+              pathname: "/routine-session",
+              params: { period, source: "home" },
+            })
+          }
           onViewRoutine={() => router.push(`/(tabs)/routine?period=${period}`)}
         />
       </Enter>

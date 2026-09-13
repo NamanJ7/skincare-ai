@@ -114,6 +114,61 @@ describe("toggleStep", () => {
     expect(next.stepOwnership).toEqual(before.stepOwnership);
     expect(next.days["2026-07-03"].am?.done).toEqual(["cleanser:base"]);
   });
+
+  it("uses scheduled totals and makes quick completion resumable by Guided Mode", () => {
+    const at = "2026-07-03T08:00:00.000Z";
+    const keys = ["cleanser:base", "sunscreen:base"];
+    let log = toggleStep(
+      emptyLog(),
+      "2026-07-03",
+      "am",
+      keys[0],
+      keys.length,
+      keys,
+      at,
+    );
+    expect(log.days["2026-07-03"].am).toMatchObject({
+      done: [keys[0]],
+      total: 2,
+      scheduledStepKeys: keys,
+      source: "quick",
+      startedAt: at,
+    });
+    log = toggleStep(log, "2026-07-03", "am", keys[1], 2, keys, at);
+    expect(log.days["2026-07-03"].am?.completedAt).toBe(at);
+    expect(periodComplete(log.days["2026-07-03"].am)).toBe(true);
+  });
+
+  it("replaces a saved skip when quick check marks that step done", () => {
+    const before: RoutineLog = {
+      days: {
+        "2026-07-03": {
+          pm: {
+            done: [],
+            total: 1,
+            scheduledStepKeys: ["cleanser:base"],
+            skipped: {
+              "cleanser:base": {
+                reason: "not_now",
+                recordedAt: "2026-07-03T20:00:00.000Z",
+              },
+            },
+          },
+        },
+      },
+    };
+    const next = toggleStep(
+      before,
+      "2026-07-03",
+      "pm",
+      "cleanser:base",
+      1,
+      ["cleanser:base"],
+      "2026-07-03T20:05:00.000Z",
+    );
+    expect(next.days["2026-07-03"].pm?.done).toEqual(["cleanser:base"]);
+    expect(next.days["2026-07-03"].pm?.skipped).toBeUndefined();
+  });
 });
 
 describe("routine preferences", () => {
@@ -192,6 +247,25 @@ describe("periodComplete / dayFraction", () => {
     expect(periodComplete({ done: ["a"], total: 2 })).toBe(false);
     expect(periodComplete({ done: ["a", "b"], total: 2 })).toBe(true);
     expect(periodComplete(undefined)).toBe(false);
+  });
+
+  it("uses exact scheduled keys instead of unrelated historical done keys", () => {
+    expect(
+      periodComplete({
+        done: ["old:a", "old:b"],
+        total: 1,
+        scheduledStepKeys: ["current:a"],
+      }),
+    ).toBe(false);
+    expect(
+      dayFraction({
+        am: {
+          done: ["old:a", "current:a"],
+          total: 2,
+          scheduledStepKeys: ["current:a", "current:b"],
+        },
+      }),
+    ).toBe(0.5);
   });
 
   it("averages across whichever periods have entries", () => {

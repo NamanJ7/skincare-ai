@@ -20,7 +20,8 @@ import { track } from "@/lib/analytics";
 import { CONCERN_LABELS } from "@/lib/labels";
 import {
   missedYesterday,
-  stepKey,
+  routineStepInstances,
+  shiftKey,
   todayKey,
   type RoutinePeriod,
 } from "@/lib/log";
@@ -30,6 +31,14 @@ import {
   routineSourceNote,
 } from "@/lib/plan";
 import type { UserProductCategory } from "@/lib/profile";
+import {
+  formatNextScheduledDay,
+  nextScheduledDate,
+  resolvedSchedule,
+  routineFingerprint,
+  scheduledStepInstances,
+} from "@/lib/routine-schedule";
+import { routineSessionExpired } from "@/lib/routine-session";
 import { routineSupportForConcern } from "@/lib/results";
 import { useAcceptRevision } from "@/lib/use-accept-revision";
 import { useOnboarding } from "@/state/onboarding";
@@ -40,6 +49,7 @@ import {
   Card,
   Divider,
   Enter,
+  PrimaryButton,
   Screen,
   Segmented,
   TextButton,
@@ -64,7 +74,8 @@ export default function RoutineTab() {
   }>();
   const priority = isConcernKey(params.priority) ? params.priority : undefined;
   const { data } = useOnboarding();
-  const { toggle, dayLog, streak, log, markStepNotOwned } = useRoutineLog();
+  const { toggle, dayLog, streak, log, markStepNotOwned, ensureSchedule } =
+    useRoutineLog();
   const acceptRevision = useAcceptRevision();
 
   const defaultPeriod: RoutinePeriod = new Date().getHours() < 12 ? "am" : "pm";
@@ -105,6 +116,21 @@ export default function RoutineTab() {
     [priority, routine],
   );
   const steps = routine[period];
+  const instances = routineStepInstances(steps);
+  const fingerprint = routineFingerprint(routine, data.profileRevision ?? 0);
+  const schedule = resolvedSchedule(log.schedule, fingerprint, today);
+  const scheduled = scheduledStepInstances(routine, period, schedule, today);
+  const scheduledKeys = scheduled.map((item) => item.key);
+  const dueKeys = new Set(scheduledKeys);
+  const resumable =
+    log.activeSession &&
+    log.activeSession.routineFingerprint === fingerprint &&
+    !routineSessionExpired(log.activeSession)
+      ? log.activeSession
+      : undefined;
+  useEffect(() => {
+    void ensureSchedule(fingerprint, today);
+  }, [ensureSchedule, fingerprint, today]);
   const time: RoutineTime = period === "am" ? "AM" : "PM";
   const done = dayLog(today)?.[period]?.done ?? [];
   const essentialsFocus = params.focus === "essentials";
@@ -121,7 +147,8 @@ export default function RoutineTab() {
   ).length;
 
   const complete =
-    steps.length > 0 && steps.every((step) => done.includes(stepKey(step)));
+    scheduledKeys.length > 0 &&
+    scheduledKeys.every((key) => done.includes(key));
   const celebrate = useCelebration(period, complete);
 
   const lapsed = missedYesterday(log, today) && streak === 0;
@@ -200,7 +227,11 @@ export default function RoutineTab() {
                 Your saved routine is unchanged.
               </AppText>
               {goodToKnow.map((note) => (
-                <AppText key={note} variant="caption" color={colors.textPrimary}>
+                <AppText
+                  key={note}
+                  variant="caption"
+                  color={colors.textPrimary}
+                >
                   • {note}
                 </AppText>
               ))}
@@ -264,6 +295,22 @@ export default function RoutineTab() {
             onChange={setPeriod}
           />
 
+          {scheduledKeys.length > 0 && !complete ? (
+            <PrimaryButton
+              label={
+                resumable
+                  ? "Resume routine"
+                  : `Start ${period === "am" ? "morning" : "evening"} routine`
+              }
+              onPress={() =>
+                router.push({
+                  pathname: "/routine-session",
+                  params: { period, source: "routine" },
+                })
+              }
+            />
+          ) : null}
+
           {priorityLabel ? (
             <View style={styles.priorityNote}>
               <Ionicons
@@ -292,21 +339,20 @@ export default function RoutineTab() {
           ) : null}
 
           <Card elevated style={styles.stepsCard}>
-            {steps.map((step, index) => {
-              const key = stepKey(step);
+            {instances.map(({ step, key, index }, visibleIndex) => {
+              const scheduledToday = dueKeys.has(key);
               const supportsPriority = supportedStepKeys.has(
                 `${period}:${key}`,
               );
               const willCompletePeriod =
+                scheduledToday &&
                 !done.includes(key) &&
-                steps.every(
-                  (candidate) =>
-                    stepKey(candidate) === key ||
-                    done.includes(stepKey(candidate)),
+                scheduledKeys.every(
+                  (candidate) => candidate === key || done.includes(candidate),
                 );
               return (
                 <View key={key}>
-                  {index > 0 ? <Divider /> : null}
+                  {visibleIndex > 0 ? <Divider /> : null}
                   <RoutineStepCard
                     step={step}
                     product={shelfAssignments[period][index]}
@@ -319,6 +365,19 @@ export default function RoutineTab() {
                     }
                     supportLabel={supportsPriority ? priorityLabel : undefined}
                     checked={done.includes(key)}
+                    scheduledToday={scheduledToday}
+                    scheduleLabel={
+                      scheduledToday
+                        ? "Scheduled today"
+                        : formatNextScheduledDay(
+                            nextScheduledDate(
+                              step,
+                              schedule,
+                              shiftKey(today, 1),
+                            ),
+                            today,
+                          )
+                    }
                     willCompletePeriod={willCompletePeriod}
                     onToggle={() => {
                       track("routine_step_toggled", {
@@ -330,11 +389,17 @@ export default function RoutineTab() {
                       if (willCompletePeriod) {
                         track("routine_period_completed", {
                           period,
-                          step_count: steps.length,
+                          step_count: scheduledKeys.length,
                           surface: "routine",
                         });
                       }
-                      toggle(period, key, steps.length);
+                      void toggle(
+                        period,
+                        key,
+                        scheduledKeys.length,
+                        today,
+                        scheduledKeys,
+                      );
                     }}
                     adjustments={adjustments.filter(
                       (adjustment) =>
@@ -392,7 +457,11 @@ export default function RoutineTab() {
           {goodToKnow.length > 0 && !revision && !essentialsFocus ? (
             <Callout tone="info" title="Good to know">
               {goodToKnow.map((note) => (
-                <AppText key={note} variant="caption" color={colors.textPrimary}>
+                <AppText
+                  key={note}
+                  variant="caption"
+                  color={colors.textPrimary}
+                >
                   • {note}
                 </AppText>
               ))}
@@ -458,48 +527,48 @@ function isConcernKey(value: unknown): value is ConcernKey {
 
 function createStyles(colors: ThemeColors) {
   return StyleSheet.create({
-  screen: { paddingTop: spacing.lg, gap: spacing.lg },
-  heading: { gap: spacing.xxs },
-  sourceRow: {
-    minHeight: touchTarget.min,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.sm,
-  },
-  sourceCopy: { flex: 1 },
-  smallAction: {
-    minHeight: touchTarget.min,
-    justifyContent: "center",
-    paddingHorizontal: spacing.xs,
-  },
-  minimumMode: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.sm,
-    paddingVertical: spacing.sm,
-    borderTopWidth: 1,
-    borderBottomWidth: 1,
-    borderColor: colors.border,
-  },
-  minimumIcon: {
-    width: touchTarget.min,
-    height: touchTarget.min,
-    alignItems: "center",
-    justifyContent: "center",
-    borderRadius: radius.pill,
-    backgroundColor: colors.disabledSurface,
-  },
-  minimumCopy: { flex: 1, gap: spacing.xxs },
-  stepsCard: { gap: 0, paddingVertical: spacing.xs },
-  supportActions: {
-    flexDirection: "row",
-    justifyContent: "flex-start",
-  },
-  priorityNote: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    gap: spacing.xs,
-  },
-  priorityCopy: { flex: 1 },
+    screen: { paddingTop: spacing.lg, gap: spacing.lg },
+    heading: { gap: spacing.xxs },
+    sourceRow: {
+      minHeight: touchTarget.min,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: spacing.sm,
+    },
+    sourceCopy: { flex: 1 },
+    smallAction: {
+      minHeight: touchTarget.min,
+      justifyContent: "center",
+      paddingHorizontal: spacing.xs,
+    },
+    minimumMode: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: spacing.sm,
+      paddingVertical: spacing.sm,
+      borderTopWidth: 1,
+      borderBottomWidth: 1,
+      borderColor: colors.border,
+    },
+    minimumIcon: {
+      width: touchTarget.min,
+      height: touchTarget.min,
+      alignItems: "center",
+      justifyContent: "center",
+      borderRadius: radius.pill,
+      backgroundColor: colors.disabledSurface,
+    },
+    minimumCopy: { flex: 1, gap: spacing.xxs },
+    stepsCard: { gap: 0, paddingVertical: spacing.xs },
+    supportActions: {
+      flexDirection: "row",
+      justifyContent: "flex-start",
+    },
+    priorityNote: {
+      flexDirection: "row",
+      alignItems: "flex-start",
+      gap: spacing.xs,
+    },
+    priorityCopy: { flex: 1 },
   });
 }

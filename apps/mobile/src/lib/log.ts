@@ -8,6 +8,18 @@ import type { Routine, RoutineStep } from "@pore/shared";
 export type RoutinePeriod = "am" | "pm";
 export type DateKey = string;
 
+export type RoutineSessionSource = "home" | "routine" | "reminder";
+export type RoutineStepSkipReason =
+  | "not_owned"
+  | "ran_out"
+  | "skin_sensitive"
+  | "not_now";
+
+export interface RoutineStepSkip {
+  reason: RoutineStepSkipReason;
+  recordedAt: string;
+}
+
 export interface PeriodLog {
   /** Step keys checked off. */
   done: string[];
@@ -16,6 +28,14 @@ export interface PeriodLog {
    * completion fractions correct even after a re-scan changes the plan.
    */
   total: number;
+  /** Exact scheduled step instances for this date and period. */
+  scheduledStepKeys?: string[];
+  /** Explicit skips never count as completion. */
+  skipped?: Record<string, RoutineStepSkip>;
+  startedAt?: string;
+  /** Set when every scheduled step has an explicit done/skip outcome. */
+  completedAt?: string;
+  source?: "guided" | "quick";
 }
 
 export interface DayLog {
@@ -44,6 +64,26 @@ export interface RoutineLog {
   revision?: RoutineRevision;
   /** Stable routine step key -> explicit ownership answer. */
   stepOwnership?: Record<string, StepOwnership>;
+  schedule?: RoutineSchedule;
+  activeSession?: ActiveRoutineSession;
+}
+
+export interface RoutineSchedule {
+  fingerprint: string;
+  anchorDate: DateKey;
+}
+
+export interface ActiveRoutineSession {
+  id: string;
+  date: DateKey;
+  period: RoutinePeriod;
+  source: RoutineSessionSource;
+  routineFingerprint: string;
+  stepKeys: string[];
+  /** `stepKeys.length` is the review screen after every step has an outcome. */
+  currentIndex: number;
+  startedAt: string;
+  updatedAt: string;
 }
 
 export const emptyLog = (): RoutineLog => ({ days: {} });
@@ -51,12 +91,99 @@ export const emptyLog = (): RoutineLog => ({ days: {} });
 function normalizePeriod(value: unknown): PeriodLog | undefined {
   if (!value || typeof value !== "object") return undefined;
   const { done, total } = value as { done?: unknown; total?: unknown };
-  if (!Array.isArray(done) || typeof total !== "number" || !Number.isFinite(total)) {
+  if (
+    !Array.isArray(done) ||
+    typeof total !== "number" ||
+    !Number.isFinite(total)
+  ) {
+    return undefined;
+  }
+  const period: PeriodLog = {
+    done: done.filter((key): key is string => typeof key === "string"),
+    total: Math.max(0, Math.floor(total)),
+  };
+  const raw = value as Partial<PeriodLog>;
+  if (Array.isArray(raw.scheduledStepKeys)) {
+    period.scheduledStepKeys = raw.scheduledStepKeys.filter(
+      (key): key is string => typeof key === "string",
+    );
+  }
+  if (raw.skipped && typeof raw.skipped === "object") {
+    const skipped: Record<string, RoutineStepSkip> = {};
+    for (const [key, entry] of Object.entries(raw.skipped)) {
+      if (!entry || typeof entry !== "object") continue;
+      const candidate = entry as Partial<RoutineStepSkip>;
+      if (
+        typeof candidate.recordedAt === "string" &&
+        ["not_owned", "ran_out", "skin_sensitive", "not_now"].includes(
+          candidate.reason ?? "",
+        )
+      ) {
+        skipped[key] = candidate as RoutineStepSkip;
+      }
+    }
+    if (Object.keys(skipped).length > 0) period.skipped = skipped;
+  }
+  if (typeof raw.startedAt === "string") period.startedAt = raw.startedAt;
+  if (typeof raw.completedAt === "string") period.completedAt = raw.completedAt;
+  if (raw.source === "guided" || raw.source === "quick") {
+    period.source = raw.source;
+  }
+  return period;
+}
+
+function normalizeSchedule(value: unknown): RoutineSchedule | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const candidate = value as Partial<RoutineSchedule>;
+  return typeof candidate.fingerprint === "string" &&
+    candidate.fingerprint.length > 0 &&
+    isDateKey(candidate.anchorDate)
+    ? {
+        fingerprint: candidate.fingerprint,
+        anchorDate: candidate.anchorDate,
+      }
+    : undefined;
+}
+
+function normalizeActiveSession(
+  value: unknown,
+): ActiveRoutineSession | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const candidate = value as Partial<ActiveRoutineSession>;
+  if (
+    typeof candidate.id !== "string" ||
+    candidate.id.length === 0 ||
+    !isDateKey(candidate.date) ||
+    (candidate.period !== "am" && candidate.period !== "pm") ||
+    !["home", "routine", "reminder"].includes(candidate.source ?? "") ||
+    typeof candidate.routineFingerprint !== "string" ||
+    candidate.routineFingerprint.length === 0 ||
+    !Array.isArray(candidate.stepKeys) ||
+    candidate.stepKeys.length === 0 ||
+    !candidate.stepKeys.every((key) => typeof key === "string") ||
+    new Set(candidate.stepKeys).size !== candidate.stepKeys.length ||
+    typeof candidate.currentIndex !== "number" ||
+    !Number.isFinite(candidate.currentIndex) ||
+    typeof candidate.startedAt !== "string" ||
+    !Number.isFinite(Date.parse(candidate.startedAt)) ||
+    typeof candidate.updatedAt !== "string" ||
+    !Number.isFinite(Date.parse(candidate.updatedAt))
+  ) {
     return undefined;
   }
   return {
-    done: done.filter((key): key is string => typeof key === "string"),
-    total: Math.max(0, Math.floor(total)),
+    id: candidate.id,
+    date: candidate.date,
+    period: candidate.period,
+    source: candidate.source as RoutineSessionSource,
+    routineFingerprint: candidate.routineFingerprint,
+    stepKeys: candidate.stepKeys,
+    currentIndex: Math.max(
+      0,
+      Math.min(candidate.stepKeys.length, Math.floor(candidate.currentIndex)),
+    ),
+    startedAt: candidate.startedAt,
+    updatedAt: candidate.updatedAt,
   };
 }
 
@@ -77,7 +204,8 @@ export function normalizeLog(value: unknown): RoutineLog {
       if (!isDateKey(key) || !day || typeof day !== "object") continue;
       const am = normalizePeriod((day as DayLog).am);
       const pm = normalizePeriod((day as DayLog).pm);
-      if (am || pm) days[key] = { ...(am ? { am } : {}), ...(pm ? { pm } : {}) };
+      if (am || pm)
+        days[key] = { ...(am ? { am } : {}), ...(pm ? { pm } : {}) };
     }
   }
   const log: RoutineLog = { days };
@@ -87,6 +215,10 @@ export function normalizeLog(value: unknown): RoutineLog {
   if (stored.stepOwnership && typeof stored.stepOwnership === "object") {
     log.stepOwnership = stored.stepOwnership;
   }
+  const schedule = normalizeSchedule(stored.schedule);
+  if (schedule) log.schedule = schedule;
+  const activeSession = normalizeActiveSession(stored.activeSession);
+  if (activeSession) log.activeSession = activeSession;
   return log;
 }
 
@@ -113,6 +245,33 @@ export function stepKey(step: RoutineStep): string {
   return `${step.category}:${step.active ?? "base"}`;
 }
 
+export interface RoutineStepInstance {
+  step: RoutineStep;
+  key: string;
+  index: number;
+}
+
+/**
+ * Stable, occurrence-aware identities for a whole period. The first occurrence
+ * deliberately keeps the legacy key so existing completion history remains
+ * attached after this migration.
+ */
+export function routineStepInstances(
+  steps: readonly RoutineStep[],
+): RoutineStepInstance[] {
+  const occurrences = new Map<string, number>();
+  return steps.map((step, index) => {
+    const base = stepKey(step);
+    const occurrence = (occurrences.get(base) ?? 0) + 1;
+    occurrences.set(base, occurrence);
+    return {
+      step,
+      index,
+      key: occurrence === 1 ? base : `${base}#${occurrence}`,
+    };
+  });
+}
+
 /** Immutably toggle one step's checked state for a given day + period. */
 export function toggleStep(
   log: RoutineLog,
@@ -120,17 +279,41 @@ export function toggleStep(
   period: RoutinePeriod,
   key: string,
   total: number,
+  scheduledStepKeys?: string[],
+  updatedAt?: string,
 ): RoutineLog {
   const day = log.days[date] ?? {};
   const current = day[period] ?? { done: [], total };
-  const done = current.done.includes(key)
+  const wasDone = current.done.includes(key);
+  const done = wasDone
     ? current.done.filter((k) => k !== key)
     : [...current.done, key];
+  const skipped = { ...(current.skipped ?? {}) };
+  if (!wasDone) delete skipped[key];
+  const keys = scheduledStepKeys ?? current.scheduledStepKeys;
+  const fullyDone =
+    !!keys &&
+    keys.length > 0 &&
+    keys.every((candidate) => done.includes(candidate));
+  const nextPeriod: PeriodLog = {
+    ...current,
+    done,
+    total: keys?.length ?? total,
+    ...(keys ? { scheduledStepKeys: keys } : {}),
+    ...(Object.keys(skipped).length > 0 ? { skipped } : { skipped: undefined }),
+    ...(updatedAt
+      ? {
+          source: "quick" as const,
+          startedAt: current.startedAt ?? updatedAt,
+          completedAt: fullyDone ? updatedAt : undefined,
+        }
+      : {}),
+  };
   return {
     ...log,
     days: {
       ...log.days,
-      [date]: { ...day, [period]: { done, total } },
+      [date]: { ...day, [period]: nextPeriod },
     },
   };
 }
@@ -147,10 +330,23 @@ export function withRoutineRevision(
   const reconcile = (period: RoutinePeriod): PeriodLog | undefined => {
     const current = day[period];
     if (!current) return undefined;
-    const valid = new Set(revisedRoutine[period].map(stepKey));
+    const valid = new Set(
+      routineStepInstances(revisedRoutine[period]).map(({ key }) => key),
+    );
+    const scheduledStepKeys = current.scheduledStepKeys?.filter((key) =>
+      valid.has(key),
+    );
+    const skipped = Object.fromEntries(
+      Object.entries(current.skipped ?? {}).filter(([key]) => valid.has(key)),
+    );
     return {
+      ...current,
       done: current.done.filter((key) => valid.has(key)),
-      total: valid.size,
+      total: scheduledStepKeys?.length ?? valid.size,
+      ...(scheduledStepKeys ? { scheduledStepKeys } : {}),
+      ...(Object.keys(skipped).length > 0
+        ? { skipped }
+        : { skipped: undefined }),
     };
   };
   return {
@@ -184,7 +380,11 @@ export function withStepOwnership(
 }
 
 export function periodComplete(p?: PeriodLog): boolean {
-  return !!p && p.total > 0 && p.done.length >= p.total;
+  if (!p || p.total <= 0) return false;
+  if (p.scheduledStepKeys?.length) {
+    return p.scheduledStepKeys.every((key) => p.done.includes(key));
+  }
+  return p.done.length >= p.total;
 }
 
 /** Fraction of logged steps done across whichever periods have entries. */
@@ -195,7 +395,14 @@ export function dayFraction(d?: DayLog): number {
   );
   if (periods.length === 0) return 0;
   const done = periods.reduce(
-    (n, p) => n + Math.min(p.done.length, p.total),
+    (n, p) =>
+      n +
+      Math.min(
+        p.scheduledStepKeys?.length
+          ? p.scheduledStepKeys.filter((key) => p.done.includes(key)).length
+          : p.done.length,
+        p.total,
+      ),
     0,
   );
   const total = periods.reduce((n, p) => n + p.total, 0);

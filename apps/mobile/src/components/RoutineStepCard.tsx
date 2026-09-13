@@ -43,6 +43,8 @@ export function RoutineStepCard({
   notOwned = false,
   onNotOwned,
   onAlreadyUse,
+  scheduledToday = true,
+  scheduleLabel,
 }: {
   step: RoutineStep;
   product?: UserProduct;
@@ -58,6 +60,8 @@ export function RoutineStepCard({
   notOwned?: boolean;
   onNotOwned?: () => void;
   onAlreadyUse?: () => void;
+  scheduledToday?: boolean;
+  scheduleLabel?: string;
 }) {
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
@@ -71,21 +75,25 @@ export function RoutineStepCard({
     focusState === "resting" ? "Resting today." : undefined,
     step.irritationRisk === "high" ? "Higher irritation risk." : undefined,
     notOwned ? "Product not currently owned." : undefined,
+    !scheduledToday ? "Not scheduled today." : undefined,
   ]
     .filter(Boolean)
     .join(" ");
   const { animatedStyle: checkStyle, trigger: triggerCheck } = useCheckPop();
-  const statusBadge = supportLabel
-    ? { label: "PRIORITY STEP", tone: "accent" as const }
-    : focusState === "resting"
-      ? { label: "RESTING TODAY", tone: "accent" as const }
-      : product
-        ? { label: "YOUR PRODUCT", tone: "accent" as const }
-        : notOwned
-          ? { label: "NOT OWNED", tone: "accent" as const }
-          : undefined;
+  const statusBadge = !scheduledToday
+    ? { label: "NOT TODAY", tone: "primary" as const }
+    : supportLabel
+      ? { label: "PRIORITY STEP", tone: "accent" as const }
+      : focusState === "resting"
+        ? { label: "RESTING TODAY", tone: "accent" as const }
+        : product
+          ? { label: "YOUR PRODUCT", tone: "accent" as const }
+          : notOwned
+            ? { label: "NOT OWNED", tone: "accent" as const }
+            : undefined;
 
   const toggle = () => {
+    if (!scheduledToday) return;
     triggerCheck();
     const feedback = willCompletePeriod
       ? Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
@@ -106,14 +114,17 @@ export function RoutineStepCard({
       <View style={styles.head}>
         <Pressable
           onPress={toggle}
+          disabled={!scheduledToday}
           hitSlop={8}
           accessibilityRole="checkbox"
-          accessibilityState={{ checked }}
+          accessibilityState={{ checked, disabled: !scheduledToday }}
           aria-checked={checked}
           accessibilityLabel={
-            checked
-              ? `Mark ${displayLabel} not done. ${stateContext}${supportContext}`
-              : `Mark ${displayLabel} done. ${stateContext}${supportContext}`
+            !scheduledToday
+              ? `${displayLabel}. Not scheduled today. ${scheduleLabel ?? ""} ${stateContext}${supportContext}`
+              : checked
+                ? `Mark ${displayLabel} not done. ${stateContext}${supportContext}`
+                : `Mark ${displayLabel} done. ${stateContext}${supportContext}`
           }
           style={styles.checkTarget}
         >
@@ -145,6 +156,11 @@ export function RoutineStepCard({
                 ? `${stepLabel(step)} · ${frequencyLabel(step)}`
                 : `${step.active ? CATEGORY_LABELS[step.category] : "Base step"} · ${frequencyLabel(step)}`}
             </AppText>
+            {!scheduledToday && scheduleLabel ? (
+              <AppText variant="caption" color={colors.textSecondary}>
+                {scheduleLabel}
+              </AppText>
+            ) : null}
             {statusBadge ? (
               <View style={{ alignSelf: "flex-start" }}>
                 <Badge label={statusBadge.label} tone={statusBadge.tone} />

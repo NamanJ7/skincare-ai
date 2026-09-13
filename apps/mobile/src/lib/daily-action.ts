@@ -10,7 +10,7 @@ import type { Routine } from "@pore/shared";
 
 import {
   periodComplete,
-  stepKey,
+  routineStepInstances,
   type DayLog,
   type RoutinePeriod,
 } from "./log";
@@ -55,7 +55,8 @@ export function dailyAction(ctx: {
   const steps = ctx.routine[period];
   const done = ctx.day?.[period]?.done ?? [];
   const complete =
-    steps.length > 0 && steps.every((s) => done.includes(stepKey(s)));
+    steps.length > 0 &&
+    routineStepInstances(steps).every(({ key }) => done.includes(key));
 
   if (steps.length > 0 && !complete) {
     // Streak already counts today once any period is complete, so "finish Day

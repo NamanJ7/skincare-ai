@@ -17,13 +17,14 @@ import {
   type ThemeColors,
 } from "@pore/shared";
 import { frequencyLabel, stepLabel } from "@/lib/labels";
-import { stepKey, type RoutinePeriod } from "@/lib/log";
+import type { RoutinePeriod, RoutineStepInstance } from "@/lib/log";
 import { useCelebration, useCheckPop } from "@/theme/motion";
 import {
   AppText,
   Card,
   Divider,
   ProgressBar,
+  PrimaryButton,
   StepCircle,
   TextButton,
   radius,
@@ -43,26 +44,24 @@ export function TodayRoutineCard({
   steps,
   done,
   onToggle,
+  onStartRoutine,
+  startRoutineLabel,
   onViewRoutine,
 }: {
   title: string;
   period: RoutinePeriod;
-  steps: RoutineStep[];
+  steps: RoutineStepInstance[];
   done: string[];
-  onToggle: (
-    step: RoutineStep,
-    index: number,
-    willCompletePeriod: boolean,
-  ) => void;
+  onToggle: (step: RoutineStepInstance, willCompletePeriod: boolean) => void;
+  onStartRoutine: () => void;
+  startRoutineLabel: string;
   onViewRoutine: () => void;
 }) {
   const { colors, styles } = useTodayRoutineTheme();
   const complete =
-    steps.length > 0 && steps.every((step) => done.includes(stepKey(step)));
+    steps.length > 0 && steps.every((item) => done.includes(item.key));
   const celebrate = useCelebration(period, complete);
-  const completedCount = steps.filter((step) =>
-    done.includes(stepKey(step)),
-  ).length;
+  const completedCount = steps.filter((item) => done.includes(item.key)).length;
   const periodLabel = period === "am" ? "morning" : "evening";
 
   return (
@@ -89,15 +88,14 @@ export function TodayRoutineCard({
 
       {steps.length > 0 ? (
         <View>
-          {steps.map((step, index) => {
-            const key = stepKey(step);
+          {steps.map((item, index) => {
+            const { step, key } = item;
             const checked = done.includes(key);
             const willCompletePeriod =
               !checked &&
               steps.every(
                 (candidate) =>
-                  stepKey(candidate) === key ||
-                  done.includes(stepKey(candidate)),
+                  candidate.key === key || done.includes(candidate.key),
               );
             return (
               <View key={key}>
@@ -106,7 +104,7 @@ export function TodayRoutineCard({
                   step={step}
                   checked={checked}
                   willCompletePeriod={willCompletePeriod}
-                  onToggle={() => onToggle(step, index, willCompletePeriod)}
+                  onToggle={() => onToggle(item, willCompletePeriod)}
                 />
               </View>
             );
@@ -130,6 +128,9 @@ export function TodayRoutineCard({
       )}
 
       <View style={styles.footer}>
+        {!complete && steps.length > 0 ? (
+          <PrimaryButton label={startRoutineLabel} onPress={onStartRoutine} />
+        ) : null}
         <TextButton label="View full routine" onPress={onViewRoutine} />
       </View>
     </Card>
@@ -284,7 +285,7 @@ function createStyles(colors: ThemeColors) {
       flex: 1,
     },
     footer: {
-      alignItems: "flex-start",
+      gap: spacing.xs,
       paddingTop: spacing.xs,
     },
   });

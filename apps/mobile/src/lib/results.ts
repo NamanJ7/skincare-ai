@@ -30,7 +30,7 @@ import {
   type AnswersOnlyReason,
 } from "./analysis-status";
 import { CONCERN_LABELS, GOAL_LABELS } from "./labels";
-import { stepKey, type RoutinePeriod } from "./log";
+import { routineStepInstances, type RoutinePeriod } from "./log";
 import type { ScanHistory } from "./scan-history";
 import type { OnboardingData } from "@/state/onboarding";
 
@@ -193,16 +193,16 @@ export function routineSupportForConcern(
     period: RoutinePeriod,
     steps: readonly RoutineStep[],
   ): RoutineSupportStep[] =>
-    steps
-      .filter((step) =>
+    routineStepInstances(steps)
+      .filter(({ step }) =>
         step.active
           ? activeSupportsConcern(step.active as ActiveKey, concern)
           : baseCategories.has(step.category),
       )
-      .map((step) => ({
+      .map(({ step, key }) => ({
         period,
         step,
-        key: `${period}:${stepKey(step)}`,
+        key: `${period}:${key}`,
       }));
 
   return [...collect("am", routine.am), ...collect("pm", routine.pm)];
@@ -281,7 +281,8 @@ export function regionsByAppearance(
 ): ObservedRegion[] {
   if (detail.length === 0) return observedRegions(fallback);
   const ranked = [...detail].sort(
-    (a, b) => APPEARANCE_RANK[b.appearanceLevel] - APPEARANCE_RANK[a.appearanceLevel],
+    (a, b) =>
+      APPEARANCE_RANK[b.appearanceLevel] - APPEARANCE_RANK[a.appearanceLevel],
   );
   return observedRegions(ranked.map((entry) => entry.region));
 }

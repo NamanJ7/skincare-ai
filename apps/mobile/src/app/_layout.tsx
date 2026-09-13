@@ -52,7 +52,6 @@ import { fontModules } from "@/theme/fonts";
 // than leaving them for iOS to evict whenever it feels storage pressure.
 installScanPhotoDisposer();
 
-
 // Keep the native splash up until the brand fonts are ready, so we never flash
 // system fonts before Fraunces/Inter load.
 SplashScreen.preventAutoHideAsync();
@@ -131,6 +130,7 @@ function AppNavigator() {
       <Stack.Screen name="legal" options={{ presentation: "modal" }} />
       <Stack.Screen name="report" />
       <Stack.Screen name="results" />
+      <Stack.Screen name="routine-session" />
     </Stack>
   );
 }
@@ -154,17 +154,32 @@ function usePersisted(): Persisted | null {
         appearance: null,
       };
       try {
-        const [profile, log, entitlement, checkins, scans, reminders, appearance] =
-          await Promise.all([
-            load<OnboardingData>("profile"),
-            load<RoutineLog>("log"),
-            load<Entitlement>("entitlement"),
-            load<CheckInLog>("checkins"),
-            load<ScanHistory>("scans"),
-            load<ReminderPrefs>("reminders"),
-            load<AppearancePreference>("appearance"),
-          ]);
-        Object.assign(local, { profile, log, entitlement, checkins, scans, reminders, appearance });
+        const [
+          profile,
+          log,
+          entitlement,
+          checkins,
+          scans,
+          reminders,
+          appearance,
+        ] = await Promise.all([
+          load<OnboardingData>("profile"),
+          load<RoutineLog>("log"),
+          load<Entitlement>("entitlement"),
+          load<CheckInLog>("checkins"),
+          load<ScanHistory>("scans"),
+          load<ReminderPrefs>("reminders"),
+          load<AppearancePreference>("appearance"),
+        ]);
+        Object.assign(local, {
+          profile,
+          log,
+          entitlement,
+          checkins,
+          scans,
+          reminders,
+          appearance,
+        });
 
         // New device / fresh install with a restored session: fill locally-empty
         // keys from the account backup. Local data always wins when present.
