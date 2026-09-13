@@ -13,6 +13,10 @@ import type {
 import { Disclaimer } from "@/components/Disclaimer";
 import { ProductsSection } from "@/components/ProductsSection";
 import { RoutineComplete } from "@/components/RoutineComplete";
+import {
+  RoutineReactionSheet,
+  routineReactionLabel,
+} from "@/components/RoutineReactionSheet";
 import { RoutineStepCard } from "@/components/RoutineStepCard";
 import { isStrongActiveStep } from "@/lib/adjustments";
 import { isCurrentScanAnalysis } from "@/lib/analysis-status";
@@ -20,6 +24,7 @@ import { track } from "@/lib/analytics";
 import { CONCERN_LABELS } from "@/lib/labels";
 import {
   missedYesterday,
+  routineReactionPending,
   routineStepInstances,
   shiftKey,
   todayKey,
@@ -87,6 +92,7 @@ export default function RoutineTab() {
   const [section, setSection] = useState<RoutineSection>(
     params.section === "products" ? "products" : "routine",
   );
+  const [reactionOpen, setReactionOpen] = useState(false);
 
   useEffect(() => {
     if (params.period === "am" || params.period === "pm") {
@@ -132,7 +138,8 @@ export default function RoutineTab() {
     void ensureSchedule(fingerprint, today);
   }, [ensureSchedule, fingerprint, today]);
   const time: RoutineTime = period === "am" ? "AM" : "PM";
-  const done = dayLog(today)?.[period]?.done ?? [];
+  const currentPeriodLog = dayLog(today)?.[period];
+  const done = currentPeriodLog?.done ?? [];
   const essentialsFocus = params.focus === "essentials";
   const priorityLabel = priority ? CONCERN_LABELS[priority] : undefined;
   const supportedStepKeys = new Set(
@@ -393,13 +400,22 @@ export default function RoutineTab() {
                           surface: "routine",
                         });
                       }
-                      void toggle(
-                        period,
-                        key,
-                        scheduledKeys.length,
-                        today,
-                        scheduledKeys,
-                      );
+                      void (async () => {
+                        const persisted = await toggle(
+                          period,
+                          key,
+                          scheduledKeys.length,
+                          today,
+                          scheduledKeys,
+                        );
+                        if (
+                          persisted &&
+                          willCompletePeriod &&
+                          routineReactionPending(currentPeriodLog)
+                        ) {
+                          setReactionOpen(true);
+                        }
+                      })();
                     }}
                     adjustments={adjustments.filter(
                       (adjustment) =>
@@ -435,15 +451,34 @@ export default function RoutineTab() {
           </Card>
 
           {complete ? (
-            <RoutineComplete
-              celebrate={celebrate}
-              streak={streak}
-              body={
-                period === "am"
-                  ? "Your evening routine will be ready later."
-                  : undefined
-              }
-            />
+            <View style={styles.completionBlock}>
+              <RoutineComplete
+                celebrate={celebrate}
+                streak={streak}
+                body={
+                  period === "am"
+                    ? "Your evening routine will be ready later."
+                    : undefined
+                }
+              />
+              {currentPeriodLog?.reaction ? (
+                <View style={styles.reactionResponse}>
+                  <AppText variant="caption" color={colors.textSecondary}>
+                    You reported:{" "}
+                    {routineReactionLabel(currentPeriodLog.reaction.kind)}.
+                  </AppText>
+                  <TextButton
+                    label="Change response"
+                    onPress={() => setReactionOpen(true)}
+                  />
+                </View>
+              ) : currentPeriodLog?.reactionDismissedAt ? (
+                <TextButton
+                  label="Add how your skin felt"
+                  onPress={() => setReactionOpen(true)}
+                />
+              ) : null}
+            </View>
           ) : null}
 
           <View style={styles.supportActions}>
@@ -488,6 +523,13 @@ export default function RoutineTab() {
           <Disclaimer />
         </>
       )}
+      <RoutineReactionSheet
+        visible={reactionOpen}
+        date={today}
+        period={period}
+        source="quick"
+        onClose={() => setReactionOpen(false)}
+      />
     </Screen>
   );
 }
@@ -560,6 +602,8 @@ function createStyles(colors: ThemeColors) {
     },
     minimumCopy: { flex: 1, gap: spacing.xxs },
     stepsCard: { gap: 0, paddingVertical: spacing.xs },
+    completionBlock: { alignItems: "center", gap: spacing.xxs },
+    reactionResponse: { alignItems: "center", gap: spacing.xxs },
     supportActions: {
       flexDirection: "row",
       justifyContent: "flex-start",

@@ -13,10 +13,13 @@ import type { Routine } from "@pore/shared";
 import {
   consistency,
   emptyLog,
+  latestRoutineReaction as findLatestRoutineReaction,
   normalizeLog,
   streakFrom,
   todayKey,
   toggleStep,
+  withRoutineReaction,
+  withRoutineReactionDismissed,
   withRoutineRevision,
   withStepOwnership,
   type DateKey,
@@ -24,6 +27,8 @@ import {
   type RoutineRevision,
   type RoutineLog,
   type RoutinePeriod,
+  type RoutineReactionKind,
+  type LatestRoutineReaction,
   type RoutineSessionSource,
   type RoutineStepSkipReason,
 } from "@/lib/log";
@@ -69,6 +74,16 @@ interface RoutineLogContextValue {
   finishSession: () => Promise<boolean>;
   abandonExpiredSession: (now?: Date) => Promise<boolean>;
   abandonSession: () => Promise<boolean>;
+  recordReaction: (
+    date: DateKey,
+    period: RoutinePeriod,
+    kind: RoutineReactionKind,
+  ) => Promise<boolean>;
+  dismissReaction: (date: DateKey, period: RoutinePeriod) => Promise<boolean>;
+  latestRoutineReaction: (
+    today: DateKey,
+    lookbackDays: number,
+  ) => LatestRoutineReaction | undefined;
   acceptRevision: (revision: RoutineRevision, revisedRoutine?: Routine) => void;
   markStepNotOwned: (stepKey: string) => void;
   clearStepOwnership: (stepKey: string) => void;
@@ -187,6 +202,27 @@ export function RoutineLogProvider({
             : current,
         ),
       abandonSession: () => commit(abandonRoutineSession),
+      recordReaction: (date, period, kind) =>
+        commit((current) =>
+          withRoutineReaction(
+            current,
+            date,
+            period,
+            kind,
+            new Date().toISOString(),
+          ),
+        ),
+      dismissReaction: (date, period) =>
+        commit((current) =>
+          withRoutineReactionDismissed(
+            current,
+            date,
+            period,
+            new Date().toISOString(),
+          ),
+        ),
+      latestRoutineReaction: (date, lookbackDays) =>
+        findLatestRoutineReaction(log, date, lookbackDays),
       acceptRevision: (revision, revisedRoutine) => {
         void commit((current) =>
           withRoutineRevision(current, revision, revisedRoutine),

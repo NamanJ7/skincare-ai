@@ -3,7 +3,7 @@
  * "YYYY-MM-DD" keys (a routine done at 11pm belongs to that calendar day, so
  * never derive keys via toISOString(), which is UTC).
  */
-import type { Routine, RoutineStep } from "@pore/shared";
+import { ACTIVES, type Routine, type RoutineStep } from "@pore/shared";
 
 export type RoutinePeriod = "am" | "pm";
 export type DateKey = string;
@@ -17,6 +17,17 @@ export type RoutineStepSkipReason =
 
 export interface RoutineStepSkip {
   reason: RoutineStepSkipReason;
+  recordedAt: string;
+}
+
+export type RoutineReactionKind =
+  | "comfortable"
+  | "tight_dry"
+  | "mild_irritation"
+  | "serious_reaction";
+
+export interface RoutineReaction {
+  kind: RoutineReactionKind;
   recordedAt: string;
 }
 
@@ -36,6 +47,10 @@ export interface PeriodLog {
   /** Set when every scheduled step has an explicit done/skip outcome. */
   completedAt?: string;
   source?: "guided" | "quick";
+  /** Optional self-report captured after this routine; never scan evidence. */
+  reaction?: RoutineReaction;
+  /** A persisted opt-out prevents the optional prompt from nagging. */
+  reactionDismissedAt?: string;
 }
 
 export interface DayLog {
@@ -128,6 +143,27 @@ function normalizePeriod(value: unknown): PeriodLog | undefined {
   if (typeof raw.completedAt === "string") period.completedAt = raw.completedAt;
   if (raw.source === "guided" || raw.source === "quick") {
     period.source = raw.source;
+  }
+  if (raw.reaction && typeof raw.reaction === "object") {
+    const reaction = raw.reaction as Partial<RoutineReaction>;
+    if (
+      [
+        "comfortable",
+        "tight_dry",
+        "mild_irritation",
+        "serious_reaction",
+      ].includes(reaction.kind ?? "") &&
+      typeof reaction.recordedAt === "string" &&
+      Number.isFinite(Date.parse(reaction.recordedAt))
+    ) {
+      period.reaction = reaction as RoutineReaction;
+    }
+  }
+  if (
+    typeof raw.reactionDismissedAt === "string" &&
+    Number.isFinite(Date.parse(raw.reactionDismissedAt))
+  ) {
+    period.reactionDismissedAt = raw.reactionDismissedAt;
   }
   return period;
 }
@@ -377,6 +413,113 @@ export function withStepOwnership(
       ? { stepOwnership }
       : { stepOwnership: undefined }),
   };
+}
+
+/** Save a one-tap, explicitly self-reported post-routine reaction. */
+export function withRoutineReaction(
+  log: RoutineLog,
+  date: DateKey,
+  period: RoutinePeriod,
+  kind: RoutineReactionKind,
+  recordedAt: string,
+): RoutineLog {
+  const day = log.days[date];
+  const current = day?.[period];
+  if (!day || !current) return log;
+  return {
+    ...log,
+    days: {
+      ...log.days,
+      [date]: {
+        ...day,
+        [period]: {
+          ...current,
+          reaction: { kind, recordedAt },
+          reactionDismissedAt: undefined,
+        },
+      },
+    },
+  };
+}
+
+/** Persist dismissal and remove any answer replaced by an explicit Skip. */
+export function withRoutineReactionDismissed(
+  log: RoutineLog,
+  date: DateKey,
+  period: RoutinePeriod,
+  dismissedAt: string,
+): RoutineLog {
+  const day = log.days[date];
+  const current = day?.[period];
+  if (!day || !current) return log;
+  return {
+    ...log,
+    days: {
+      ...log.days,
+      [date]: {
+        ...day,
+        [period]: {
+          ...current,
+          reaction: undefined,
+          reactionDismissedAt: dismissedAt,
+        },
+      },
+    },
+  };
+}
+
+export function routineReactionPending(period?: PeriodLog): boolean {
+  return !period?.reaction && !period?.reactionDismissedAt;
+}
+
+export interface LatestRoutineReaction {
+  date: DateKey;
+  period: RoutinePeriod;
+  reaction: RoutineReaction;
+  /** Derived from stored scheduled step identities, not from scan/check-in data. */
+  containedStrongActive: boolean;
+}
+
+function isStrongActiveStepKey(key: string): boolean {
+  const separator = key.indexOf(":");
+  if (separator < 0) return false;
+  const active = key.slice(separator + 1).replace(/#\d+$/, "");
+  return (
+    active in ACTIVES &&
+    ACTIVES[active as keyof typeof ACTIVES].isStrongActive === true
+  );
+}
+
+/** Latest reaction within an inclusive local-calendar lookback window. */
+export function latestRoutineReaction(
+  log: RoutineLog,
+  today: DateKey,
+  lookbackDays: number,
+): LatestRoutineReaction | undefined {
+  const candidates: LatestRoutineReaction[] = [];
+  const window = Math.max(0, Math.floor(lookbackDays));
+  for (let offset = 0; offset <= window; offset += 1) {
+    const date = shiftKey(today, -offset);
+    const day = log.days[date];
+    for (const period of ["am", "pm"] as const) {
+      const entry = day?.[period];
+      if (!entry?.reaction) continue;
+      const keys = entry.scheduledStepKeys ?? [
+        ...entry.done,
+        ...Object.keys(entry.skipped ?? {}),
+      ];
+      candidates.push({
+        date,
+        period,
+        reaction: entry.reaction,
+        containedStrongActive: keys.some(isStrongActiveStepKey),
+      });
+    }
+  }
+  return candidates.sort(
+    (a, b) =>
+      Date.parse(b.reaction.recordedAt) - Date.parse(a.reaction.recordedAt),
+  )[0];
 }
 
 export function periodComplete(p?: PeriodLog): boolean {

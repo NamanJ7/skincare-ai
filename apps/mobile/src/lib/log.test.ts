@@ -6,6 +6,7 @@ import {
   dayFraction,
   emptyLog,
   isDateKey,
+  latestRoutineReaction,
   normalizeLog,
   periodComplete,
   shiftKey,
@@ -13,8 +14,11 @@ import {
   streakFrom,
   todayKey,
   toggleStep,
+  routineReactionPending,
   weekDays,
   withRoutineRevision,
+  withRoutineReaction,
+  withRoutineReactionDismissed,
   withStepOwnership,
   type RoutineLog,
 } from "./log";
@@ -239,6 +243,123 @@ describe("routine preferences", () => {
     expect(
       withStepOwnership(marked, "serum:vitamin_c", undefined).stepOwnership,
     ).toBeUndefined();
+  });
+});
+
+describe("routine reactions", () => {
+  const date = "2026-07-10";
+  const at = "2026-07-10T20:00:00.000Z";
+
+  function resolvedLog(): RoutineLog {
+    return {
+      days: {
+        [date]: {
+          pm: {
+            done: ["cleanser:base", "treatment:retinoid"],
+            total: 2,
+            scheduledStepKeys: ["cleanser:base", "treatment:retinoid"],
+            completedAt: at,
+          },
+        },
+      },
+    };
+  }
+
+  it("records an answer and lets a later answer replace it", () => {
+    const comfortable = withRoutineReaction(
+      resolvedLog(),
+      date,
+      "pm",
+      "comfortable",
+      at,
+    );
+    const changed = withRoutineReaction(
+      comfortable,
+      date,
+      "pm",
+      "tight_dry",
+      "2026-07-10T20:01:00.000Z",
+    );
+    expect(changed.days[date].pm?.reaction?.kind).toBe("tight_dry");
+    expect(changed.days[date].pm?.reactionDismissedAt).toBeUndefined();
+  });
+
+  it("persists dismissal so the prompt does not repeat", () => {
+    const dismissed = withRoutineReactionDismissed(
+      resolvedLog(),
+      date,
+      "pm",
+      at,
+    );
+    expect(routineReactionPending(dismissed.days[date].pm)).toBe(false);
+    expect(dismissed.days[date].pm?.reaction).toBeUndefined();
+    expect(routineReactionPending(undefined)).toBe(true);
+  });
+
+  it("finds the latest reaction and derives strong-active context from scheduled keys", () => {
+    let log = withRoutineReaction(
+      resolvedLog(),
+      date,
+      "pm",
+      "mild_irritation",
+      at,
+    );
+    log.days["2026-07-09"] = {
+      am: {
+        done: ["cleanser:base"],
+        total: 1,
+        reaction: {
+          kind: "comfortable",
+          recordedAt: "2026-07-09T08:00:00.000Z",
+        },
+      },
+    };
+    expect(latestRoutineReaction(log, date, 3)).toMatchObject({
+      date,
+      period: "pm",
+      containedStrongActive: true,
+      reaction: { kind: "mild_irritation" },
+    });
+    expect(latestRoutineReaction(log, "2026-07-14", 3)).toBeUndefined();
+  });
+
+  it("keeps completion and consistency math unchanged", () => {
+    const before = resolvedLog();
+    const after = withRoutineReaction(
+      before,
+      date,
+      "pm",
+      "serious_reaction",
+      at,
+    );
+    expect(periodComplete(after.days[date].pm)).toBe(
+      periodComplete(before.days[date].pm),
+    );
+    expect(dayFraction(after.days[date])).toBe(dayFraction(before.days[date]));
+  });
+
+  it("normalizes valid reactions and drops only malformed additions", () => {
+    const normalized = normalizeLog({
+      days: {
+        [date]: {
+          am: {
+            done: ["cleanser:base"],
+            total: 1,
+            reaction: { kind: "invented", recordedAt: "bad" },
+            reactionDismissedAt: "bad",
+          },
+          pm: {
+            done: ["cleanser:base"],
+            total: 1,
+            reaction: { kind: "comfortable", recordedAt: at },
+          },
+        },
+      },
+    });
+    expect(normalized.days[date].am?.done).toEqual(["cleanser:base"]);
+    expect(normalized.days[date].am?.reaction).toBeUndefined();
+    expect(normalized.days[date].am?.reactionDismissedAt).toBeUndefined();
+    expect(normalized.days[date].pm?.reaction?.kind).toBe("comfortable");
   });
 });
 

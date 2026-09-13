@@ -3,13 +3,14 @@
  * how the journey is going, and when the next check-in happens.
  */
 import { router } from "expo-router";
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { StyleSheet, View } from "react-native";
 
 import { AdjustmentCard } from "@/components/AdjustmentCard";
 import { DailyActionCard } from "@/components/DailyActionCard";
 import { Disclaimer } from "@/components/Disclaimer";
 import { EscalationCard } from "@/components/EscalationCard";
+import { RoutineReactionSheet } from "@/components/RoutineReactionSheet";
 import { TodayRoutineCard } from "@/components/TodayRoutineCard";
 import {
   isStrongActiveStep,
@@ -24,6 +25,7 @@ import { scanAccess } from "@/lib/gate";
 import { deriveJourney } from "@/lib/journey";
 import {
   periodComplete,
+  routineReactionPending,
   routineStepInstances,
   shiftKey,
   todayKey,
@@ -100,11 +102,16 @@ function dateFromKey(value: string): Date {
 export default function TodayTab() {
   const colors = useThemeColors();
   const { data } = useOnboarding();
-  const { dayLog, streak, log, toggle, ensureSchedule } = useRoutineLog();
+  const { dayLog, streak, log, toggle, ensureSchedule, latestRoutineReaction } =
+    useRoutineLog();
   const { checkIns, latest, due, daysUntilDue } = useCheckIns();
   const { history } = useScanHistory();
   const { entitlement } = useEntitlement();
   const { prefs: reminderPrefs } = useReminders();
+  const [reactionPrompt, setReactionPrompt] = useState<{
+    date: string;
+    period: "am" | "pm";
+  }>();
 
   const now = new Date();
   const today = todayKey(now);
@@ -149,6 +156,9 @@ export default function TodayTab() {
     ? data.plan?.assessment
     : undefined;
   const flags = redFlags(latest, currentAssessment);
+  const latestReaction = latestRoutineReaction(today, 3);
+  const seriousRoutineReaction =
+    latestReaction?.reaction.kind === "serious_reaction";
   const status = deriveSkinStatus(checkIns, today);
   const dismissedKinds =
     reminderPrefs.dismissed?.date === today
@@ -162,8 +172,9 @@ export default function TodayTab() {
     today,
     log,
     latestCheckIn: latest,
+    latestRoutineReaction: latestReaction,
     routine: scheduledRoutine,
-    escalated: flags.escalate,
+    escalated: flags.escalate || seriousRoutineReaction,
     dismissedKinds,
     period,
   });
@@ -240,9 +251,14 @@ export default function TodayTab() {
         )}
       </Enter>
 
-      {flags.escalate ? (
+      {flags.escalate || seriousRoutineReaction ? (
         <EscalationCard
-          reasons={flags.reasons}
+          reasons={[
+            ...flags.reasons,
+            ...(seriousRoutineReaction
+              ? ["burning, pain, or a spreading rash after a routine"]
+              : []),
+          ]}
           hasStrongActives={hasStrongActives}
         />
       ) : null}
@@ -274,13 +290,22 @@ export default function TodayTab() {
                 surface: "today",
               });
             }
-            void toggle(
-              period,
-              key,
-              steps.length,
-              routineDate,
-              steps.map((candidate) => candidate.key),
-            );
+            void (async () => {
+              const persisted = await toggle(
+                period,
+                key,
+                steps.length,
+                routineDate,
+                steps.map((candidate) => candidate.key),
+              );
+              if (
+                persisted &&
+                willCompletePeriod &&
+                routineReactionPending(log.days[routineDate]?.[period])
+              ) {
+                setReactionPrompt({ date: routineDate, period });
+              }
+            })();
           }}
           startRoutineLabel={
             resumable
@@ -343,6 +368,13 @@ export default function TodayTab() {
       </Enter>
 
       <Disclaimer />
+      <RoutineReactionSheet
+        visible={!!reactionPrompt}
+        date={reactionPrompt?.date ?? today}
+        period={reactionPrompt?.period ?? period}
+        source="quick"
+        onClose={() => setReactionPrompt(undefined)}
+      />
     </Screen>
   );
 }

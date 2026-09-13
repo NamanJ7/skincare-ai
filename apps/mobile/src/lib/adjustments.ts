@@ -8,6 +8,7 @@ import {
   periodComplete,
   shiftKey,
   type DateKey,
+  type LatestRoutineReaction,
   type RoutineLog,
   type RoutinePeriod,
   type RoutineRevisionKind,
@@ -34,6 +35,8 @@ export interface RoutineAdjustmentContext {
   dismissedKinds: AdjustmentKind[];
   /** Supplied by Home for a deterministic "current routine" destination. */
   period?: RoutinePeriod;
+  /** Latest post-routine self-report; separate from check-ins and scans. */
+  latestRoutineReaction?: LatestRoutineReaction;
 }
 
 const RECENT_IRRITATION = new Set(["stinging", "redness", "itching"]);
@@ -63,7 +66,12 @@ function hasLoggedDay(log: RoutineLog, today: DateKey, days = 7): boolean {
 export function routineAdjustment(
   ctx: RoutineAdjustmentContext,
 ): RoutineAdjustment | null {
-  if (ctx.escalated) return null;
+  if (
+    ctx.escalated ||
+    ctx.latestRoutineReaction?.reaction.kind === "serious_reaction"
+  ) {
+    return null;
+  }
   const dismissed = new Set(ctx.dismissedKinds);
   const hasStrongActive = [...ctx.routine.am, ...ctx.routine.pm].some(
     isStrongActiveStep,
@@ -79,6 +87,49 @@ export function routineAdjustment(
     ctx.latestCheckIn.irritationSigns.some((sign) =>
       RECENT_IRRITATION.has(sign),
     );
+  const reactionAge = ctx.latestRoutineReaction
+    ? daysBetween(ctx.latestRoutineReaction.date, ctx.today)
+    : Number.POSITIVE_INFINITY;
+  const recentMildReaction =
+    ctx.latestRoutineReaction?.reaction.kind === "mild_irritation" &&
+    reactionAge >= 0 &&
+    reactionAge <= 3;
+  const recentDryReaction =
+    ctx.latestRoutineReaction?.reaction.kind === "tight_dry" &&
+    reactionAge >= 0 &&
+    reactionAge <= 2;
+
+  if (
+    !dismissed.has("pause_strong_actives") &&
+    recentMildReaction &&
+    ctx.latestRoutineReaction?.containedStrongActive
+  ) {
+    return {
+      kind: "pause_strong_actives",
+      headline: "Give your skin a quieter few nights",
+      body: "You reported mild discomfort after a routine with a strong active. Recovery Mode can pause strong actives for a few nights.",
+      cta: "Review Recovery Mode",
+      href: "/(tabs)/routine?period=pm",
+      period: "pm",
+    };
+  }
+
+  if (
+    !dismissed.has("simplify_today") &&
+    (recentDryReaction || recentMildReaction)
+  ) {
+    const period = ctx.period ?? "pm";
+    return {
+      kind: "simplify_today",
+      headline: "Make your next routine gentler",
+      body: recentDryReaction
+        ? "You reported that your skin felt a little tight or dry. Minimum Mode can keep the next routine to the essentials."
+        : "You reported mild discomfort after your routine. Minimum Mode can keep the next routine simple.",
+      cta: "Review Minimum Mode",
+      href: `/(tabs)/routine?period=${period}&focus=essentials`,
+      period,
+    };
+  }
 
   if (
     !dismissed.has("pause_strong_actives") &&

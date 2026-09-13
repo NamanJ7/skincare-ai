@@ -7,11 +7,16 @@ import { Modal, Pressable, StyleSheet, View } from "react-native";
 
 import type { ThemeColors } from "@pore/shared";
 import { RoutineComplete } from "@/components/RoutineComplete";
+import {
+  RoutineReactionSheet,
+  routineReactionLabel,
+} from "@/components/RoutineReactionSheet";
 import { activePeriod } from "@/lib/daily-action";
 import { track } from "@/lib/analytics";
 import { frequencyLabel, stepLabel } from "@/lib/labels";
 import {
   periodComplete,
+  routineReactionPending,
   routineStepInstances,
   todayKey,
   type RoutinePeriod,
@@ -58,6 +63,8 @@ interface CompletionSummary {
   completed: number;
   total: number;
   full: boolean;
+  date: string;
+  period: RoutinePeriod;
 }
 
 export default function RoutineSessionScreen() {
@@ -82,6 +89,7 @@ export default function RoutineSessionScreen() {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState(false);
   const [completion, setCompletion] = useState<CompletionSummary>();
+  const [reactionOpen, setReactionOpen] = useState(false);
   const initializationRef = useRef("");
   const resumedRef = useRef("");
   const endingRef = useRef(false);
@@ -203,6 +211,7 @@ export default function RoutineSessionScreen() {
   };
 
   if (completion) {
+    const completionPeriodLog = log.days[completion.date]?.[completion.period];
     return (
       <Screen contentStyle={styles.screen}>
         {completion.full ? (
@@ -227,9 +236,33 @@ export default function RoutineSessionScreen() {
             </AppText>
           </View>
         )}
+        {completionPeriodLog?.reaction ? (
+          <View style={styles.reactionResponse}>
+            <AppText variant="caption" color={colors.textSecondary}>
+              You reported:{" "}
+              {routineReactionLabel(completionPeriodLog.reaction.kind)}.
+            </AppText>
+            <TextButton
+              label="Change response"
+              onPress={() => setReactionOpen(true)}
+            />
+          </View>
+        ) : completionPeriodLog?.reactionDismissedAt ? (
+          <TextButton
+            label="Add how your skin felt"
+            onPress={() => setReactionOpen(true)}
+          />
+        ) : null}
         <PrimaryButton
           label="Back to Home"
           onPress={() => router.replace("/(tabs)")}
+        />
+        <RoutineReactionSheet
+          visible={reactionOpen}
+          date={completion.date}
+          period={completion.period}
+          source="guided"
+          onClose={() => setReactionOpen(false)}
         />
       </Screen>
     );
@@ -378,7 +411,10 @@ export default function RoutineSessionScreen() {
       completed: completedCount,
       total: activeSession.stepKeys.length,
       full,
+      date: activeSession.date,
+      period: activeSession.period,
     });
+    setReactionOpen(routineReactionPending(periodLog));
     setSaving(false);
   }
 
@@ -650,6 +686,7 @@ function createStyles(colors: ThemeColors) {
       gap: spacing.sm,
       paddingVertical: spacing.xl,
     },
+    reactionResponse: { alignItems: "center", gap: spacing.xxs },
     centered: { textAlign: "center" },
     scrim: {
       flex: 1,
