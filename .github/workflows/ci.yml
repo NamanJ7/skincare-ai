@@ -32,9 +32,12 @@ jobs:
       # the version lives in exactly one place.
       - uses: pnpm/action-setup@v4
 
+      # Node 20 reached end-of-life in April 2026. The repo's `engines` field
+      # says >=20, but nobody develops against 20 any more, so a gate pinned
+      # there validates a runtime the product will never run on.
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: pnpm
 
       - run: pnpm install --frozen-lockfile

@@ -309,3 +309,13 @@ request, but GitHub will not stop a merge on a red run until branch protection
 is enabled on `main` — Settings → Branches → require the
 `typecheck · test · lint · build` check. That is a repository setting, not
 something a commit can do. Until it is on, the gate is advisory.
+
+### CI's actions still target the deprecated Node 20 runtime
+`actions/checkout@v4`, `actions/setup-node@v4` and `pnpm/action-setup@v4` all
+declare Node 20 as their JS runtime. GitHub currently force-runs them on Node 24
+and prints a deprecation warning on every run; when it stops doing that, the
+workflow breaks. The fix is bumping each action to the major that targets Node
+24 — deliberately not done blind, because naming a tag that does not exist turns
+the gate red for a warning that is not yet failing anything. Check the current
+majors and bump them together. (The build itself already runs on Node 22; only
+the actions' own runtime is stale.)
