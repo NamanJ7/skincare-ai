@@ -76,7 +76,50 @@ export const CAPTURE_TUNING = {
   minSkinCoverage: 0.55,
   /** Distance in (Cb,Cr) from the skin centre before we call it a colour cast. */
   maxChromaDistance: 22,
+  /**
+   * How much brighter a flash-lit frame must be than its ambient reference
+   * before we are willing to call the light controlled. 1.15 is a 15% lift —
+   * enough to be a real contribution rather than sensor noise or a flicker.
+   */
+  minFlashLumaRatio: 1.15,
+  /**
+   * Floor on the ambient reference before dividing. In a dark room the
+   * reference is near zero and an unclamped ratio explodes; clamping means a
+   * genuinely dark room still classifies as flash-lit (which it is) without the
+   * arithmetic doing something silly.
+   */
+  minReferenceLuma: 8,
 } as const;
+
+/** What actually lit a capture, as opposed to what the app intended to light it with. */
+export type CaptureIlluminant = "screen_flash" | "ambient";
+
+/**
+ * Decide what lit a frame, by comparing it against an ambient reference shot
+ * moments earlier.
+ *
+ * This exists because the label used to be a *declaration*: the app set it from
+ * a compile-time constant and the progress engine trusted it as the only gate on
+ * whether two sessions may be subtracted. That is fragile in a way no device
+ * check fixes, because "we asked for a flash" and "our light actually dominated
+ * this frame" are different claims. A screen flash contributes nothing
+ * measurable in daylight; it contributes a great deal in a dark bathroom. Two
+ * sessions shot in those two places are not comparable even if the flash fired
+ * perfectly both times.
+ *
+ * Bias is deliberately toward `ambient`. Wrongly saying `ambient` costs a
+ * comparison the user might have been able to have; wrongly saying
+ * `screen_flash` lets the progress engine subtract two photos taken under
+ * different light and report a change that did not happen — which is the exact
+ * confabulation this product is built to refuse.
+ */
+export function classifyIlluminant(referenceLuma: number, litLuma: number): CaptureIlluminant {
+  if (!Number.isFinite(referenceLuma) || !Number.isFinite(litLuma) || litLuma <= 0) {
+    return "ambient";
+  }
+  const reference = Math.max(referenceLuma, CAPTURE_TUNING.minReferenceLuma);
+  return litLuma >= reference * CAPTURE_TUNING.minFlashLumaRatio ? "screen_flash" : "ambient";
+}
 
 /**
  * Skin chroma is close to tone-invariant — what changes with tone is luma, not

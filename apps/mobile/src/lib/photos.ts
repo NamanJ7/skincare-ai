@@ -10,6 +10,7 @@ import { Directory, File, Paths } from "expo-file-system";
 import { ImageManipulator, SaveFormat } from "expo-image-manipulator";
 import {
   captureHint,
+  classifyIlluminant,
   type CaptureAngle,
   type PhotoQuality,
   type SkinTone,
@@ -72,16 +73,24 @@ export function newSessionId(): string {
 /**
  * Measure a raw camera frame, and if it passes, compress and store it.
  *
- * `illuminant` records whether the shot was lit by the app's screen flash — a
- * known, repeatable light — or by whatever the room had. Only screen-flash
- * captures are comparable to each other across sessions, so the distinction
- * travels with the photo instead of being assumed.
+ * The illuminant is **measured, not declared**. `referenceLuma` is the mean luma
+ * of an ambient frame captured moments earlier, with none of our light on it;
+ * comparing it against this frame's luma is what decides whether our light
+ * actually dominated. That distinction used to be a compile-time constant, and
+ * the progress engine trusts it as the only gate on whether two sessions may be
+ * subtracted — so "we asked for a flash" was standing in for "the light was
+ * controlled and repeatable", which are not the same claim in daylight.
  */
 export async function processCapture(
   picture: CameraCapturedPicture,
   angle: CaptureAngle,
   tone: SkinTone,
-  illuminant: PhotoQuality["illuminant"],
+  /**
+   * Mean luma of an ambient reference frame taken just before this one. Pass
+   * `NaN` when no reference could be captured — `classifyIlluminant` then falls
+   * back to `ambient`, which costs a comparison rather than inventing one.
+   */
+  referenceLuma: number,
   /** Which capture session this photo belongs to — see `newSessionId`. */
   sessionId: string,
   /**
@@ -98,7 +107,7 @@ export async function processCapture(
     angle,
     score: score.score,
     flags: score.flags,
-    illuminant,
+    illuminant: classifyIlluminant(referenceLuma, score.metrics.meanLuma),
   };
 
   const hint = captureHint(score.flags);

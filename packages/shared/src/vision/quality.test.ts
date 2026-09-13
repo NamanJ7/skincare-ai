@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { scoreFrame, captureHint, CAPTURE_TUNING } from "./quality";
+import { scoreFrame, captureHint, classifyIlluminant, CAPTURE_TUNING } from "./quality";
 import type { SkinTone } from "../types/intake";
 
 const W = 64;
@@ -146,5 +146,49 @@ describe("captureHint", () => {
   it("names the specific fixable problem", () => {
     expect(captureHint(["too_far"])).toMatch(/closer/);
     expect(captureHint(["dark"])).toMatch(/dark/i);
+  });
+});
+
+/**
+ * The illuminant label is the only gate `isMeasurable` in the progress engine
+ * applies before subtracting two sessions, so a wrong `screen_flash` is how the
+ * app would end up confabulating progress. These lock in that the bias runs the
+ * other way.
+ */
+describe("classifyIlluminant", () => {
+  const { minFlashLumaRatio, minReferenceLuma } = CAPTURE_TUNING;
+
+  it("calls a real lift screen_flash", () => {
+    // A dim room at 60, lit to 110 — the light clearly contributed.
+    expect(classifyIlluminant(60, 110)).toBe("screen_flash");
+  });
+
+  it("refuses to call daylight a flash", () => {
+    // Outdoors: the screen adds nothing measurable, so the two sessions are not
+    // comparable however faithfully the flash fired.
+    expect(classifyIlluminant(180, 185)).toBe("ambient");
+  });
+
+  it("still recognises a flash in a dark room, where the reference is near zero", () => {
+    expect(classifyIlluminant(1, 120)).toBe("screen_flash");
+    expect(classifyIlluminant(0, 120)).toBe("screen_flash");
+  });
+
+  it("does not let a near-zero reference manufacture a flash out of a dark frame", () => {
+    // Clamping the denominator must not turn "we captured nothing" into a claim.
+    expect(classifyIlluminant(0, minReferenceLuma * minFlashLumaRatio * 0.9)).toBe("ambient");
+  });
+
+  it("treats the threshold as a floor, not a midpoint", () => {
+    const ref = 100;
+    expect(classifyIlluminant(ref, ref * minFlashLumaRatio)).toBe("screen_flash");
+    expect(classifyIlluminant(ref, ref * minFlashLumaRatio - 0.01)).toBe("ambient");
+  });
+
+  it("falls back to ambient when a measurement is missing or nonsense", () => {
+    expect(classifyIlluminant(Number.NaN, 120)).toBe("ambient");
+    expect(classifyIlluminant(60, Number.NaN)).toBe("ambient");
+    expect(classifyIlluminant(60, 0)).toBe("ambient");
+    expect(classifyIlluminant(Number.POSITIVE_INFINITY, 120)).toBe("ambient");
   });
 });

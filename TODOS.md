@@ -13,40 +13,45 @@ not match the paper. The regression test in `quality.test.ts` locks in the
 behaviour that matters (a correctly exposed deep-skin capture must not be called
 "too dark"); the numbers around it are still provisional.
 
-### Verify `flash="screen"` on device — this one gates the progress engine
-**Read this before treating it as a config detail.** The illuminant label is a
-*declaration*, not a measurement. `photo.tsx` sets it from the compile-time
-constant `USE_NATIVE_SCREEN_FLASH` alone; `photos.ts` passes it through
-untouched; and `isMeasurable` in `progress/engine.ts` is
-`flags.length === 0 && illuminant === "screen_flash"` — that label is the *only*
-gate deciding whether two sessions may be subtracted. Nothing cross-checks it,
-even though `scoreFrame` already computes a gray-world illuminant estimate.
+### The illuminant is now measured, not declared
+Done, and the framing this entry used to carry was wrong twice over. It claimed
+the SDK docs "do not describe front-camera behaviour" for `flash="screen"` —
+they do: the SDK 56 docstring says it uses the device screen as a flash for
+front-camera selfies, via CameraX on Android and Retina Flash on iOS. And it
+filed the whole thing as a config detail, when the real problem was one no
+device check could settle.
 
-So both settings of the flag are currently wrong in different directions:
+The label was a *declaration*. `photo.tsx` set it from a compile-time constant,
+`photos.ts` passed it through untouched, and `isMeasurable` in the progress
+engine trusts it as the only gate on whether two sessions may be subtracted.
+"We asked for a flash" and "our light actually dominated this frame" are
+different claims, and they come apart in daylight: a screen flash contributes
+nothing measurable outdoors and a great deal in a dark bathroom, so two sessions
+shot in those two places are not comparable even if the flash fired perfectly
+both times.
 
-- `true` (today): if `flash="screen"` is a no-op on the front camera, every photo
-  is ambient-lit but **labelled** `screen_flash`. `/compare` then subtracts two
-  uncontrolled photos and reports a change — the app confabulating progress,
-  which is the one thing this product's design exists to refuse. It fails
-  silently and confidently, the worst available shape.
-- `false`: the app paints its own white overlay for `FLASH_MS`, which is a
-  genuinely controlled illuminant, and then records the shot as `ambient`
-  anyway. Honest, but it means `isMeasurable` never passes and `/compare` can
-  never compare anything at all. The progress feature is dead in that mode.
+Now: `shoot()` captures an ambient reference frame (`skipProcessing`, so it is
+cheap, and orientation does not affect a mean) before any of our light is on,
+`processCapture` takes its mean luma, and `classifyIlluminant` in
+`vision/quality.ts` decides the label from the ratio against the lit frame.
+Six cases in `quality.test.ts` cover it, including the two that matter: daylight
+must not be called a flash, and a near-zero reference must not manufacture one
+out of a dark frame. The bias is toward `ambient` throughout — a wrong `ambient`
+costs a comparison, a wrong `screen_flash` invents one.
 
-The device check is five minutes and decides which problem you have. The real
-fix, either way, is to stop trusting a boolean: label the illuminant from
-something observed rather than something intended.
+`flash="screen"` was dropped in the process. Not because it does not work, but
+because there is no way to capture an unlit reference while the camera sits in a
+flash mode without toggling a prop mid-shutter and hoping the change lands. The
+app paints its own overlay instead, which keeps the capture path linear.
 
----
-
-
-`apps/mobile/src/app/onboarding/photo.tsx` sets `USE_NATIVE_SCREEN_FLASH = true`.
-`'screen'` is a documented SDK 56 `FlashMode`, but the docs do not describe its
-front-camera behaviour, and it has not been confirmed on hardware. Check on both
-platforms. If it is a no-op, flip the flag to `false`: the app then paints its
-own white overlay for `FLASH_MS` around the shutter and records the photo as
-`ambient` rather than claiming a controlled illuminant it did not have.
+**The open question that replaces this one:** is the app-painted overlay bright
+enough? A plain white `View` at whatever brightness the display happens to be on
+is weaker than Retina Flash. If device testing shows captures classifying
+`ambient` indoors — visible as `/compare` refusing to compare — the fix is to
+raise the display to full brightness for the duration of the flash
+(`expo-brightness`), **not** to go back to claiming light that was never
+verified. The measurement makes that testable: the classification rate is the
+signal.
 
 ### Screen-flash intensity per tone
 A flash level that exposes fair skin correctly will clip its highlights and
