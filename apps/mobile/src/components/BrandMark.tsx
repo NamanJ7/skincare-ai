@@ -1,44 +1,16 @@
-/**
- * Pore brand mark — a stylized water-drop with a sparkle, drawn with plain Views
- * (no SVG dep). A faithful stand-in for the logo until the real artwork is
- * dropped in as an asset. Sized by `size` (the drop's bounding box).
- */
-import { View } from "react-native";
-import { colors } from "@/theme";
+/** The official Pore droplet and profile mark, sized by its square frame. */
+import { Image, type ImageStyle, type StyleProp } from "react-native";
 
-export function BrandMark({ size = 64, color = colors.primary }: { size?: number; color?: string }) {
-  const sparkle = Math.max(8, size * 0.15);
+const PORE_LOGO = require("../../assets/images/pore-logo.png");
+
+export function BrandMark({ size = 64, style }: { size?: number; style?: StyleProp<ImageStyle> }) {
   return (
-    <View style={{ width: size, height: size, alignItems: "center", justifyContent: "center" }}>
-      {/* Water droplet: a square with three rounded corners + one soft point.
-          Rotated 45° so the point sits at the top, like a falling drop. */}
-      <View
-        style={{
-          width: size * 0.74,
-          height: size * 0.74,
-          borderWidth: 2,
-          borderColor: color,
-          backgroundColor: "transparent",
-          borderTopLeftRadius: size * 0.07,
-          borderTopRightRadius: size * 0.42,
-          borderBottomRightRadius: size * 0.42,
-          borderBottomLeftRadius: size * 0.42,
-          transform: [{ rotate: "45deg" }],
-        }}
-      />
-      {/* Four-point sparkle (a rotated square) in antique gold, in the bulb. */}
-      <View
-        style={{
-          position: "absolute",
-          width: sparkle,
-          height: sparkle,
-          left: size * 0.3,
-          top: size * 0.42,
-          backgroundColor: colors.gold,
-          borderRadius: sparkle * 0.18,
-          transform: [{ rotate: "45deg" }],
-        }}
-      />
-    </View>
+    <Image
+      source={PORE_LOGO}
+      resizeMode="contain"
+      style={[{ width: size, height: size }, style]}
+      accessibilityIgnoresInvertColors
+      accessibilityLabel="Pore logo"
+    />
   );
 }

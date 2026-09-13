@@ -60,9 +60,9 @@ const TABS: Tab[] = [
   },
   {
     id: "compatibility",
-    label: "Ingredient compatibility",
-    title: "Know what works together.",
-    body: "Pore checks your actives and ingredients to help you avoid irritating combinations and unnecessary overlap.",
+    label: "Active compatibility",
+    title: "Understand how your actives fit.",
+    body: "Pore checks supported active categories to flag major conflicts, duplication, and combinations that may be too irritating together.",
     points: [
       "Gentle warnings for combinations to space out",
       "Confidence that your layers make sense",
@@ -73,12 +73,12 @@ const TABS: Tab[] = [
   {
     id: "progress",
     label: "Progress tracking",
-    title: "See what is actually helping.",
-    body: "Log your routine and track skin changes over time with notes and photo comparisons, so you keep what works.",
+    title: "See how your skin changes over time.",
+    body: "Log your routine and compare standardized photos and self-reports over time without pretending that one product caused every change.",
     points: [
       "Consistency tracking week to week",
       "Skin notes and photo comparisons",
-      "Understand which products earn their spot",
+      "Review your routine alongside directional changes",
     ],
     visual: <ProgressMock />,
   },
@@ -98,12 +98,12 @@ const TABS: Tab[] = [
     id: "mobile",
     label: "Mobile access",
     soon: true,
-    title: "Pore is coming with you.",
-    body: "Start on the web today. Mobile access is on the way so you can follow and log your routine wherever life takes you.",
+    title: "Pore is being built iOS-first.",
+    body: "The measured TestFlight beta brings guided scanning, routines, and progress tools to supported iPhones first.",
     points: [
-      "Web app available first",
-      "Mobile coming soon",
-      "Your routine, in sync",
+      "iOS TestFlight beta first",
+      "Designed around a native camera flow",
+      "Cloud sync follows after beta validation",
     ],
     visual: (
       <PhoneFrame>

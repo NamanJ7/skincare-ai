@@ -13,24 +13,46 @@
  *   5. At most one strong exfoliating/active per session (no over-exfoliation).
  *   6. Sensitivity caps the number of distinct strong actives overall.
  *   7. Duplicate actives within a session are merged.
+ *   8. Every routine retains a gentle cleanser and moisturizer baseline.
+ *   9. Clinician-only hydroquinone is never recommended as self-care.
  */
 import type { IntakeResponse } from "../types/intake";
-import type { ActiveKey, Routine, RoutineStep, RoutineTime } from "../types/routine";
+import type {
+  ActiveKey,
+  Routine,
+  RoutineStep,
+  RoutineTime,
+} from "../types/routine";
 import { ACTIVES, activeRelevanceScore, type ActiveMeta } from "./ingredients";
 
 export type SafetyRuleId =
   | "spf_required"
   | "pregnancy_unsafe_removed"
   | "pregnancy_caution_flagged"
+  | "prescription_baseline_mode"
   | "allergy_removed"
   | "retinoid_frequency_clamped"
   | "session_irritation_cap"
   | "sensitivity_active_cap"
-  | "duplicate_active_merged";
+  | "duplicate_active_merged"
+  | "routine_preference_cap"
+  | "skin_type_frequency_adjusted"
+  | "cleanser_required"
+  | "moisturizer_required"
+  | "clinician_only_removed"
+  | "assessment_evidence_removed"
+  | "unverified_evidence_capped"
+  | "professional_review_mode";
 
 export interface SafetyAdjustment {
   rule: SafetyRuleId;
-  action: "added" | "removed" | "reduced_frequency" | "separated" | "flagged" | "merged";
+  action:
+    | "added"
+    | "removed"
+    | "reduced_frequency"
+    | "separated"
+    | "flagged"
+    | "merged";
   active?: ActiveKey;
   time?: RoutineTime;
   detail: string;
@@ -54,7 +76,11 @@ function isSessionIrritant(meta: ActiveMeta): boolean {
 }
 
 function irritationRank(meta: ActiveMeta): number {
-  return meta.baseIrritation === "low" ? 0 : meta.baseIrritation === "medium" ? 1 : 2;
+  return meta.baseIrritation === "low"
+    ? 0
+    : meta.baseIrritation === "medium"
+      ? 1
+      : 2;
 }
 
 function removeFrom(arr: RoutineStep[], step: RoutineStep): void {
@@ -83,7 +109,10 @@ function byKeepPriorityDesc(goals: IntakeResponse["goals"]) {
   };
 }
 
-export function applySafetyRules(routine: Routine, intake: IntakeResponse): SafetyResult {
+export function applySafetyRules(
+  routine: Routine,
+  intake: IntakeResponse,
+): SafetyResult {
   const adjustments: SafetyAdjustment[] = [];
   const am: RoutineStep[] = routine.am.map((s) => ({ ...s }));
   const pm: RoutineStep[] = routine.pm.map((s) => ({ ...s }));
@@ -102,13 +131,30 @@ export function applySafetyRules(routine: Routine, intake: IntakeResponse): Safe
           action: "removed",
           active: step.active,
           time,
-          detail: `Removed ${labelOf(step.active)} (${time}) — you listed it as an allergy or past reaction.`,
+          detail: `Removed ${labelOf(step.active)} (${time}) because you listed it as an allergy or past reaction.`,
         });
       }
     }
   }
 
-  // 2. Pregnancy / breastfeeding filter.
+  // 2. Hydroquinone requires clinician supervision; never offer it as a
+  // self-care product recommendation regardless of market or skin concern.
+  for (const [time, steps] of sessions) {
+    for (const step of [...steps]) {
+      if (step.active !== "hydroquinone") continue;
+      removeFrom(steps, step);
+      adjustments.push({
+        rule: "clinician_only_removed",
+        action: "removed",
+        active: step.active,
+        time,
+        detail:
+          "Removed hydroquinone. Use it only when a licensed clinician prescribes and supervises it.",
+      });
+    }
+  }
+
+  // 3. Pregnancy / breastfeeding filter.
   if (intake.pregnancyOrBreastfeeding) {
     for (const [time, steps] of sessions) {
       for (const step of [...steps]) {
@@ -121,7 +167,7 @@ export function applySafetyRules(routine: Routine, intake: IntakeResponse): Safe
             action: "removed",
             active: m.key,
             time,
-            detail: `Removed ${m.label} (${time}) — best avoided during pregnancy or breastfeeding.`,
+            detail: `Removed ${m.label} (${time}). It is best avoided during pregnancy or breastfeeding.`,
           });
         } else if (m.pregnancySafety === "caution") {
           adjustments.push({
@@ -129,14 +175,33 @@ export function applySafetyRules(routine: Routine, intake: IntakeResponse): Safe
             action: "flagged",
             active: m.key,
             time,
-            detail: `${m.label} is usually used in limited amounts during pregnancy/breastfeeding — confirm with your doctor or pharmacist first.`,
+            detail: `${m.label} is usually used in limited amounts during pregnancy or breastfeeding. Confirm with your doctor or pharmacist first.`,
           });
         }
       }
     }
   }
 
-  // 3. Merge duplicate actives within a session.
+  // A prescription regimen is an unknown clinical baseline. Keep Pore's plan
+  // gentle instead of layering an OTC strong active onto it.
+  if (intake.usingPrescriptionSkincare) {
+    for (const [time, steps] of sessions) {
+      for (const step of [...steps]) {
+        const meta = metaOf(step.active);
+        if (!meta?.isStrongActive) continue;
+        removeFrom(steps, step);
+        adjustments.push({
+          rule: "prescription_baseline_mode",
+          action: "removed",
+          active: meta.key,
+          time,
+          detail: `Removed ${meta.label} (${time}) because you use prescription skincare. Pore won't layer a strong active without your prescriber's guidance.`,
+        });
+      }
+    }
+  }
+
+  // 4. Merge duplicate actives within a session.
   for (const [time, steps] of sessions) {
     const seen = new Set<ActiveKey>();
     for (const step of [...steps]) {
@@ -156,7 +221,7 @@ export function applySafetyRules(routine: Routine, intake: IntakeResponse): Safe
     }
   }
 
-  // 4. Retinoid frequency clamp.
+  // 5. Retinoid frequency clamp.
   const maxRetinoidFreq = intake.sensitivity === "high" ? 2 : 3;
   for (const [time, steps] of sessions) {
     for (const step of steps) {
@@ -172,34 +237,73 @@ export function applySafetyRules(routine: Routine, intake: IntakeResponse): Safe
           action: "reduced_frequency",
           active: m.key,
           time,
-          detail: `Lowered ${m.label} from ${was}x to ${maxRetinoidFreq}x/week — retinoids should be introduced slowly to avoid irritation.`,
+          detail: `Lowered ${m.label} from ${was}x to ${maxRetinoidFreq}x/week. Retinoids should be introduced slowly to avoid irritation.`,
         });
       }
     }
   }
 
-  // 5. At most one strong exfoliating/active per session (try to move, else drop).
+  // 6. At most one strong exfoliating/active per session (try to move, else drop).
   capSessionIrritants(pm, am, "PM", "AM", intake.goals, adjustments);
   capSessionIrritants(am, pm, "AM", "PM", intake.goals, adjustments);
 
-  // 6. Sensitivity cap on distinct strong actives across the whole routine.
+  // 7. Sensitivity cap on distinct strong actives across the whole routine.
   applySensitivityCap(am, pm, intake, adjustments);
 
-  // 7. Sunscreen is mandatory in the AM.
+  // 8. A simple barrier-supporting baseline is mandatory.
+  if (
+    !am.some((step) => step.category === "cleanser") &&
+    !pm.some((step) => step.category === "cleanser")
+  ) {
+    pm.unshift({
+      order: 0,
+      category: "cleanser",
+      frequencyPerWeek: 7,
+      rationale:
+        "Use a gentle cleanser to remove sunscreen and daily buildup without over-stripping your skin.",
+      irritationRisk: "low",
+    });
+    adjustments.push({
+      rule: "cleanser_required",
+      action: "added",
+      time: "PM",
+      detail: "Added a gentle cleanser as the baseline evening step.",
+    });
+  }
+  for (const [time, steps] of sessions) {
+    if (steps.some((step) => step.category === "moisturizer")) continue;
+    steps.push({
+      order: steps.length + 1,
+      category: "moisturizer",
+      frequencyPerWeek: 7,
+      rationale:
+        "Use a simple moisturizer to support your skin barrier and reduce irritation from treatment steps.",
+      irritationRisk: "low",
+    });
+    adjustments.push({
+      rule: "moisturizer_required",
+      action: "added",
+      time,
+      detail: `Added a simple moisturizer to the ${time} routine.`,
+    });
+  }
+
+  // 9. Sunscreen is mandatory in the AM.
   if (!am.some((s) => s.category === "sunscreen")) {
     am.push({
       order: am.length + 1,
       category: "sunscreen",
       frequencyPerWeek: 7,
       rationale:
-        "Daily SPF protects your barrier and stops dark marks from deepening — the single highest-impact step, never skip it.",
+        "Daily SPF protects your barrier and stops dark marks from deepening. It is the single highest-impact step, so never skip it.",
       irritationRisk: "low",
     });
     adjustments.push({
       rule: "spf_required",
       action: "added",
       time: "AM",
-      detail: "Added a daily sunscreen step — required in every Pore routine.",
+      detail:
+        "Added a daily sunscreen step because every Pore routine needs one.",
     });
   }
 
@@ -222,7 +326,13 @@ function capSessionIrritants(
   const extras = irritants.slice(SESSION_IRRITANT_CAP);
   for (const extra of extras) {
     removeFrom(self, extra);
-    if (sessionIrritants(other).length === 0) {
+    // Relieving PM's irritant load must not create a worse problem in AM.
+    // Retinoids are PM-only: they photodegrade and raise photosensitivity, so
+    // an overflowing PM drops one rather than relocating it into the morning.
+    // Exfoliating acids may still move — rule 9 guarantees sunscreen in the AM.
+    const meta = metaOf(extra.active);
+    const retinoidIntoMorning = otherTime === "AM" && !!meta?.isRetinoid;
+    if (sessionIrritants(other).length === 0 && !retinoidIntoMorning) {
       other.push(extra);
       adjustments.push({
         rule: "session_irritation_cap",
@@ -237,7 +347,7 @@ function capSessionIrritants(
         action: "removed",
         active: extra.active,
         time: selfTime,
-        detail: `Removed ${labelOf(extra.active)} from ${selfTime} — combining several strong exfoliating actives at once risks over-exfoliation.`,
+        detail: `Removed ${labelOf(extra.active)} from ${selfTime}. Combining several strong exfoliating actives at once risks over-exfoliation.`,
       });
     }
   }
@@ -250,6 +360,12 @@ function applySensitivityCap(
   adjustments: SafetyAdjustment[],
 ): void {
   const cap = MAX_ACTIVES_BY_SENSITIVITY[intake.sensitivity];
+  const ownedStrong = new Set<ActiveKey>();
+  for (const key of intake.currentProducts) {
+    if (!(key in ACTIVES)) continue;
+    const active = key as ActiveKey;
+    if (ACTIVES[active].isStrongActive) ownedStrong.add(active);
+  }
   const strong: ActiveKey[] = [];
   for (const step of [...am, ...pm]) {
     const m = metaOf(step.active);
@@ -257,9 +373,13 @@ function applySensitivityCap(
       strong.push(step.active);
     }
   }
-  if (strong.length <= cap) return;
+  const combined = new Set<ActiveKey>([...ownedStrong, ...strong]);
+  if (combined.size <= cap) return;
 
   const ranked = [...strong].sort((a, b) => {
+    // Existing compatible actives are kept before newly proposed ones.
+    if (ownedStrong.has(a) !== ownedStrong.has(b))
+      return ownedStrong.has(a) ? 1 : -1;
     const sa = activeRelevanceScore(a, intake.goals);
     const sb = activeRelevanceScore(b, intake.goals);
     if (sa !== sb) return sa - sb; // lowest relevance dropped first
@@ -267,7 +387,10 @@ function applySensitivityCap(
     const rb = irritationRank(ACTIVES[b]);
     return rb - ra; // harsher dropped first on ties
   });
-  const toDrop = ranked.slice(0, strong.length - cap);
+  // Counted against `combined` (owned + proposed) on purpose: a user already at
+  // the cap with products they own gets no *new* strong active, even though only
+  // the routine's own steps are droppable.
+  const toDrop = ranked.slice(0, Math.min(ranked.length, combined.size - cap));
 
   for (const active of toDrop) {
     for (const steps of [am, pm]) {
@@ -279,7 +402,7 @@ function applySensitivityCap(
       rule: "sensitivity_active_cap",
       action: "removed",
       active,
-      detail: `Removed ${labelOf(active)} — with ${intake.sensitivity} sensitivity we keep to ${cap} strong active${cap === 1 ? "" : "s"} so your skin barrier can recover.`,
+      detail: `Removed ${labelOf(active)}. With ${intake.sensitivity} sensitivity, we keep to ${cap} strong active${cap === 1 ? "" : "s"} so your skin barrier can recover.`,
     });
   }
 }

@@ -18,7 +18,7 @@ import {
 export const metadata: Metadata = {
   title: "Features",
   description:
-    "Guided face photos, personalized routines, a product shelf you understand, ingredient compatibility, progress tracking, and AI guidance - explore everything Pore does.",
+    "Guided face photos, personalized routines, a product shelf you understand, active compatibility, and directional progress tracking.",
 };
 
 const HIGHLIGHTS = [
@@ -39,13 +39,13 @@ const HIGHLIGHTS = [
   },
   {
     icon: <CheckIcon size={20} />,
-    title: "Ingredient compatibility",
-    body: "Avoid irritating combinations with gentle, plain-language checks.",
+    title: "Active compatibility",
+    body: "Check supported actives for major conflicts, irritation risk, and duplication.",
   },
   {
     icon: <ChartIcon size={20} />,
     title: "Progress tracking",
-    body: "Track consistency, notes, and visible changes over time.",
+    body: "Compare consistency, self-reports, and standardized photos over time.",
   },
   {
     icon: <SparkleIcon size={20} />,

@@ -5,41 +5,75 @@
   "dependencies": {
     "@expo-google-fonts/fraunces": "^0.4.1",
     "@expo-google-fonts/inter": "^0.4.2",
-    "@expo/ui": "~56.0.18",
+    "@expo/metro-runtime": "~56.0.21",
+    "@expo/ui": "~56.0.26",
+    "@expo/vector-icons": "^15.0.2",
+    "@mediapipe/tasks-vision": "0.10.35",
     "@pore/shared": "workspace:*",
-    "expo": "~56.0.12",
-    "expo-constants": "~56.0.18",
+    "@react-native-async-storage/async-storage": "2.2.0",
+    "@supabase/supabase-js": "^2.110.7",
+    "expo": "~56.0.21",
+    "expo-apple-authentication": "~56.0.4",
+    "expo-camera": "~56.0.8",
+    "expo-clipboard": "~56.0.4",
+    "expo-constants": "~56.0.25",
+    "expo-crypto": "~56.0.5",
+    "expo-dev-client": "~56.0.26",
     "expo-device": "~56.0.4",
+    "expo-file-system": "~56.0.11",
     "expo-font": "~56.0.7",
     "expo-glass-effect": "~56.0.4",
-    "expo-image": "~56.0.11",
-    "expo-linking": "~56.0.14",
-    "expo-router": "~56.2.11",
-    "expo-splash-screen": "~56.0.10",
+    "expo-haptics": "~56.0.3",
+    "expo-image": "~56.0.12",
+    "expo-image-manipulator": "~56.0.26",
+    "expo-linking": "~56.0.17",
+    "expo-notifications": "~56.0.25",
+    "expo-router": "~56.2.20",
+    "expo-secure-store": "~56.0.4",
+    "expo-sensors": "~56.0.6",
+    "expo-splash-screen": "~56.0.15",
     "expo-status-bar": "~56.0.4",
-    "expo-symbols": "~56.0.6",
+    "expo-symbols": "~56.0.7",
     "expo-system-ui": "~56.0.5",
-    "expo-web-browser": "~56.0.5",
+    "expo-web-browser": "~56.0.6",
+    "jpeg-js": "^0.4.4",
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "react-native": "0.85.3",
     "react-native-gesture-handler": "~2.31.1",
+    "react-native-nitro-image": "0.15.1",
+    "react-native-nitro-modules": "0.36.1",
     "react-native-reanimated": "4.3.1",
     "react-native-safe-area-context": "~5.7.0",
-    "react-native-screens": "4.25.2",
+    "react-native-screens": "4.26.2",
+    "react-native-vision-camera": "5.1.0",
+    "react-native-vision-camera-face-detector": "2.0.6",
+    "react-native-vision-camera-worklets": "5.1.0",
     "react-native-web": "~0.21.0",
     "react-native-worklets": "0.8.3"
   },
   "devDependencies": {
     "@types/react": "~19.2.2",
-    "typescript": "~6.0.3"
+    "typescript": "~6.0.3",
+    "vitest": "^2.1.8"
   },
   "scripts": {
     "start": "expo start",
+    "build": "expo export --platform ios --output-dir dist",
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "expo": {
+    "doctor": {
+      "reactNativeDirectoryCheck": {
+        "exclude": [
+          "react-native-nitro-image"
+        ]
+      }
+    }
   },
   "private": true
 }

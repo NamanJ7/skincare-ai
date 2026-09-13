@@ -14,11 +14,10 @@ export const FOOTER_NAV: NavLink[] = [
   { label: "Features", href: "/features" },
   { label: "Pricing", href: "/pricing" },
   { label: "Blog", href: "/blog" },
-  { label: "Login", href: "/login" },
 ];
 
 export const LEGAL_LINKS: NavLink[] = [
-  { label: "Privacy Policy", href: "/privacy" },
+  { label: "Privacy Notice", href: "/privacy" },
   { label: "Terms of Use", href: "/terms" },
   { label: "Contact", href: "/contact" },
 ];

@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { Fraunces, Inter } from "next/font/google";
-import Script from "next/script";
+import { headers } from "next/headers";
 import "./globals.css";
 
 const fraunces = Fraunces({
@@ -43,11 +43,30 @@ export const metadata: Metadata = {
   },
 };
 
-export default function RootLayout({
+/**
+ * Every route renders per request so the CSP nonce can be applied.
+ *
+ * This is load-bearing, not incidental. proxy.ts mints a nonce per request and
+ * the policy has no 'unsafe-inline', so Next's ~40 inline bootstrap and
+ * flight-data scripts must carry that nonce. A statically prerendered page is
+ * generated at build time, when the proxy has never run — its inline scripts
+ * carry no nonce, and the browser blocks every one of them, so the page ships
+ * as unhydrated HTML. Reading headers() is what opts the tree out of static
+ * generation and lets Next stamp the nonce during the request-time render.
+ *
+ * The cost is a prerender, not a model call: these are marketing pages backed
+ * by in-repo data. Verified by curling the built app for `nonce=` attributes —
+ * see docs/security-audit-2026-08-24.md.
+ */
+export const dynamic = "force-dynamic";
+
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  // Establishes the request-time dependency that carries the nonce.
+  await headers();
   return (
     <html
       lang="en"
@@ -55,11 +74,6 @@ export default function RootLayout({
     >
       <body className="min-h-full flex flex-col bg-canvas text-ink">
         {children}
-        {/* Tally popup widget - drives every "Join the Waitlist" CTA (form LZVOM2). */}
-        <Script
-          src="https://tally.so/widgets/embed.js"
-          strategy="afterInteractive"
-        />
       </body>
     </html>
   );

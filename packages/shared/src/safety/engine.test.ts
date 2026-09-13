@@ -103,6 +103,21 @@ describe("allergy filter", () => {
   });
 });
 
+describe("prescription baseline mode", () => {
+  it("removes strong OTC actives but keeps gentle support steps", () => {
+    const { routine: out, adjustments } = applySafetyRules(
+      routine(
+        [mk("serum", "niacinamide")],
+        [mk("treatment", "retinoid"), mk("moisturizer")],
+      ),
+      intake({ usingPrescriptionSkincare: true }),
+    );
+    expect(hasActive(out, "retinoid")).toBe(false);
+    expect(hasActive(out, "niacinamide")).toBe(true);
+    expect(adjustments.some((item) => item.rule === "prescription_baseline_mode")).toBe(true);
+  });
+});
+
 describe("retinoid frequency clamp", () => {
   it("clamps to 3x/week for non-sensitive skin", () => {
     const { routine: out, adjustments } = applySafetyRules(
@@ -137,6 +152,32 @@ describe("per-session irritation cap", () => {
     expect(hasActive(out, "glycolic_acid")).toBe(true);
   });
 
+  it("never relocates a retinoid into the AM to relieve PM", () => {
+    // AM is empty, so the pre-fix engine moved the lower-ranked PM irritant
+    // there — and for an acne goal that is the retinoid, which photodegrades
+    // and raises photosensitivity. It must be dropped instead.
+    const { routine: out, adjustments } = applySafetyRules(
+      routine([], [mk("exfoliant", "salicylic_acid"), mk("treatment", "retinoid")]),
+      intake({ goals: ["acne"], sensitivity: "low" }),
+    );
+    expect(out.am.some((s) => s.active === "retinoid")).toBe(false);
+    expect(hasActive(out, "salicylic_acid")).toBe(true);
+    expect(
+      adjustments.some(
+        (a) => a.rule === "session_irritation_cap" && a.active === "retinoid" && a.action === "removed",
+      ),
+    ).toBe(true);
+  });
+
+  it("still moves an exfoliating acid into the AM, which always has SPF", () => {
+    const { routine: out } = applySafetyRules(
+      routine([], [mk("exfoliant", "salicylic_acid"), mk("exfoliant", "glycolic_acid")]),
+      intake({ goals: ["acne"] }),
+    );
+    expect(hasActive(out, "glycolic_acid")).toBe(true);
+    expect(out.am.some((s) => s.category === "sunscreen")).toBe(true);
+  });
+
   it("drops extras when there is no room to separate", () => {
     const { routine: out } = applySafetyRules(
       routine(
@@ -166,7 +207,17 @@ describe("sensitivity cap on distinct strong actives", () => {
       (a) => a && ACTIVES[a as ActiveKey].isStrongActive,
     );
     expect(new Set(strong).size).toBeLessThanOrEqual(1);
-    expect(adjustments.some((a) => a.rule === "sensitivity_active_cap")).toBe(true);
+    // Either cap may be the one that gets there first — the session cap removes
+    // the retinoid before the sensitivity cap is reached, since a retinoid is
+    // never relocated into the AM. What matters is that the removal is recorded.
+    expect(
+      adjustments.some(
+        (a) =>
+          (a.rule === "sensitivity_active_cap" ||
+            a.rule === "session_irritation_cap") &&
+          a.action === "removed",
+      ),
+    ).toBe(true);
   });
 
   it("low sensitivity allows up to three strong actives", () => {
@@ -181,6 +232,32 @@ describe("sensitivity cap on distinct strong actives", () => {
     expect(hasActive(out, "salicylic_acid")).toBe(true);
     expect(hasActive(out, "azelaic_acid")).toBe(true);
     expect(hasActive(out, "vitamin_c")).toBe(true);
+  });
+
+  it("counts a strong current treatment before introducing a new one", () => {
+    const { routine: out, adjustments } = applySafetyRules(
+      routine([], [mk("exfoliant", "salicylic_acid")]),
+      intake({
+        goals: ["acne"],
+        sensitivity: "high",
+        currentProducts: ["retinoid"],
+      }),
+    );
+    expect(hasActive(out, "salicylic_acid")).toBe(false);
+    expect(adjustments.some((item) => item.rule === "sensitivity_active_cap")).toBe(true);
+  });
+
+  it("changes the survivor when the primary goal changes", () => {
+    const candidate = routine(
+      [mk("exfoliant", "salicylic_acid")],
+      [mk("exfoliant", "glycolic_acid")],
+    );
+    const acne = applySafetyRules(candidate, intake({ goals: ["acne"], sensitivity: "high" })).routine;
+    const texture = applySafetyRules(candidate, intake({ goals: ["texture"], sensitivity: "high" })).routine;
+    expect(hasActive(acne, "salicylic_acid")).toBe(true);
+    expect(hasActive(acne, "glycolic_acid")).toBe(false);
+    expect(hasActive(texture, "glycolic_acid")).toBe(true);
+    expect(hasActive(texture, "salicylic_acid")).toBe(false);
   });
 });
 
@@ -205,5 +282,24 @@ describe("a gentle routine is left intact (only SPF added)", () => {
     expect(out.am.some((s) => s.category === "sunscreen")).toBe(true);
     const removals = adjustments.filter((a) => a.action === "removed");
     expect(removals).toHaveLength(0);
+  });
+});
+
+describe("baseline and clinician-only product guards", () => {
+  it("adds the gentle cleanser and moisturizer baseline", () => {
+    const { routine: out, adjustments } = applySafetyRules(routine([], []), intake());
+    expect([...out.am, ...out.pm].some((step) => step.category === "cleanser")).toBe(true);
+    expect(out.am.some((step) => step.category === "moisturizer")).toBe(true);
+    expect(out.pm.some((step) => step.category === "moisturizer")).toBe(true);
+    expect(adjustments.some((adjustment) => adjustment.rule === "cleanser_required")).toBe(true);
+  });
+
+  it("never leaves hydroquinone in a self-care routine", () => {
+    const { routine: out, adjustments } = applySafetyRules(
+      routine([], [mk("treatment", "hydroquinone")]),
+      intake({ goals: ["hyperpigmentation"] }),
+    );
+    expect(hasActive(out, "hydroquinone")).toBe(false);
+    expect(adjustments.some((adjustment) => adjustment.rule === "clinician_only_removed")).toBe(true);
   });
 });

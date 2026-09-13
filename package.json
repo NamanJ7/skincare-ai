@@ -11,7 +11,9 @@
     "dev": "turbo run dev",
     "lint": "turbo run lint",
     "typecheck": "turbo run typecheck",
-    "test": "turbo run test"
+    "test": "turbo run test",
+    "audit:copy": "node scripts/audit-copy.mjs",
+    "audit:theme": "node scripts/audit-mobile-theme.mjs"
   },
   "devDependencies": {
     "playwright": "^1.61.0",

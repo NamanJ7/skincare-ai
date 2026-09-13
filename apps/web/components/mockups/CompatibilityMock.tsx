@@ -1,6 +1,6 @@
 import { CheckIcon, AlertIcon } from "../ui/icons";
 
-/** Feature 2 — Ingredient Compatibility: pairs with checks + gentle warnings. */
+/** Feature 2: supported-active compatibility with plain-language warnings. */
 export function CompatibilityMock({ className = "" }: { className?: string }) {
   const rows = [
     { a: "Niacinamide", b: "Hyaluronic acid", ok: true, note: "Works well together" },

@@ -1,0 +1,38 @@
+{
+  "cli": {
+    "version": ">= 12.0.0",
+    "appVersionSource": "local"
+  },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "ios": {
+        "//": "MLKit face detection needs a real device — the arm64 iOS simulator slice is unavailable (see react-native-vision-camera-face-detector README).",
+        "simulator": false
+      },
+      "channel": "development",
+      "environment": "development"
+    },
+    "preview": {
+      "distribution": "internal",
+      "channel": "preview",
+      "environment": "preview"
+    },
+    "beta": {
+      "distribution": "store",
+      "autoIncrement": true,
+      "channel": "beta",
+      "environment": "production"
+    },
+    "production": {
+      "autoIncrement": true,
+      "channel": "production",
+      "environment": "production"
+    }
+  },
+  "submit": {
+    "beta": {},
+    "production": {}
+  }
+}

@@ -8,7 +8,7 @@ import { Reveal } from "../ui/Reveal";
 /** The three pricing cards — reused on the home pricing section and /pricing. */
 export function PricingCards() {
   return (
-    <div className="grid gap-6 lg:grid-cols-3">
+    <div className="mx-auto grid max-w-4xl gap-6 md:grid-cols-2">
       {PRICING_TIERS.map((tier, i) => (
         <Reveal key={tier.id} delay={i * 80}>
           <TierCard tier={tier} />
