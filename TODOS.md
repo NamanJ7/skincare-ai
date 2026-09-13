@@ -284,3 +284,28 @@ the app no longer uses.
 `packages/shared` is the only package with a test suite. The `/api/plan` input
 validation in `apps/web/app/api/plan/route.ts` is a trust boundary in front of a
 paid endpoint and is currently only covered by manual probes.
+
+### `/api/plan` has no rate limiting and does not validate `intake`
+`validateImages` is thorough about the image array — count, size, media type,
+and the client-measured `quality` parsed rather than trusted. `intake` gets
+none of that: the body is cast `as Partial<PlanInput>` (a compile-time claim,
+not a runtime check) and the route only tests it for truthiness, so any truthy
+value reaches `JSON.stringify` in `pipeline.ts` and goes into the prompt
+verbatim.
+
+There is also no throttle of any kind — no IP limit, no auth, no origin check.
+Two Opus calls at `max_tokens: 16000` each, with up to three images, are
+triggered by any unauthenticated POST. The route's own comment calls itself a
+trust boundary in front of a paid endpoint; it currently guards shape but not
+volume, and not the field that reaches the model as text.
+
+An `IntakeResponseSchema` in `apps/web/lib/schemas.ts` (which already mirrors
+the domain enums for outputs) plus a throttle is the shape of the fix. This is
+a security change, not a polish pass, and wants its own PR before launch.
+
+### CI reports but does not block
+`.github/workflows/ci.yml` runs typecheck, test, lint and build on every pull
+request, but GitHub will not stop a merge on a red run until branch protection
+is enabled on `main` — Settings → Branches → require the
+`typecheck · test · lint · build` check. That is a repository setting, not
+something a commit can do. Until it is on, the gate is advisory.
