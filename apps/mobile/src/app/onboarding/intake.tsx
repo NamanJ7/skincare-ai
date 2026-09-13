@@ -3,13 +3,24 @@ import { useState, type ReactNode } from "react";
 import { ActivityIndicator, Pressable, View } from "react-native";
 
 import { ACTIVES, type ActiveKey, type Sensitivity, type SkinGoal, type SkinType } from "@pore/shared";
-import { fetchPlan } from "@/lib/api";
+import { fetchPlan, type PlanError } from "@/lib/api";
 import { buildIntake } from "@/lib/intake";
 import { recordAssessment } from "@/lib/journal";
 import { CAPTURE_STEPS, listSessions, type CapturedPhoto } from "@/lib/photos";
 import { REMINDER_HOURS, enableReminder, formatHour } from "@/lib/reminder";
 import { useOnboarding } from "@/state/onboarding";
-import { AppText, Chip, GhostButton, PrimaryButton, ProgressDots, Screen, colors, radius, spacing } from "@/theme";
+import {
+  AppText,
+  Card,
+  Chip,
+  GhostButton,
+  PrimaryButton,
+  ProgressDots,
+  Screen,
+  colors,
+  radius,
+  spacing,
+} from "@/theme";
 
 const GOALS: { key: SkinGoal; label: string }[] = [
   { key: "acne", label: "Acne / breakouts" },
@@ -60,6 +71,7 @@ export default function Intake() {
   const { data, update } = useOnboarding();
   const [step, setStep] = useState(0);
   const [analyzing, setAnalyzing] = useState(false);
+  const [planError, setPlanError] = useState<PlanError | null>(null);
   /**
    * Shown after the routine exists, not as another question before it. The
    * permission prompt lands on the moment the user has just been handed
@@ -111,17 +123,37 @@ export default function Intake() {
 
     // The photos were taken first, but the assessment needs these answers, so
     // generation happens here rather than running on questionnaire defaults.
+    await generate({ ...data, ...answers });
+  }
+
+  /**
+   * Generate the plan.
+   *
+   * Split out from `next()` so the failure state can retry it without walking
+   * the questionnaire again — the answers are already persisted, so a retry is
+   * one tap rather than five screens.
+   */
+  async function generate(withAnswers: typeof data) {
     setAnalyzing(true);
-    const photos = data.photos ?? [];
-    const ordered = CAPTURE_STEPS.map((s) => photos.find((p) => p.angle === s.angle)).filter(
-      (p): p is CapturedPhoto => p !== undefined,
-    );
-    const plan = await fetchPlan({
-      images: ordered.map((p) => ({ data: p.data, mediaType: "image/jpeg", quality: p.quality })),
-      intake: buildIntake({ ...data, ...answers }),
-    });
-    if (plan) {
-      update({ plan });
+    setPlanError(null);
+    try {
+      const photos = data.photos ?? [];
+      const ordered = CAPTURE_STEPS.map((s) => photos.find((p) => p.angle === s.angle)).filter(
+        (p): p is CapturedPhoto => p !== undefined,
+      );
+      const outcome = await fetchPlan({
+        images: ordered.map((p) => ({ data: p.data, mediaType: "image/jpeg", quality: p.quality })),
+        intake: buildIntake(withAnswers),
+      });
+
+      // A failed plan used to fall through to /today anyway, where a hardcoded
+      // demo routine stood in for the one we never built. Say what happened.
+      if (!outcome.ok) {
+        setPlanError(outcome.error);
+        return;
+      }
+
+      update({ plan: outcome.plan });
       // This first reading is the zero every later measurement subtracts from,
       // so it is filed away the moment it exists. Without it there is nothing
       // to compare a return visit against.
@@ -130,11 +162,12 @@ export default function Intake() {
         // stored session is the set this assessment was made from.
         sessionId: listSessions()[0]?.id ?? "baseline",
         capturedAt: ordered[0]?.capturedAt ?? new Date().toISOString(),
-        assessment: plan.assessment,
+        assessment: outcome.plan.assessment,
       });
+      setAskingReminder(true);
+    } finally {
+      setAnalyzing(false);
     }
-    setAnalyzing(false);
-    setAskingReminder(true);
   }
 
   async function chooseReminder(hour: number | null) {
@@ -244,6 +277,29 @@ export default function Intake() {
         </Question>
       )}
 
+      {planError && (
+        <Card>
+          <AppText variant="bodyStrong" color={colors.escalate}>
+            We couldn&apos;t finish your routine
+          </AppText>
+          <AppText variant="caption" color={colors.inkMuted}>
+            {planError.message}
+          </AppText>
+          <View style={{ gap: spacing.xs, marginTop: spacing.xs }}>
+            {planError.retryable && (
+              <PrimaryButton
+                label="Try again"
+                onPress={() => void generate({ ...data })}
+              />
+            )}
+            <GhostButton
+              label="Retake my photos"
+              onPress={() => router.replace("/onboarding/photo")}
+            />
+          </View>
+        </Card>
+      )}
+
       {analyzing ? (
         <View style={{ alignItems: "center", gap: spacing.sm, marginTop: spacing.lg }}>
           <ActivityIndicator color={colors.primary} />
@@ -253,12 +309,14 @@ export default function Intake() {
         </View>
       ) : (
         <View style={{ gap: spacing.sm, marginTop: spacing.lg }}>
-          <PrimaryButton
-            label={step < STEP_COUNT - 1 ? "Next" : "Build my routine"}
-            onPress={next}
-            disabled={!canAdvance}
-          />
-          <GhostButton label="Back" onPress={back} />
+          {!planError && (
+            <PrimaryButton
+              label={step < STEP_COUNT - 1 ? "Next" : "Build my routine"}
+              onPress={next}
+              disabled={!canAdvance}
+            />
+          )}
+          {!planError && <GhostButton label="Back" onPress={back} />}
         </View>
       )}
     </Screen>
