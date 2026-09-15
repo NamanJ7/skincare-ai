@@ -53,6 +53,20 @@ export interface PlanResult {
 
 const MODEL = "claude-opus-4-8";
 
+/**
+ * The model declined the request rather than failing.
+ *
+ * Distinguished from a server error so the caller can say something true: a
+ * refusal surfaced as a 500 reads to the user as "we're broken" when the honest
+ * answer is "we won't read this one".
+ */
+export class PlanRefusedError extends Error {
+  constructor(readonly category: string | null) {
+    super("The model declined to assess these photos");
+    this.name = "PlanRefusedError";
+  }
+}
+
 export async function generatePlan(input: PlanInput): Promise<PlanResult> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
 
@@ -62,6 +76,14 @@ export async function generatePlan(input: PlanInput): Promise<PlanResult> {
     .filter((q): q is PhotoQuality => q !== undefined);
 
   if (!apiKey) {
+    // A development convenience, and a production hazard if it goes unnoticed:
+    // the findings below are invented. `mode: "mock"` is the contract that says
+    // so, and clients MUST branch on it — a deploy that is merely missing its
+    // key would otherwise show someone fabricated findings about their face.
+    console.warn(
+      "[/api/plan] ANTHROPIC_API_KEY is unset — returning a MOCK plan. " +
+        "Findings are fabricated. This must never be a production configuration.",
+    );
     const assessment = mockAssessment(input.intake, photoQuality);
     const { routine, adjustments } = applySafetyRules(draftRoutine(input.intake), input.intake);
     return { assessment, routine, adjustments, mode: "mock" };
@@ -111,6 +133,12 @@ export async function generatePlan(input: PlanInput): Promise<PlanResult> {
       },
     ],
   });
+  // A safety classifier declining is not a server fault, and face photos are
+  // exactly the input class where it can happen. `stop_details` is populated
+  // only on refusal, so it is guarded rather than read blindly.
+  if (assessmentResp.stop_reason === "refusal") {
+    throw new PlanRefusedError(assessmentResp.stop_details?.category ?? null);
+  }
   const parsed = assessmentResp.parsed_output;
   if (!parsed) throw new Error("Assessment did not return structured output");
   // photoQuality is measured on the device, not by the model — attach it here
@@ -130,6 +158,9 @@ export async function generatePlan(input: PlanInput): Promise<PlanResult> {
       },
     ],
   });
+  if (routineResp.stop_reason === "refusal") {
+    throw new PlanRefusedError(routineResp.stop_details?.category ?? null);
+  }
   const draft = routineResp.parsed_output;
   if (!draft) throw new Error("Routine did not return structured output");
 

@@ -2,10 +2,28 @@
  * Zod schemas for the AI pipeline's structured outputs. These mirror the
  * @pore/shared domain types and are passed to Claude via `zodOutputFormat` so
  * the model is constrained to return schema-valid JSON (then validated again on
- * parse). Keep the enum members in sync with @pore/shared/types.
+ * parse).
+ *
+ * The enum members mirror @pore/shared/types. That used to be a comment asking
+ * for discipline; the `Covers<>` assertions at the bottom of this file make it
+ * a compile error instead, so adding a domain value without updating the schema
+ * fails `pnpm typecheck` rather than silently shipping a validator that rejects
+ * valid input.
  */
 import { z } from "zod";
-import type { Routine } from "@pore/shared";
+import type {
+  ActiveKey,
+  Budget,
+  Climate,
+  FragrancePreference,
+  IntakeResponse,
+  ProductCategory,
+  Routine,
+  Sensitivity,
+  SkinGoal,
+  SkinTone,
+  SkinType,
+} from "@pore/shared";
 
 const concern = z.enum([
   "acne_like_breakouts",
@@ -135,3 +153,104 @@ export function normalizeDraft(draft: RoutineDraft): Routine {
   });
   return { am: draft.am.map(map), pm: draft.pm.map(map), notes: draft.notes };
 }
+
+// ---------------------------------------------------------------- intake --
+
+/**
+ * The intake, validated at the trust boundary.
+ *
+ * This exists because `intake` was previously checked for presence and nothing
+ * else, then `JSON.stringify`'d into BOTH model calls. That made the token cost
+ * of a request attacker-controlled: an unknown field holding a few megabytes of
+ * text is serialized twice into a 1M-context model at $5/M input.
+ *
+ * `.strict()` is the load-bearing part. Rejecting unknown keys means the
+ * serialized size is bounded by the fields below rather than by whatever the
+ * caller decided to attach — a stronger guarantee than a byte cap, because it
+ * rejects the shape of the attack and not just its size. It also closes the
+ * prompt-injection surface: only enum members and bounded values survive, and
+ * `location` is the single free-text field that gets through.
+ */
+const skinType = z.enum(["oily", "dry", "combination", "normal"]);
+const sensitivity = z.enum(["low", "medium", "high"]);
+const skinGoal = z.enum([
+  "acne",
+  "post_acne_marks",
+  "hyperpigmentation",
+  "oiliness",
+  "dryness",
+  "texture",
+  "redness",
+  "fine_lines",
+  "general_health",
+]);
+const budget = z.enum(["low", "medium", "high"]);
+const fragrancePreference = z.enum(["fragrance_free", "no_preference"]);
+const skinTone = z.enum(["very_fair", "fair", "medium", "olive", "brown", "deep"]);
+const climate = z.enum(["dry", "humid", "temperate", "cold"]);
+
+/** There are twelve actives in total, so no list of them can legitimately be longer. */
+const ACTIVE_COUNT = 12;
+/** Nine concerns, nine goals. */
+const GOAL_COUNT = 9;
+
+export const IntakeSchema = z
+  .object({
+    // The app blocks under-16 upstream; the server does not take the client's
+    // word for that, because the client is whoever is calling.
+    age: z.number().int().min(16).max(120),
+    goals: z.array(skinGoal).max(GOAL_COUNT),
+    skinType,
+    sensitivity,
+    currentProducts: z.array(active).max(ACTIVE_COUNT),
+    allergies: z.array(active).max(ACTIVE_COUNT),
+    budget,
+    fragrancePreference,
+    pregnancyOrBreastfeeding: z.boolean(),
+    skinTone,
+    darkMarkProne: z.boolean(),
+    climate,
+    // The one free-text field that reaches the prompt. Keep it short.
+    location: z.string().max(120).optional(),
+  })
+  .strict();
+
+/**
+ * Compile-time proof that each Zod enum covers its domain union.
+ *
+ * `Covers<Union, Members>` resolves to `never` unless every member of the
+ * union appears in the enum, so a missing value is a type error here rather
+ * than a validator that quietly 400s real users.
+ */
+type Covers<Union extends string, Members extends string> = [
+  Exclude<Union, Members>,
+] extends [never]
+  ? true
+  : ["MISSING FROM ZOD ENUM:", Exclude<Union, Members>];
+
+const _enumsCoverDomain: {
+  active: Covers<ActiveKey, z.infer<typeof active>>;
+  category: Covers<ProductCategory, z.infer<typeof category>>;
+  skinType: Covers<SkinType, z.infer<typeof skinType>>;
+  sensitivity: Covers<Sensitivity, z.infer<typeof sensitivity>>;
+  skinGoal: Covers<SkinGoal, z.infer<typeof skinGoal>>;
+  budget: Covers<Budget, z.infer<typeof budget>>;
+  fragrance: Covers<FragrancePreference, z.infer<typeof fragrancePreference>>;
+  skinTone: Covers<SkinTone, z.infer<typeof skinTone>>;
+  climate: Covers<Climate, z.infer<typeof climate>>;
+} = {
+  active: true,
+  category: true,
+  skinType: true,
+  sensitivity: true,
+  skinGoal: true,
+  budget: true,
+  fragrance: true,
+  skinTone: true,
+  climate: true,
+};
+void _enumsCoverDomain;
+
+/** The parsed intake is structurally the domain type. */
+const _intakeMatchesDomain: IntakeResponse = {} as z.infer<typeof IntakeSchema>;
+void _intakeMatchesDomain;

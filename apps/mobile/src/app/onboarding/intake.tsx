@@ -60,6 +60,8 @@ export default function Intake() {
   const { data, update } = useOnboarding();
   const [step, setStep] = useState(0);
   const [analyzing, setAnalyzing] = useState(false);
+  /** Set when the plan request failed outright, so the user can retry. */
+  const [error, setError] = useState<string | null>(null);
   /**
    * Shown after the routine exists, not as another question before it. The
    * permission prompt lands on the moment the user has just been handed
@@ -112,28 +114,39 @@ export default function Intake() {
     // The photos were taken first, but the assessment needs these answers, so
     // generation happens here rather than running on questionnaire defaults.
     setAnalyzing(true);
+    setError(null);
     const photos = data.photos ?? [];
     const ordered = CAPTURE_STEPS.map((s) => photos.find((p) => p.angle === s.angle)).filter(
       (p): p is CapturedPhoto => p !== undefined,
     );
-    const plan = await fetchPlan({
+    const outcome = await fetchPlan({
       images: ordered.map((p) => ({ data: p.data, mediaType: "image/jpeg", quality: p.quality })),
       intake: buildIntake({ ...data, ...answers }),
     });
-    if (plan) {
-      update({ plan });
-      // This first reading is the zero every later measurement subtracts from,
-      // so it is filed away the moment it exists. Without it there is nothing
-      // to compare a return visit against.
+    setAnalyzing(false);
+
+    // A failed read stops here. Walking on would hand the user a routine that
+    // was never generated from their photos, presented as though it was.
+    if (outcome.status === "failed") {
+      setError(outcome.message);
+      return;
+    }
+
+    // `mode: "mock"` means the server had no API key and invented these
+    // findings. They must not become state, and above all must not be filed as
+    // the baseline — this reading is the zero every later measurement subtracts
+    // from, so a fabricated one would poison every future comparison rather
+    // than being wrong once.
+    if (outcome.status === "ok" && outcome.plan.mode === "ai") {
+      update({ plan: outcome.plan });
       recordAssessment({
         // The capture screen has already written its manifest, so the newest
         // stored session is the set this assessment was made from.
         sessionId: listSessions()[0]?.id ?? "baseline",
         capturedAt: ordered[0]?.capturedAt ?? new Date().toISOString(),
-        assessment: plan.assessment,
+        assessment: outcome.plan.assessment,
       });
     }
-    setAnalyzing(false);
     setAskingReminder(true);
   }
 
@@ -253,8 +266,27 @@ export default function Intake() {
         </View>
       ) : (
         <View style={{ gap: spacing.sm, marginTop: spacing.lg }}>
+          {error ? (
+            <View
+              style={{
+                gap: spacing.xxs,
+                padding: spacing.md,
+                borderRadius: radius.lg,
+                borderWidth: 1,
+                borderColor: colors.hairline,
+                backgroundColor: colors.surface,
+              }}
+            >
+              <AppText variant="bodyStrong" color={colors.escalate}>
+                We couldn&apos;t build your routine
+              </AppText>
+              <AppText variant="caption" color={colors.inkMuted}>
+                {error} Your photos and answers are saved on this phone — nothing was lost.
+              </AppText>
+            </View>
+          ) : null}
           <PrimaryButton
-            label={step < STEP_COUNT - 1 ? "Next" : "Build my routine"}
+            label={error ? "Try again" : step < STEP_COUNT - 1 ? "Next" : "Build my routine"}
             onPress={next}
             disabled={!canAdvance}
           />
