@@ -280,7 +280,52 @@ Onboarding is now photo-first, which matches `apps/web/components/sections/HowIt
 and `FeatureCards.tsx`. Check no other marketing copy still describes an order
 the app no longer uses.
 
-### `apps/web` has no tests
-`packages/shared` is the only package with a test suite. The `/api/plan` input
-validation in `apps/web/app/api/plan/route.ts` is a trust boundary in front of a
-paid endpoint and is currently only covered by manual probes.
+### `/api/plan`: hardened, but a real rate limit still needs a datastore
+Done: the intake is `.strict()`-validated (closing a ~110x token-amplification
+vector — an unknown field of a few megabytes was serialized into both Opus
+calls), the body is capped before parsing, image limits match the API's real 5MB
+ceiling, base64 and `mediaType` are checked, an empty image array no longer fires
+two model calls on nothing, 500s no longer leak Anthropic error text, refusals
+return 422 instead of 500, and the boundary has 21 tests.
+
+Still open:
+
+- **The rate limiter is in-memory and therefore best-effort.** Serverless
+  instances do not share memory, so it bounds a burst against one warm instance
+  and nothing else. A real limit needs a datastore — Upstash or Vercel KV is the
+  usual answer. That is a vendor, an account and a recurring bill, so it is a
+  decision rather than a patch.
+- **`PLAN_API_KEY` is friction, not auth.** It is unset by default so nothing
+  breaks; when set, the mobile app must send `x-pore-key`. Its copy would ship
+  inside the JS bundle, so it stops scanners and not people. Real client
+  authentication means App Attest / Play Integrity and a backend to verify them.
+- **Nothing runs on commit.** There is no `.github/workflows` at all, so
+  `pnpm test`, `pnpm typecheck` and `pnpm lint` only run when someone runs them.
+  A small CI workflow is the cheapest remaining win in the repo.
+
+### `apps/mobile` has no tests
+`packages/shared` and the `/api/plan` boundary are covered. The mobile app is
+not: the persistence in `lib/profile.ts` and `lib/journal.ts`, and the
+`mode: "mock"` guards in `onboarding/intake.tsx` and `compare.tsx`, are all
+verified only by manual probes.
+
+### Two findings from a branch that was otherwise discarded
+Carried here because the code was dropped but the facts are real:
+
+- **`applySafetyRules` is not idempotent.** `pregnancy_caution_flagged` emits on
+  every pass with no corresponding state change, so re-applying the engine over
+  an already-clamped routine duplicates that entry in the audit trail the UI
+  renders verbatim. Every other rule no-ops on a second pass. Anything that
+  re-runs the engine over a stored routine needs to know this.
+- **`intake.location` is the one free-text field that reaches a prompt.** After
+  the `.strict()` intake schema, every other field is an enum or a bounded
+  number, so `location` is the only injection surface left. It is length-capped,
+  not sanitized.
+- **`ROUTINE_SYSTEM` claims to use preferences nobody chose.** `prompts.ts:33`
+  says "reflect the user's budget and fragrance preference in your rationale",
+  while `buildIntake` hardcodes `budget: "medium"` and
+  `fragrancePreference: "no_preference"` — literal values, not `??` defaults.
+  So every rationale is reasoning over answers no user gave. The same argument
+  that retired `currentProducts` applies: either collect them or stop claiming
+  to use them. Left alone here only because changing a prompt on a paid endpoint
+  wants its own before/after, not a security commit.

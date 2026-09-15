@@ -70,7 +70,7 @@ pnpm build            # turbo run build     (web only defines `build`; mobile/sh
 pnpm dev              # turbo run dev       (persistent, uncached)
 pnpm lint             # turbo run lint      (web only; eslint-config-next flat config)
 pnpm typecheck        # turbo run typecheck (all three packages: tsc --noEmit)
-pnpm test             # turbo run test      (packages/shared only, via vitest)
+pnpm test             # turbo run test      (packages/shared + apps/web, via vitest)
 ```
 
 Single-package / single-test invocations:
@@ -96,14 +96,13 @@ pnpm --filter @pore/mobile ios / android / web
 pnpm --filter @pore/mobile typecheck
 ```
 
-Current baseline (keep it here): `pnpm test` → 4 files, 95 tests, all passing (`safety` 12, `vision`
-21, `progress` 21, `schedule` 41). `pnpm typecheck` → clean in all three packages. `pnpm lint` → 0
-errors, 6 pre-existing `no-unused-vars` warnings (`components/ui/Button.tsx`, `lib/mock.ts`). Don't
-let a change add errors; the warnings are known.
+Current baseline (keep it here): `pnpm test` → 5 files, 116 tests, all passing (`safety` 12,
+`vision` 21, `progress` 21, `schedule` 41, `web/validatePlanRequest` 21). `pnpm typecheck` → clean
+in all three packages. `pnpm lint` → 0 errors, 6 pre-existing `no-unused-vars` warnings
+(`components/ui/Button.tsx`, `lib/mock.ts`). Don't let a change add errors; the warnings are known.
 
-`packages/shared` is the only package with tests. `apps/web` and `apps/mobile` have none — notably
-the `/api/plan` input validation, which is a trust boundary in front of a paid endpoint (tracked in
-`TODOS.md`).
+`apps/mobile` still has no tests. `apps/web`'s only suite covers the `/api/plan` trust boundary —
+see that section below.
 
 ## Architecture: the plan-generation pipeline
 
@@ -111,10 +110,13 @@ the `/api/plan` input validation, which is a trust boundary in front of a paid e
 `POST /api/plan` (`apps/web/app/api/plan/route.ts`, Node runtime — the Anthropic SDK needs Node,
 not edge — with `maxDuration: 60` since it makes two model calls).
 
-**The route is a trust boundary and is explicit about it.** `validateImages` caps the request at 3
-images and ~8MB decoded each, rejects `data:` URI prefixes, allowlists media types, and parses
-client-supplied `quality` through `PhotoQualitySchema` rather than trusting it. Each rule returns
-its own message — "invalid request" tells a legitimate client nothing. Keep that property.
+**The route is a trust boundary and is explicit about it.** Validation lives in the pure, tested
+`apps/web/lib/validatePlanRequest.ts`: 3 images, 5MB decoded each (the API's own ceiling), base64
+checked, `data:` URI prefixes rejected, media types allowlisted and required, client-supplied
+`quality` parsed through `PhotoQualitySchema` rather than trusted, and the intake `.strict()`-parsed
+through `IntakeSchema`. Each rule returns its own message — "invalid request" tells a legitimate
+client nothing. Keep that property, and see the trust-boundary section below for why the intake
+parsing in particular is load-bearing.
 
 1. **Vision assessment** — up to 3 photos + intake JSON go to Claude (`client.messages.parse` with a
    Zod `output_config.format`, model `claude-opus-4-8`) using `ASSESSMENT_SYSTEM`, producing a
@@ -380,6 +382,52 @@ by `components/blog/RichText.tsx`), `lib/updates.ts` (the "built in public" feed
 Waitlist is a **Tally** popup: `lib/tally.ts` exposes `openWaitlist()` + the form id; the widget
 script is loaded once in `app/layout.tsx`, and the post-submit redirect to `/waitlist/confirmed` is
 configured in the Tally dashboard, not in code. There is no waitlist API route in this repo.
+
+## The `/api/plan` trust boundary
+
+One unauthenticated POST is the entire server attack surface, and it fronts two sequential
+`claude-opus-4-8` calls ($5/1M input, 1M context). `apps/web/lib/validatePlanRequest.ts` is a
+pure, tested module — no Next, no SDK, no API key — because a boundary you cannot test is a
+claim rather than a boundary. Add cases to `validatePlanRequest.test.ts` when changing it.
+
+The governing rule: **every request cost must be bounded by things we decide, never by things
+the caller sends.** `IntakeSchema` is `.strict()` for exactly that reason — rejecting unknown
+keys bounds the serialized intake by its declared fields, rather than by whatever a caller
+attaches. Before it existed, `intake` was checked for presence and then `JSON.stringify`'d
+into *both* model calls, so a multi-megabyte unknown field turned a ~$0.09 request into
+roughly $10. It is also the prompt-injection surface: only enum members and bounded values
+survive, and `location` is the sole free-text field that reaches a prompt.
+
+The Zod enums in `schemas.ts` are held to the domain unions by the `Covers<>` assertions at the
+bottom of that file. A domain value added without updating the schema is a **typecheck
+failure**, not a validator that silently 400s real users.
+
+Two things are deliberately weaker than they look, and are labelled as such in the code:
+`PLAN_API_KEY` is friction against automated scanning, not authentication (the mobile copy would
+ship in the app bundle), and the in-memory rate limiter bounds a burst against one warm
+serverless instance and nothing more. A real limit needs a datastore this project does not
+have — see `TODOS.md`.
+
+Never return `err.message` from the 500 path. Anthropic SDK errors embed the provider's JSON
+body: billing state, key validity, org rate-limit status, the model id. A leaked 500 is a free
+probe of the account.
+
+### `mode: "mock"` is a contract, not a hint
+
+With `ANTHROPIC_API_KEY` unset the pipeline returns a complete, real-looking plan whose findings
+are fabricated. **Every caller of `fetchPlan` must check it**, and the reason is sharper here
+than "don't show fake findings":
+
+- `onboarding/intake.tsx` files the first reading via `recordAssessment` as the baseline every
+  later measurement subtracts from. A fabricated baseline is not wrong once — it is wrong
+  forever.
+- `compare.tsx` feeds the reading into `adaptRoutine`, which steps real actives up or down. A
+  mock there changes what someone puts on their face.
+
+Both now require `outcome.plan.mode === "ai"` before recording or adapting. `fetchPlan` also
+returns a `PlanOutcome` that keeps "no server configured" apart from "the request failed": the
+first falls through to the labelled local demo, the second stops with a retry. Never collapse
+those two.
 
 ## Conventions
 

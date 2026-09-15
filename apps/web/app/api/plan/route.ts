@@ -1,93 +1,100 @@
-import { generatePlan, type ImageMediaType, type PlanImage, type PlanInput } from "@/lib/pipeline";
-import { PhotoQualitySchema } from "@/lib/schemas";
+import { PlanRefusedError, generatePlan } from "@/lib/pipeline";
+import { MAX_BODY_BYTES, validatePlanRequest } from "@/lib/validatePlanRequest";
 
 // The Anthropic SDK needs the Node runtime (not edge); two Opus calls can take
 // a while, so give the function room.
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
-/** The guided capture takes three shots; anything more is not a real client. */
-const MAX_IMAGES = 3;
-/** ~8MB of decoded image bytes. Base64 inflates by 4/3. */
-const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
-const ALLOWED_MEDIA_TYPES: ImageMediaType[] = [
-  "image/jpeg",
-  "image/png",
-  "image/webp",
-  "image/gif",
-];
+/**
+ * A shared secret, and an honest account of what it is worth.
+ *
+ * `EXPO_PUBLIC_*` values are inlined into the app bundle, so anyone with the
+ * binary can read this. It is not authentication and will not stop a determined
+ * person. What it does stop is automated scanning — bots hunting for
+ * unprotected LLM proxies — which is the overwhelming majority of what a public
+ * endpoint like this actually sees.
+ *
+ * Unset means no check, so local development and the mock path keep working
+ * with no configuration.
+ */
+const PLAN_API_KEY = process.env.PLAN_API_KEY;
 
 /**
- * This is a trust boundary in front of a paid Opus endpoint, so it is explicit
- * and lives here rather than being folded into the pipeline. Each rule returns
- * its own message: "invalid request" tells a legitimate client nothing.
+ * Best-effort burst limiting, in memory.
+ *
+ * Read this before trusting it: serverless instances do not share memory, so
+ * this bounds a burst against ONE warm instance and does nothing about a
+ * distributed or cold-start pattern. It is friction, not a guarantee. A real
+ * limit needs a datastore, which this project does not have — see TODOS.
  */
-function validateImages(raw: unknown): { images: PlanImage[] } | { error: string } {
-  if (raw === undefined || raw === null) return { images: [] };
-  if (!Array.isArray(raw)) return { error: "`images` must be an array" };
-  if (raw.length > MAX_IMAGES) {
-    return { error: `At most ${MAX_IMAGES} images are accepted, got ${raw.length}` };
+const WINDOW_MS = 60_000;
+const MAX_REQUESTS_PER_WINDOW = 10;
+const hits = new Map<string, { count: number; resetAt: number }>();
+
+function overRateLimit(ip: string, now = Date.now()): boolean {
+  const entry = hits.get(ip);
+  if (!entry || now > entry.resetAt) {
+    hits.set(ip, { count: 1, resetAt: now + WINDOW_MS });
+    // Keep the map from growing without bound on a long-lived instance.
+    if (hits.size > 10_000) {
+      for (const [key, value] of hits) if (now > value.resetAt) hits.delete(key);
+    }
+    return false;
   }
+  entry.count += 1;
+  return entry.count > MAX_REQUESTS_PER_WINDOW;
+}
 
-  const images: PlanImage[] = [];
-  for (let i = 0; i < raw.length; i++) {
-    const img = raw[i] as Partial<PlanImage> | null;
-    if (!img || typeof img !== "object") return { error: `images[${i}] must be an object` };
-    if (typeof img.data !== "string" || img.data.length === 0) {
-      return { error: `images[${i}].data must be a non-empty base64 string` };
-    }
-    if (img.data.startsWith("data:")) {
-      return { error: `images[${i}].data must be raw base64, without a data: URI prefix` };
-    }
-    // Base64 encodes 3 bytes per 4 characters; check before allocating anything.
-    if ((img.data.length * 3) / 4 > MAX_IMAGE_BYTES) {
-      return { error: `images[${i}] exceeds the ${MAX_IMAGE_BYTES / (1024 * 1024)}MB limit` };
-    }
-    if (img.mediaType !== undefined && !ALLOWED_MEDIA_TYPES.includes(img.mediaType)) {
-      return {
-        error: `images[${i}].mediaType must be one of ${ALLOWED_MEDIA_TYPES.join(", ")}`,
-      };
-    }
-
-    // Capture quality is client-measured, so it is parsed rather than trusted.
-    let quality: PlanImage["quality"];
-    if (img.quality !== undefined) {
-      const parsed = PhotoQualitySchema.safeParse(img.quality);
-      if (!parsed.success) return { error: `images[${i}].quality is malformed` };
-      quality = parsed.data;
-    }
-
-    images.push({ data: img.data, mediaType: img.mediaType, quality });
-  }
-  return { images };
+function clientIp(req: Request): string {
+  const forwarded = req.headers.get("x-forwarded-for");
+  return forwarded?.split(",")[0]?.trim() || "unknown";
 }
 
 export async function POST(req: Request) {
-  let body: Partial<PlanInput>;
+  if (PLAN_API_KEY && req.headers.get("x-pore-key") !== PLAN_API_KEY) {
+    return Response.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  if (overRateLimit(clientIp(req))) {
+    return Response.json({ error: "Too many requests" }, { status: 429 });
+  }
+
+  // Refuse oversized payloads before deserializing anything.
+  const declaredLength = Number(req.headers.get("content-length") ?? 0);
+  if (declaredLength > MAX_BODY_BYTES) {
+    return Response.json({ error: "Request body is too large" }, { status: 413 });
+  }
+
+  let body: unknown;
   try {
-    body = (await req.json()) as Partial<PlanInput>;
+    body = await req.json();
   } catch {
     return Response.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  if (!body.intake) {
-    return Response.json({ error: "Missing `intake`" }, { status: 400 });
-  }
-
-  const validated = validateImages(body.images);
-  if ("error" in validated) {
-    return Response.json({ error: validated.error }, { status: 400 });
+  const validated = validatePlanRequest(body);
+  if (!validated.ok) {
+    return Response.json({ error: validated.error }, { status: validated.status });
   }
 
   try {
-    const result = await generatePlan({
-      images: validated.images,
-      intake: body.intake,
-    });
-    return Response.json(result);
+    return Response.json(await generatePlan(validated.input));
   } catch (err) {
+    if (err instanceof PlanRefusedError) {
+      // Not a server fault. 422 so the client can say "we couldn't read these"
+      // rather than "something broke".
+      console.warn("/api/plan refused:", err.category);
+      return Response.json(
+        { error: "We couldn't assess these photos. Try retaking them." },
+        { status: 422 },
+      );
+    }
+    // Never return `err.message`. These are almost always Anthropic SDK errors,
+    // and their messages embed the provider's JSON body — billing state ("credit
+    // balance is too low"), key validity, org rate-limit status, the model id.
+    // That turns any 500 into a free probe of the account for whoever finds the URL.
     console.error("/api/plan failed:", err);
-    const message = err instanceof Error ? err.message : "Unknown error";
-    return Response.json({ error: message }, { status: 500 });
+    return Response.json({ error: "Could not generate a plan" }, { status: 500 });
   }
 }

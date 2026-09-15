@@ -85,16 +85,27 @@ export default function Compare() {
     setAssessing(true);
     setAssessError(null);
     try {
-      const result = await fetchPlan({
+      const outcome = await fetchPlan({
         images: photos.map((p) => ({ data: p.data, mediaType: "image/jpeg" })),
         intake: buildIntake(data),
       });
-      if (!result) {
+      if (outcome.status === "failed") {
         setAssessError(
-          "We couldn't reach the assessment service, so your photos are saved but not measured yet. Try again when you're back online.",
+          `${outcome.message} Your photos are saved but not measured yet — try again when you're back online.`,
         );
         return;
       }
+      // Anything that is not a real read must not be recorded, and must not
+      // reach adaptRoutine below. An unconfigured server returns invented
+      // findings marked `mode: "mock"`, and feeding those into the adaptation
+      // would step a real active up or down on the strength of a fixture.
+      if (outcome.status !== "ok" || outcome.plan.mode !== "ai") {
+        setAssessError(
+          "The assessment service isn't configured, so your photos are saved but not measured yet.",
+        );
+        return;
+      }
+      const result = outcome.plan;
       const recorded = recordAssessment({
         sessionId: sessions[0]?.id ?? "current",
         capturedAt: photos[0]?.capturedAt ?? new Date().toISOString(),
