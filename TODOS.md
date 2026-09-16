@@ -281,13 +281,20 @@ and `FeatureCards.tsx`. Check no other marketing copy still describes an order
 the app no longer uses.
 
 ### `apps/web` route handlers are untested at the HTTP layer
-`apps/web` now has a test suite (`lib/plan-boundary.test.ts`, run by `pnpm test`)
-covering `IntakeSchema` and the rate limiter as units. What is still uncovered is
-the handler itself: the status codes, the `RateLimit-*` / `Retry-After` headers,
-and the ordering of the gates in `app/api/plan/route.ts` were verified by manual
-curl probes, not by a test. A refactor that reorders the gates — say, moving the
-body-size check after `req.json()` — would pass the current suite while undoing
-the protection. `apps/mobile` still has no tests at all.
+`apps/web` now has four suites, run by `pnpm test`, all on trust boundaries:
+`lib/validateImages.test.ts` and `lib/rateLimit.test.ts` (the two guards in front
+of the paid endpoint), `lib/plan-boundary.test.ts` (`IntakeSchema`, the bound on
+what that endpoint pays for) and `lib/consent.test.ts` (the parental-consent
+tokens and codes, every fail-closed path). Everything else in `apps/web` is
+untested, which is fine — it is a marketing site.
+
+What is still uncovered is the **handlers themselves**: the status codes, the
+`Retry-After` header, and the ordering of the gates in `app/api/plan/route.ts`
+were verified by manual curl probes, not by a test. A refactor that reorders the
+gates — say, moving the body-size check after `req.json()` — would pass the
+current suite while undoing the protection. That gap matters more here than the
+untested marketing pages, because on this route the ordering *is* the control.
+`apps/mobile` still has no tests at all.
 
 ## Security & cost hardening — deferred items
 
@@ -328,6 +335,7 @@ Two limits, both deliberate:
 Also still true: `CONSENT_SECRET`, `RESEND_API_KEY` and `CONSENT_EMAIL_FROM`
 must be set in the deployment or no minor can ever finish onboarding. That is
 the intended failure direction, but it will look like a bug if nobody sets them.
+
 ### `/waitlist/confirmed` confirms a waitlist nobody joined
 `apps/web/app/(auth)/signup/page.tsx:43` (and the Google button's `href` at `:138`)
 navigate to `/waitlist/confirmed` without ever touching Tally. The waitlist lives
@@ -352,13 +360,38 @@ It also silently no-ops below the model's minimum cacheable prefix. **Trigger:**
 add it when traffic is bursty enough that requests land within 5 minutes of each
 other, and verify with `usage.cache_read_input_tokens > 0` rather than assuming.
 
-### The rate limiter is per-instance
-`apps/web/lib/rate-limit.ts` is an in-memory Map. On Vercel that is per-lambda and
-dies with a cold start: it stops a script, not a distributed caller. The durable
-control is the input bound in `IntakeSchema`. Upgrade when there is real traffic:
-Vercel Firewall rate-limit rules (no code) or an Upstash-backed counter (replace
-the body of `rateLimit`, the signature is already the right shape). It keys on a
-caller identity string, so it becomes a user id the day real auth lands.
+### `/api/plan` rate limiting is a speed bump, not a wall
+`apps/web/lib/rateLimit.ts` counts per-IP requests (5 per 10 minutes) and
+concurrent generations (4) **in the process**, so on Vercel each lambda enforces
+its own limit and a cold start resets it. `x-forwarded-for` is also spoofable by
+anyone talking to the origin directly. It stops the accidental case — a retry
+loop, a stuck client, a scraper that does not care — and it is the most that can
+be done without shared state. The durable cost control is the input bound in
+`IntakeSchema`, not this.
+
+Before this endpoint carries real traffic, move the counters to Redis/KV;
+`check()` is pure apart from the store it is handed, so only the store changes.
+Vercel Firewall rate-limit rules are the no-code alternative. Real protection
+means auth on the endpoint, which means an account system that does not exist
+yet — `clientKey()` already returns a caller identity string, so it becomes a
+user id the day that lands.
+
+### The mobile client cannot see a 429 — fix this next
+**This is a prerequisite the rate limiter created, and it is the highest-value
+mobile change outstanding.** `fetchPlan` in `apps/mobile/src/lib/api.ts` now logs
+the status and body of any non-ok response — so the failure is at least visible
+in the client log rather than silent — but it still returns `null` for every
+outcome alike (no API URL, offline, 400, 429, 500), and `onboarding/intake.tsx`
+proceeds regardless of whether a plan came back. So a throttled user finishes the
+questionnaire and is handed the local fallback with nothing on screen saying why.
+
+That was already true for every other failure; the limiter just adds one more way
+to reach it. The fix is to make `fetchPlan` return a discriminated outcome
+(`ok` / `unconfigured` / `offline` / `timeout` / `server` / `busy`), give it an
+`AbortController` deadline so a stalled request cannot spin forever, and stop
+`intake.tsx` navigating onward on failure. There is a working implementation of
+exactly this in the abandoned branch at `801a832` (`apps/mobile/src/lib/api.ts`)
+if it is useful as a starting point.
 
 ### `maxDuration` is 60s and unverified against the deploy target
 `apps/web/app/api/plan/route.ts:8` sets `maxDuration = 60`. Two sequential Opus

@@ -1,12 +1,16 @@
 /**
- * The /api/plan trust boundary: what stops an anonymous caller from spending
- * money. TODOS.md flagged this as covered by manual probes only.
+ * The bound on what one `/api/plan` request can cost.
+ *
+ * `intake` is `JSON.stringify`'d into *both* Claude prompts, so its size is the
+ * per-request bill. The rate limiter caps how many requests are paid for, not
+ * how much each one costs — that is this schema's job, and it is covered here.
+ * The limiter and the image rules have their own suites
+ * (`rateLimit.test.ts`, `validateImages.test.ts`).
  *
  * Not a suite — the assertions on the paid path, and nothing else.
  */
 import { describe, expect, it } from "vitest";
 import { IntakeSchema } from "./schemas";
-import { rateLimit } from "./rate-limit";
 
 const validIntake = {
   age: 28,
@@ -55,33 +59,3 @@ describe("IntakeSchema", () => {
   });
 });
 
-describe("rateLimit", () => {
-  // `now` is injected rather than faked globally: the window is arithmetic, so
-  // there is nothing to fake. Each test uses its own key for isolation.
-  it("allows the limit and rejects the next request", () => {
-    const t = 1_000_000;
-    for (let i = 0; i < 5; i++) {
-      expect(rateLimit("allow-key", t + i).ok).toBe(true);
-    }
-    const blocked = rateLimit("allow-key", t + 5);
-    expect(blocked.ok).toBe(false);
-    expect(blocked.remaining).toBe(0);
-    expect(blocked.retryAfter).toBeGreaterThan(0);
-  });
-
-  it("releases once the window has passed", () => {
-    const t = 2_000_000;
-    for (let i = 0; i < 5; i++) rateLimit("release-key", t + i);
-    expect(rateLimit("release-key", t + 5).ok).toBe(false);
-
-    // 10 minutes later the window is empty again.
-    expect(rateLimit("release-key", t + 10 * 60 * 1000 + 1).ok).toBe(true);
-  });
-
-  it("tracks callers independently", () => {
-    const t = 3_000_000;
-    for (let i = 0; i < 5; i++) rateLimit("caller-a", t + i);
-    expect(rateLimit("caller-a", t + 5).ok).toBe(false);
-    expect(rateLimit("caller-b", t + 5).ok).toBe(true);
-  });
-});

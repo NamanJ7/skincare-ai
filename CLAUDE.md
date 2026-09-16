@@ -42,7 +42,7 @@ pnpm's symlinked store. Don't "fix" that back to symlinks.
   `./progress` subpath — those three are reachable from the root barrel only).
   - `design/` — color/spacing/radius/typography/shadow tokens (`tokens.ts`) plus a Tailwind preset.
   - `types/` — the domain model (`IntakeResponse`, `Routine`/`RoutineStep`, `Assessment`,
-    `PhotoQuality`, product types).
+    `PhotoQuality`).
   - `safety/` — `applySafetyRules`, the deterministic routine-safety engine, and the `ACTIVES`
     ingredient metadata table + `activeRelevanceScore` it runs against.
   - `schedule/` — `planDay`/`planWeek`, the deterministic cadence engine (see below) that turns a
@@ -89,7 +89,7 @@ pnpm --filter @pore/shared typecheck
 pnpm --filter web dev                        # next dev, http://localhost:3000
 pnpm --filter web lint
 pnpm --filter web build
-pnpm --filter web test                       # vitest run (lib/**/*.test.ts)
+pnpm --filter web test                       # vitest run (lib/**, app/** *.test.ts)
 
 # mobile (run from apps/mobile, or pnpm --filter @pore/mobile <script>)
 pnpm --filter @pore/mobile start             # expo start
@@ -97,17 +97,21 @@ pnpm --filter @pore/mobile ios / android / web
 pnpm --filter @pore/mobile typecheck
 ```
 
-Current baseline (keep it here): `pnpm test` → 6 files, 112 tests, all passing (`safety` 12,
-`vision` 21, `progress` 21, `schedule` 41, web `plan-boundary` 7, web `consent` 10). `pnpm
-typecheck` → clean in all three packages. `pnpm lint` → 0 errors, 6 pre-existing `no-unused-vars`
-warnings (`components/ui/Button.tsx`, `lib/mock.ts`). Don't let a change add errors; the warnings
-are known.
+Current baseline (keep it here): `pnpm test` → 8 files, 130 tests, all passing —
+`packages/shared` 95 (`safety` 12, `vision` 21, `progress` 21, `schedule` 41) and `apps/web` 35
+(`validateImages` 11, `rateLimit` 10, `consent` 10, `plan-boundary` 4). `pnpm typecheck` →
+clean in all three packages. `pnpm lint` → 0 errors, 6 pre-existing `no-unused-vars` warnings
+(`components/ui/Button.tsx`, `lib/mock.ts`). Don't let a change add errors; the warnings are known.
 
-`packages/shared` holds the bulk of the tests. `apps/web` has two suites, both on trust boundaries:
-`lib/plan-boundary.test.ts` (`/api/plan` — `IntakeSchema` and the rate limiter) and
-`lib/consent.test.ts` (the parental-consent tokens and codes, including every fail-closed path).
-Neither covers the route handlers' own status codes, headers or gate ordering — those are still
-manual probes only, tracked in `TODOS.md`. `apps/mobile` has none.
+`apps/web`'s tests cover only the trust boundaries — the two guards in front of the paid endpoint
+(`lib/validateImages.ts`, `lib/rateLimit.ts`), the intake schema that bounds what that endpoint
+pays for (`lib/plan-boundary.test.ts`), and the parental-consent tokens and codes including every
+fail-closed path (`lib/consent.test.ts`). That is the intended scope: the rest of that app is a
+marketing site. **Nothing covers the route handlers themselves** — their status codes, headers and
+gate ordering are manual probes only, tracked in `TODOS.md`, which matters because the ordering is
+where the protection lives. `apps/mobile` has no tests; the logic there worth testing belongs in
+`packages/shared`, which is why the pure parts of capture measurement live in `vision/` rather than
+beside the camera.
 
 ## Architecture: the plan-generation pipeline
 
@@ -115,24 +119,44 @@ manual probes only, tracked in `TODOS.md`. `apps/mobile` has none.
 `POST /api/plan` (`apps/web/app/api/plan/route.ts`, Node runtime — the Anthropic SDK needs Node,
 not edge — with `maxDuration: 60` since it makes two model calls).
 
-**The route is a cost boundary, not just a correctness one, and the gate ORDER is the protection.**
+**The route is a cost boundary as well as a correctness one, and the gate ORDER is the protection.**
 `route.ts` runs four gates: rate limit → `content-length` → `IntakeSchema` → `validateImages`. The
 first two run before `req.json()`, so a rejected caller never gets a body buffered into memory, and
-a missing `content-length` is a 411 rather than an unbounded read. `IntakeSchema` (`lib/schemas.ts`)
-matters most: the intake is `JSON.stringify`'d into *both* Claude prompts, so every free-text field
-is length- and count-capped and the object is `.strict()`. An unbounded intake is an unbounded bill
-— rate limiting caps only how many requests you pay for, not how much each one costs, and
-`lib/rate-limit.ts` is an in-memory Map (per-instance on serverless), so it is the backstop, not the
-primary control. `validateImages` then caps the request at 3 images and 1MB decoded each (sized so
-three at the cap still fit under Vercel's ~4.5MB body limit), rejects `data:` URI prefixes,
-allowlists media types, and parses client-supplied `quality` through `PhotoQualitySchema` rather
-than trusting it.
+a missing `content-length` is a 411 rather than an unbounded read.
 
-Each rule returns its own message — "invalid request" tells a legitimate client nothing. Keep that
-property. 500s return a fixed message; the real error is logged, never returned. Do not reorder,
-relax or remove any of this without reading `lib/plan-boundary.test.ts` first: it covers the schema
-and limiter as units but not the handler's ordering, so a reordering refactor passes the suite while
+`IntakeSchema` (`lib/schemas.ts`) matters most: the intake is `JSON.stringify`'d into *both* Claude
+prompts, so every free-text field is length- and count-capped and the object is `.strict()`. An
+unbounded intake is an unbounded bill — rate limiting caps only how many requests you pay for, not
+how much each one costs.
+
+`validateImages` (`apps/web/lib/validateImages.ts`, extracted from the route so it can be tested)
+caps the request at 3 images and 1MB decoded each — sized so three at the cap still fit under
+Vercel's ~4.5MB platform body limit, which is what makes the number reachable — rejects `data:` URI
+prefixes, allowlists media types, and parses client-supplied `quality` through `PhotoQualitySchema`
+rather than trusting it. The size check reads the base64 string length *before* allocating anything
+— allocating first is how a size limit becomes the denial of service.
+
+**It is also rate limited** (`apps/web/lib/rateLimit.ts`): 5 requests per IP per 10 minutes and 4
+concurrent generations, because the endpoint is public, unauthenticated, and makes two Opus calls per
+request. Be accurate about what that is — **the counters live in the process**, so on serverless each
+instance enforces its own limit and a cold start resets it, and `x-forwarded-for` is spoofable by
+anyone reaching the origin directly. It stops a retry loop or a careless scraper. It is **not a
+security control** and must not be described as one; it is the backstop, and `IntakeSchema` is the
+primary cost control. When this takes real traffic, move the counters to Redis/KV — `check()` is pure
+apart from the store it is handed, so only the store changes.
+
+Each rule returns its own message — "invalid request" tells a legitimate client nothing, and this is
+the surface a mobile build hits when its encoding is off. Keep that property. 500s return a fixed
+message; the real error is logged, never returned, because SDK errors carry key state and internal
+paths. Do not reorder, relax or remove any of this without reading `lib/plan-boundary.test.ts`,
+`lib/rateLimit.test.ts` and `lib/validateImages.test.ts` first: they cover the schema, limiter and
+image rules as units but not the handler's ordering, so a reordering refactor passes the suite while
 quietly undoing the protection.
+
+One consequence the server cannot fix: `fetchPlan` collapses every non-ok outcome to `null` — it now
+logs the status and body first, so the failure is visible in the client log, but the caller still
+cannot tell a 429 from a 400, and `onboarding/intake.tsx` proceeds regardless. A throttled user is
+handed no plan and shown the local fallback. See `TODOS.md`.
 
 1. **Vision assessment** — up to 3 photos + intake JSON go to Claude (`client.messages.parse` with a
    Zod `output_config.format`, model `claude-opus-4-8`) using `ASSESSMENT_SYSTEM`, producing a

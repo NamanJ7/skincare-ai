@@ -18,39 +18,39 @@ import {
 export const metadata: Metadata = {
   title: "Features",
   description:
-    "Guided face photos, personalized routines, a product shelf you understand, ingredient compatibility, progress tracking, and AI guidance - explore everything Pore does.",
+    "Guided three-photo capture, a routine clamped by deterministic safety rules, paced actives, and a before-and-after Pore refuses to fake - explore everything Pore does.",
 };
 
 const HIGHLIGHTS = [
   {
     icon: <CameraIcon size={20} />,
-    title: "Guided face photo",
-    body: "Start by taking a clear picture of your face so Pore can read visible skin cues.",
+    title: "Guided capture",
+    body: "Three angles under your screen's own light, each measured before it counts.",
   },
   {
     icon: <DropIcon size={20} />,
-    title: "Personalized routines",
-    body: "Simple AM / PM routines shaped by your face photo, goals, and products.",
-  },
-  {
-    icon: <LeafIcon size={20} />,
-    title: "Product shelf",
-    body: "Catalog what you own so Pore builds around your real routine.",
+    title: "Personalized routine",
+    body: "Simple AM / PM steps shaped by your photos, your goals, and how your skin reacts.",
   },
   {
     icon: <CheckIcon size={20} />,
-    title: "Ingredient compatibility",
-    body: "Avoid irritating combinations with gentle, plain-language checks.",
+    title: "Deterministic safety",
+    body: "Sunscreen always, allergens removed, pregnancy-unsafe actives stripped - in code.",
+  },
+  {
+    icon: <LeafIcon size={20} />,
+    title: "Paced actives",
+    body: "One strong active a day, ramped over six weeks, pulled back when your skin protests.",
   },
   {
     icon: <ChartIcon size={20} />,
-    title: "Progress tracking",
-    body: "Track consistency, notes, and visible changes over time.",
+    title: "Measured progress",
+    body: "Two blind readings subtracted in code - and a refusal when they aren't comparable.",
   },
   {
     icon: <SparkleIcon size={20} />,
-    title: "AI guidance",
-    body: "Personalized guidance as your skin changes - education, not diagnosis.",
+    title: "A reason for everything",
+    body: "Every step and every adjustment says why - education, never a diagnosis.",
   },
 ];
 

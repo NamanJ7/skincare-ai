@@ -2,7 +2,7 @@ import { z } from "zod";
 
 import { sendConsentEmail } from "@/lib/consent-email";
 import { issueToken } from "@/lib/consent";
-import { clientKey, rateLimit } from "@/lib/rate-limit";
+import { check, clientKey, createStore } from "@/lib/rateLimit";
 
 // node:crypto and the mailer both need the Node runtime.
 export const runtime = "nodejs";
@@ -23,13 +23,23 @@ const RequestSchema = z
   })
   .strict();
 
+/**
+ * A store of this route's own, not the one `/api/plan` uses.
+ *
+ * Sharing it would mean a teen who asked for a second approval email had spent
+ * part of the budget for generating their plan — two unrelated actions throttling
+ * each other. Same limits, separate counters.
+ */
+const store = createStore();
+
 export async function POST(req: Request) {
-  const limit = rateLimit(`consent:${clientKey(req)}`);
-  if (!limit.ok) {
-    console.warn(`/api/consent/request rate limited: ${clientKey(req)}`);
+  const key = clientKey(req.headers);
+  const gate = check(store, key, Date.now());
+  if (!gate.allowed) {
+    console.warn(`/api/consent/request rate limited (${gate.reason}): ${key}`);
     return Response.json(
       { error: "Too many requests. Please wait a few minutes and try again." },
-      { status: 429, headers: { "Retry-After": String(limit.retryAfter) } },
+      { status: 429, headers: { "Retry-After": String(gate.retryAfterSeconds) } },
     );
   }
 

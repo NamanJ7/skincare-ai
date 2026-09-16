@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 import { codeFor, readToken } from "@/lib/consent";
-import { clientKey, rateLimit } from "@/lib/rate-limit";
+import { check, clientKey, createStore } from "@/lib/rateLimit";
 
 export const runtime = "nodejs";
 
@@ -15,12 +15,15 @@ export const runtime = "nodejs";
  */
 const ApproveSchema = z.object({ token: z.string().max(2048) }).strict();
 
+/** This route's own counters — see the note in `../request/route.ts`. */
+const store = createStore();
+
 export async function POST(req: Request) {
-  const limit = rateLimit(`consent-approve:${clientKey(req)}`);
-  if (!limit.ok) {
+  const gate = check(store, clientKey(req.headers), Date.now());
+  if (!gate.allowed) {
     return Response.json(
       { error: "Too many requests. Please wait a few minutes and try again." },
-      { status: 429, headers: { "Retry-After": String(limit.retryAfter) } },
+      { status: 429, headers: { "Retry-After": String(gate.retryAfterSeconds) } },
     );
   }
 

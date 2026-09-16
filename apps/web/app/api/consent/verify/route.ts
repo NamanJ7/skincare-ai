@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 import { verifyCode } from "@/lib/consent";
-import { clientKey, rateLimit } from "@/lib/rate-limit";
+import { check, clientKey, createStore } from "@/lib/rateLimit";
 
 export const runtime = "nodejs";
 
@@ -16,13 +16,22 @@ const VerifySchema = z
   .object({ token: z.string().max(2048), code: z.string().max(16) })
   .strict();
 
+/**
+ * This route's own counters — see the note in `../request/route.ts`.
+ *
+ * Separate from the approve route too: guessing codes here must not be able to
+ * lock a parent out of pressing approve.
+ */
+const store = createStore();
+
 export async function POST(req: Request) {
-  const limit = rateLimit(`consent-verify:${clientKey(req)}`);
-  if (!limit.ok) {
-    console.warn(`/api/consent/verify rate limited: ${clientKey(req)}`);
+  const key = clientKey(req.headers);
+  const gate = check(store, key, Date.now());
+  if (!gate.allowed) {
+    console.warn(`/api/consent/verify rate limited (${gate.reason}): ${key}`);
     return Response.json(
       { error: "Too many attempts. Please wait a few minutes and try again." },
-      { status: 429, headers: { "Retry-After": String(limit.retryAfter) } },
+      { status: 429, headers: { "Retry-After": String(gate.retryAfterSeconds) } },
     );
   }
 

@@ -4,7 +4,7 @@ import { Reveal } from "../ui/Reveal";
 import { Badge } from "../ui/Badge";
 import { CompatibilityMock } from "../mockups/CompatibilityMock";
 import { ProgressMock } from "../mockups/ProgressMock";
-import { ProductCardMock } from "../mockups/ProductCardMock";
+import { RoutineChecklistMock } from "../mockups/RoutineChecklistMock";
 import { FaceScanMock } from "../mockups/FaceScanMock";
 
 type Tone = "cream" | "lavender" | "muted" | "surface";
@@ -19,35 +19,35 @@ const FEATURES: {
 }[] = [
   {
     index: "01",
-    eyebrow: "Guided Face Photo",
-    title: "Start with a picture of your face.",
-    body: "Pore begins with a clear face photo, then uses visible skin cues alongside your concerns, products, and preferences to build a routine that fits.",
+    eyebrow: "Guided Capture",
+    title: "Three photos, taken like an instrument.",
+    body: "Straight on and each side, lit by your own screen so every set is shot under the same light. Each frame is measured for focus and exposure before it counts, and a bad one is rejected with one fixable instruction rather than becoming a confident wrong answer.",
     tone: "surface",
     visual: <FaceScanMock />,
   },
   {
     index: "02",
-    eyebrow: "Ingredient Compatibility",
-    title: "Know what works together.",
-    body: "Pore checks ingredients and active products to help you avoid irritating combinations, unnecessary overlap, and confusing routines.",
+    eyebrow: "Deterministic Safety",
+    title: "The rules are code, not a prompt.",
+    body: "Sunscreen is always in your morning. One strong active per day, never two. Anything you have reacted to is removed outright, pregnancy-unsafe ingredients are stripped, and how reactive your skin is caps the whole routine. Every change comes with the reason it was made.",
     tone: "lavender",
     visual: <CompatibilityMock />,
   },
   {
     index: "03",
-    eyebrow: "Track Your Progress",
-    title: "See what is actually helping.",
-    body: "Log your routine, track skin changes over time, and understand which products are worth keeping - with notes and photo comparisons.",
+    eyebrow: "Measured Progress",
+    title: "We refuse to invent an improvement.",
+    body: "Each photo set is assessed on its own, blind, with no idea an earlier one exists — then the two are subtracted in code. If the sets were not shot under comparable light, Pore says it cannot tell you rather than finding a story in them.",
     tone: "cream",
     visual: <ProgressMock />,
   },
   {
     index: "04",
-    eyebrow: "Smarter Product Guidance",
-    title: "Stop buying products that don't fit.",
-    body: "Pore helps you understand what products may support your goals before adding more to your shelf - with a clear routine-fit signal.",
+    eyebrow: "One Thing Tonight",
+    title: "You never plan a night yourself.",
+    body: "Strong actives start once a week and build over six, spaced so two never land together. Report that your skin stung and the routine pulls them for three days on its own. Today shows only the session in front of you, and the reason it looks that way.",
     tone: "muted",
-    visual: <ProductCardMock />,
+    visual: <RoutineChecklistMock />,
   },
 ];
 
@@ -57,7 +57,7 @@ export function FeatureCards() {
       <Reveal>
         <SectionHeading
           eyebrow="Inside Pore"
-          title="Start with a face photo. Build from there."
+          title="An instrument, a rulebook, and one thing to do tonight."
         />
       </Reveal>
 
