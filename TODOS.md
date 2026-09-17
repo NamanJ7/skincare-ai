@@ -280,28 +280,50 @@ Onboarding is now photo-first, which matches `apps/web/components/sections/HowIt
 and `FeatureCards.tsx`. Check no other marketing copy still describes an order
 the app no longer uses.
 
-### `apps/web` has no tests
-`packages/shared` is the only package with a test suite. The `/api/plan` input
-validation in `apps/web/app/api/plan/route.ts` is a trust boundary in front of a
-paid endpoint and is currently only covered by manual probes.
+### ~~`apps/web` has no tests~~ — the trust boundary is covered now
+`apps/web` has vitest and 21 tests over the two things guarding a paid endpoint:
+`lib/validateImages.ts` (extracted from the route so it could be tested at all)
+and `lib/rateLimit.ts`. Everything else in `apps/web` is still untested, which is
+fine — it is a marketing site.
 
-### `/api/plan` has no rate limiting and does not validate `intake`
+### `/api/plan` rate limiting is a speed bump, not a wall
+`lib/rateLimit.ts` counts per-IP requests (5 per 10 minutes) and concurrent
+generations (4) **in the process**, so on serverless each instance enforces its
+own limit and a cold start resets it. `x-forwarded-for` is also spoofable by
+anyone talking to the origin directly. It stops the accidental case — a retry
+loop, a stuck client, a scraper that does not care — and it is the most that can
+be done without shared state. Before this endpoint carries real traffic, move
+the counters to Redis/KV; `check()` is pure apart from the store it is handed,
+so only the store changes. Real protection means auth on the endpoint, which
+means an account system that does not exist yet.
+
+### `/api/plan` still does not validate `intake`
+The throttle above closed the volume half of this; the shape half is open.
 `validateImages` is thorough about the image array — count, size, media type,
-and the client-measured `quality` parsed rather than trusted. `intake` gets
-none of that: the body is cast `as Partial<PlanInput>` (a compile-time claim,
-not a runtime check) and the route only tests it for truthiness, so any truthy
-value reaches `JSON.stringify` in `pipeline.ts` and goes into the prompt
-verbatim.
+and the client-measured `quality` parsed rather than trusted. `intake` gets none
+of that: the body is cast `as Partial<PlanInput>` (a compile-time claim, not a
+runtime check) and the route only tests it for truthiness, so any truthy value
+reaches `JSON.stringify` in `pipeline.ts` and goes into the prompt verbatim.
+`IntakeResponse` carries free-text fields, so this is the field that reaches the
+model as text. An `IntakeResponseSchema` in `apps/web/lib/schemas.ts` — which
+already mirrors the domain enums for outputs — is the shape of the fix.
 
-There is also no throttle of any kind — no IP limit, no auth, no origin check.
-Two Opus calls at `max_tokens: 16000` each, with up to three images, are
-triggered by any unauthenticated POST. The route's own comment calls itself a
-trust boundary in front of a paid endpoint; it currently guards shape but not
-volume, and not the field that reaches the model as text.
+### ~~The mobile client cannot see a 429~~ — done
+`fetchPlan` returns a discriminated `PlanOutcome`: either the plan, or a
+`PlanError` carrying `offline | busy | rejected | unknown` and a `retryable`
+flag, with an `AbortSignal.timeout` deadline so a stalled request cannot spin
+forever. A 429 maps to `busy`/retryable, and `onboarding/intake.tsx` no longer
+navigates onward on failure — it shows what happened and offers a retry that
+re-sends the same answers.
 
-An `IntakeResponseSchema` in `apps/web/lib/schemas.ts` (which already mirrors
-the domain enums for outputs) plus a throttle is the shape of the fix. This is
-a security change, not a polish pass, and wants its own PR before launch.
+The kinds differ slightly from what this entry originally proposed:
+`unconfigured`, `offline` and `timeout` are one `offline` kind, because the
+person watching the spinner cannot act on the difference, and `rejected` was
+added for the one case where retrying is pointless. The endpoint cooperates —
+it maps upstream failures to 503 when a retry might work and 500 when it will
+not, and its 429 and error responses now carry CORS headers, without which a
+cross-origin caller cannot read the status at all and every throttle would look
+like being offline.
 
 ### CI reports but does not block
 `.github/workflows/ci.yml` runs typecheck, test, lint and build on every pull

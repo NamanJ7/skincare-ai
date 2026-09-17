@@ -26,10 +26,10 @@ export const PRICING_TIERS: PricingTier[] = [
     cta: "waitlist",
     ctaLabel: "Join Waitlist",
     features: [
-      "Basic routine builder",
-      "Product shelf",
-      "Daily AM / PM checklist",
-      "Basic ingredient guidance",
+      "Guided three-photo capture",
+      "Personalized AM / PM routine",
+      "Deterministic safety clamp",
+      "Daily session with paced actives",
     ],
   },
   {
@@ -74,14 +74,12 @@ export type ComparisonRow = {
 };
 
 export const COMPARISON_ROWS: ComparisonRow[] = [
-  { label: "Routine builder", free: true, plus: true, pro: true },
-  { label: "Product shelf", free: true, plus: true, pro: true },
-  { label: "Daily AM / PM checklist", free: true, plus: true, pro: true },
-  { label: "Ingredient guidance", free: "Basic", plus: "Advanced", pro: "Advanced" },
-  { label: "Compatibility checks", free: false, plus: true, pro: true },
-  { label: "Progress tracking", free: false, plus: true, pro: "Expanded" },
-  { label: "Routine optimization insights", free: false, plus: true, pro: true },
-  { label: "Personalized product guidance", free: false, plus: true, pro: true },
+  { label: "Guided three-photo capture", free: true, plus: true, pro: true },
+  { label: "Personalized AM / PM routine", free: true, plus: true, pro: true },
+  { label: "Deterministic safety clamp", free: true, plus: true, pro: true },
+  { label: "Daily session with paced actives", free: true, plus: true, pro: true },
+  { label: "Measured before / after", free: false, plus: true, pro: "Expanded" },
+  { label: "Routine adapts to what changed", free: false, plus: true, pro: true },
   { label: "Advanced skin-progress insights", free: false, plus: false, pro: true },
   { label: "Priority access to new AI tools", free: false, plus: false, pro: true },
 ];
@@ -89,11 +87,11 @@ export const COMPARISON_ROWS: ComparisonRow[] = [
 export const PRICING_FAQ: { q: string; a: string }[] = [
   {
     q: "When does Pore launch?",
-    a: "Pore is launching soon as a web app, with mobile access on the way. Join the waitlist and you'll be among the first to get access and early-access pricing details.",
+    a: "Pore is launching as a phone app — the capture needs your screen as a light source, and your photos never leave the device. Join the waitlist and you'll be among the first to get access and early-access pricing details.",
   },
   {
     q: "Will the free plan stay free?",
-    a: "Yes. The Free plan is built for anyone starting out — a basic routine builder, product shelf, daily checklist, and ingredient guidance, with no time limit.",
+    a: "Yes. The Free plan is built for anyone starting out — guided capture, a personalized routine, the full safety clamp, and your daily session, with no time limit.",
   },
   {
     q: "Can pricing change before launch?",
@@ -104,7 +102,11 @@ export const PRICING_FAQ: { q: string; a: string }[] = [
     a: "No. Pore offers personalized skincare education and routine guidance only. It is not a substitute for professional medical advice, and it encourages seeing a professional when that's the right call.",
   },
   {
-    q: "Can I use Pore with products I already own?",
-    a: "Absolutely. You build your shelf with what you already use, and Pore works around it — helping you simplify rather than constantly add more.",
+    q: "Does Pore recommend specific products to buy?",
+    a: "Not today. Pore tells you which ingredients belong in your routine, how often, and why — then you use whatever you already own that fits. Naming products is something we would rather get right than get out early.",
+  },
+  {
+    q: "Where do my photos go?",
+    a: "They stay on your phone. They're sent for your own analysis and never stored on our servers, we never train on them, and you can erase everything from inside the app at any time.",
   },
 ];

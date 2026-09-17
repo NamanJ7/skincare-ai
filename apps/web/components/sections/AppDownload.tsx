@@ -10,11 +10,12 @@ export function AppDownload() {
         <div className="relative mx-auto max-w-3xl text-center">
           <Glow tone="lavender" size={420} className="left-1/2 top-[-120px] -translate-x-1/2" />
           <h2 className="font-display text-3xl leading-tight text-on-primary sm:text-4xl">
-            Pore is coming with you.
+            Pore lives on your phone.
           </h2>
           <p className="mx-auto mt-4 max-w-xl text-lg leading-relaxed text-on-primary/80">
-            Start on the web. Continue your routine wherever life takes you.
-            Mobile access is coming soon.
+            It has to: the capture needs your screen as a light source, and your photos and your
+            record never leave the device. It is not on the stores yet — join the waitlist and
+            we&apos;ll tell you the day it is.
           </p>
 
           <div className="mt-7 flex flex-wrap items-center justify-center gap-3">
