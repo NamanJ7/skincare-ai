@@ -16,6 +16,27 @@ export const maxDuration = 60;
  */
 const store = createStore();
 
+/**
+ * The mobile app calls this from a different origin than the one serving it,
+ * and it sends `content-type: application/json`, which is not a CORS-simple
+ * content type — so the browser sends a preflight first. Without an OPTIONS
+ * handler that preflight 405s and the request never happens.
+ */
+const CORS_HEADERS = {
+  "access-control-allow-origin": "*",
+  "access-control-allow-methods": "POST, OPTIONS",
+  "access-control-allow-headers": "content-type",
+  "access-control-max-age": "86400",
+} as const;
+
+function json(body: unknown, status: number): Response {
+  return Response.json(body, { status, headers: CORS_HEADERS });
+}
+
+export function OPTIONS() {
+  return new Response(null, { status: 204, headers: CORS_HEADERS });
+}
+
 export async function POST(req: Request) {
   const gate = check(store, clientKey(req.headers), Date.now());
   if (!gate.allowed) {
@@ -26,7 +47,15 @@ export async function POST(req: Request) {
             ? "Too many plans are being generated right now. Try again in a moment."
             : "Too many requests. Try again shortly.",
       },
-      { status: 429, headers: { "retry-after": String(gate.retryAfterSeconds) } },
+      {
+        status: 429,
+        headers: {
+          ...CORS_HEADERS,
+          "retry-after": String(gate.retryAfterSeconds),
+          // Without this the header is present but unreadable cross-origin.
+          "access-control-expose-headers": "retry-after",
+        },
+      },
     );
   }
 
@@ -34,16 +63,16 @@ export async function POST(req: Request) {
   try {
     body = (await req.json()) as Partial<PlanInput>;
   } catch {
-    return Response.json({ error: "Invalid JSON body" }, { status: 400 });
+    return json({ error: "Invalid JSON body" }, 400);
   }
 
   if (!body.intake) {
-    return Response.json({ error: "Missing `intake`" }, { status: 400 });
+    return json({ error: "Missing `intake`" }, 400);
   }
 
   const validated = validateImages(body.images);
   if ("error" in validated) {
-    return Response.json({ error: validated.error }, { status: 400 });
+    return json({ error: validated.error }, 400);
   }
 
   store.inFlight += 1;
@@ -52,14 +81,33 @@ export async function POST(req: Request) {
       images: validated.images,
       intake: body.intake,
     });
-    return Response.json(result);
+    return json(result, 200);
   } catch (err) {
     // The detail goes to the server log, not to the client: SDK errors carry
     // key state, model ids and internal paths, and the client has no use for
     // any of it beyond "try again".
     console.error("/api/plan failed:", err);
-    return Response.json({ error: "Could not generate a plan" }, { status: 500 });
+    // The upstream message is logged, never returned. It can carry request
+    // ids, rate-limit text, and echoes of what was sent. What the client needs
+    // is narrower and more useful: whether trying again could work. 503 says
+    // yes, so the app can offer a retry that means something.
+    return json({ error: "Could not build a plan right now" }, upstreamStatus(err));
   } finally {
+    // Counts down on every exit, thrown or returned, or the limiter leaks a
+    // slot per failure and the endpoint throttles itself shut.
     store.inFlight -= 1;
   }
+}
+
+/** Map an upstream failure onto the one bit the client acts on: retry or not. */
+function upstreamStatus(err: unknown): number {
+  const status = (err as { status?: unknown })?.status;
+  if (typeof status === "number") {
+    // Overloaded or rate-limited upstream: the same request may well succeed.
+    if (status === 429 || status === 529 || status >= 500) return 503;
+    // Our own credentials or request shape are wrong. Retrying will not fix it,
+    // and it is not the caller's fault, so it stays a 500.
+    if (status >= 400) return 500;
+  }
+  return 503;
 }

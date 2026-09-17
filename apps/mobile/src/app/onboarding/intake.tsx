@@ -3,13 +3,24 @@ import { useState, type ReactNode } from "react";
 import { ActivityIndicator, Pressable, View } from "react-native";
 
 import { ACTIVES, type ActiveKey, type Sensitivity, type SkinGoal, type SkinType } from "@pore/shared";
-import { fetchPlan } from "@/lib/api";
+import { fetchPlan, type PlanError } from "@/lib/api";
 import { buildIntake } from "@/lib/intake";
 import { recordAssessment } from "@/lib/journal";
 import { CAPTURE_STEPS, listSessions, type CapturedPhoto } from "@/lib/photos";
 import { REMINDER_HOURS, enableReminder, formatHour } from "@/lib/reminder";
 import { useOnboarding } from "@/state/onboarding";
-import { AppText, Chip, GhostButton, PrimaryButton, ProgressDots, Screen, colors, radius, spacing } from "@/theme";
+import {
+  AppText,
+  Card,
+  Chip,
+  GhostButton,
+  PrimaryButton,
+  ProgressDots,
+  Screen,
+  colors,
+  radius,
+  spacing,
+} from "@/theme";
 
 const GOALS: { key: SkinGoal; label: string }[] = [
   { key: "acne", label: "Acne / breakouts" },
@@ -60,6 +71,7 @@ export default function Intake() {
   const { data, update } = useOnboarding();
   const [step, setStep] = useState(0);
   const [analyzing, setAnalyzing] = useState(false);
+  const [planError, setPlanError] = useState<PlanError | null>(null);
   /**
    * Shown after the routine exists, not as another question before it. The
    * permission prompt lands on the moment the user has just been handed
@@ -97,7 +109,27 @@ export default function Intake() {
       return;
     }
 
-    const answers = {
+    const answers = answersFromForm();
+    update(answers);
+
+    // The photos were taken first, but the assessment needs these answers, so
+    // generation happens here rather than running on questionnaire defaults.
+    // `data` is this closure's value and predates the update() above, so the
+    // answers are merged in explicitly rather than read back from it.
+    await generate({ ...data, ...answers });
+  }
+
+  /**
+   * The questionnaire's answers, read off local state.
+   *
+   * Both the first attempt and the retry go through here. They used to build
+   * the payload differently — the retry passed `data` alone and was correct
+   * only because update() had re-rendered by the time a thumb reached the
+   * button. A retry that sends something other than what failed is not a
+   * retry, and that difference would have been invisible until it mattered.
+   */
+  function answersFromForm() {
+    return {
       goals,
       skinType: skinType ?? "combination",
       sensitivity: sensitivity ?? "medium",
@@ -107,21 +139,36 @@ export default function Intake() {
       // It is what lets the next cold start go straight to the routine.
       onboardedAt: new Date().toISOString(),
     } as const;
-    update(answers);
+  }
 
-    // The photos were taken first, but the assessment needs these answers, so
-    // generation happens here rather than running on questionnaire defaults.
+  /**
+   * Generate the plan.
+   *
+   * Split out from `next()` so the failure state can retry it without walking
+   * the questionnaire again — the answers are already persisted, so a retry is
+   * one tap rather than five screens.
+   */
+  async function generate(withAnswers: typeof data) {
     setAnalyzing(true);
-    const photos = data.photos ?? [];
-    const ordered = CAPTURE_STEPS.map((s) => photos.find((p) => p.angle === s.angle)).filter(
-      (p): p is CapturedPhoto => p !== undefined,
-    );
-    const plan = await fetchPlan({
-      images: ordered.map((p) => ({ data: p.data, mediaType: "image/jpeg", quality: p.quality })),
-      intake: buildIntake({ ...data, ...answers }),
-    });
-    if (plan) {
-      update({ plan });
+    setPlanError(null);
+    try {
+      const photos = data.photos ?? [];
+      const ordered = CAPTURE_STEPS.map((s) => photos.find((p) => p.angle === s.angle)).filter(
+        (p): p is CapturedPhoto => p !== undefined,
+      );
+      const outcome = await fetchPlan({
+        images: ordered.map((p) => ({ data: p.data, mediaType: "image/jpeg", quality: p.quality })),
+        intake: buildIntake(withAnswers),
+      });
+
+      // A failed plan used to fall through to /today anyway, where a hardcoded
+      // demo routine stood in for the one we never built. Say what happened.
+      if (!outcome.ok) {
+        setPlanError(outcome.error);
+        return;
+      }
+
+      update({ plan: outcome.plan });
       // This first reading is the zero every later measurement subtracts from,
       // so it is filed away the moment it exists. Without it there is nothing
       // to compare a return visit against.
@@ -130,11 +177,12 @@ export default function Intake() {
         // stored session is the set this assessment was made from.
         sessionId: listSessions()[0]?.id ?? "baseline",
         capturedAt: ordered[0]?.capturedAt ?? new Date().toISOString(),
-        assessment: plan.assessment,
+        assessment: outcome.plan.assessment,
       });
+      setAskingReminder(true);
+    } finally {
+      setAnalyzing(false);
     }
-    setAnalyzing(false);
-    setAskingReminder(true);
   }
 
   async function chooseReminder(hour: number | null) {
@@ -143,6 +191,11 @@ export default function Intake() {
   }
 
   function back() {
+    // Reconsidering an answer is the other way out of a failure, so the stale
+    // error card goes with it. Without this the card outlives the answers it
+    // was about: `planError` was only ever cleared inside generate(), which a
+    // non-retryable failure never calls.
+    setPlanError(null);
     if (step === 0) router.back();
     else setStep((s) => s - 1);
   }
@@ -244,6 +297,29 @@ export default function Intake() {
         </Question>
       )}
 
+      {planError && (
+        <Card>
+          <AppText variant="bodyStrong" color={colors.escalate}>
+            We couldn&apos;t finish your routine
+          </AppText>
+          <AppText variant="caption" color={colors.inkMuted}>
+            {planError.message}
+          </AppText>
+          <View style={{ gap: spacing.xs, marginTop: spacing.xs }}>
+            {planError.retryable && (
+              <PrimaryButton
+                label="Try again"
+                onPress={() => void generate({ ...data, ...answersFromForm() })}
+              />
+            )}
+            <GhostButton
+              label="Retake my photos"
+              onPress={() => router.replace("/onboarding/photo")}
+            />
+          </View>
+        </Card>
+      )}
+
       {analyzing ? (
         <View style={{ alignItems: "center", gap: spacing.sm, marginTop: spacing.lg }}>
           <ActivityIndicator color={colors.primary} />
@@ -253,11 +329,21 @@ export default function Intake() {
         </View>
       ) : (
         <View style={{ gap: spacing.sm, marginTop: spacing.lg }}>
-          <PrimaryButton
-            label={step < STEP_COUNT - 1 ? "Next" : "Build my routine"}
-            onPress={next}
-            disabled={!canAdvance}
-          />
+          {/*
+            While the error card is up it owns the forward action, so the
+            primary button stands down rather than offering a second way to
+            do the same thing. Back never stands down: a `rejected` failure
+            offers no "Try again", and hiding both left "Retake my photos" as
+            the only exit — sending someone back to the camera over an answer
+            they might rather have changed.
+          */}
+          {!planError && (
+            <PrimaryButton
+              label={step < STEP_COUNT - 1 ? "Next" : "Build my routine"}
+              onPress={next}
+              disabled={!canAdvance}
+            />
+          )}
           <GhostButton label="Back" onPress={back} />
         </View>
       )}

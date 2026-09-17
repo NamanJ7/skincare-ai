@@ -16,7 +16,18 @@ import { deleteProfile } from "@/lib/profile";
 import { REMINDER_HOURS, disableReminder, enableReminder, formatHour } from "@/lib/reminder";
 import { deleteStoredPhotos, listSessions, storedPhotoCount } from "@/lib/photos";
 import { useOnboarding } from "@/state/onboarding";
-import { AppText, Card, Chip, Disclosure, Divider, GhostButton, Screen, colors, spacing } from "@/theme";
+import {
+  AppText,
+  Card,
+  Chip,
+  Disclosure,
+  Divider,
+  GhostButton,
+  PrimaryButton,
+  Screen,
+  colors,
+  spacing,
+} from "@/theme";
 
 const CATEGORY_LABELS: Record<ProductCategory, string> = {
   cleanser: "Cleanser",
@@ -39,31 +50,6 @@ const CONCERN_LABELS: Record<ConcernKey, string> = {
   fine_line_appearance: "Fine-line appearance",
   irritation_signs: "Signs of irritation",
 };
-
-/** Local fallback draft (over-loaded on purpose so the safety engine acts). */
-function draftRoutine(): Routine {
-  const step = (
-    order: number,
-    category: ProductCategory,
-    active: RoutineStep["active"],
-    frequencyPerWeek: number,
-    rationale: string,
-  ): RoutineStep => ({ order, category, active, frequencyPerWeek, rationale, irritationRisk: "medium" });
-  return {
-    am: [
-      step(1, "cleanser", undefined, 7, "Start clean without stripping your skin."),
-      step(2, "serum", "vitamin_c", 7, "Brightens and helps even out tone over time."),
-      step(3, "moisturizer", undefined, 7, "Locks in hydration and supports your barrier."),
-    ],
-    pm: [
-      step(1, "cleanser", undefined, 7, "Remove the day's oil and sunscreen."),
-      step(2, "exfoliant", "salicylic_acid", 4, "Helps clear pores and reduce breakouts."),
-      step(3, "exfoliant", "glycolic_acid", 4, "Smooths texture and fades marks."),
-      step(4, "treatment", "retinoid", 7, "Boosts cell turnover for texture and marks."),
-    ],
-    notes: ["Patch-test any new active for a few days before full use."],
-  };
-}
 
 /** Plain-language band for a 0..1 confidence, so the number is not the whole story. */
 function confidenceLabel(c: number): string {
@@ -172,36 +158,42 @@ export default function Plan() {
     );
   }
 
-  // Prefer the server-generated plan; otherwise run the engine locally so the
-  // screen still demonstrates the full flow offline.
+  // No local fallback. This screen used to synthesise a routine *and* three
+  // invented findings ("Acne-like breakouts · moderate") whenever the real plan
+  // was missing, and present them as the user's own assessment. A plan we did
+  // not build is not a plan we get to show.
   const view = useMemo(() => {
-    if (data.plan) {
-      const a = data.plan.assessment;
-      return {
-        concerns: a.findings
-          .filter((f) => f.present)
-          .map((f) => `${CONCERN_LABELS[f.concern]} · ${f.appearanceLevel}`),
-        summary: a.summary,
-        escalate: a.escalation.recommendProfessional,
-        confidence: a.overallConfidence,
-        limitations: a.limitations,
-        photoQuality: a.photoQuality,
-        routine: data.plan.routine,
-        adjustments: data.plan.adjustments,
-      };
-    }
-    const { routine, adjustments } = applySafetyRules(draftRoutine(), buildIntake(data));
+    if (!data.plan) return null;
+    const a = data.plan.assessment;
     return {
-      concerns: ["Acne-like breakouts · moderate", "Dark-spot appearance · mild", "Oiliness · noticeable"],
-      summary: "A simple routine built around your skin — with only the steps you actually need.",
-      escalate: false,
-      confidence: null,
-      limitations: [],
-      photoQuality: [],
-      routine,
-      adjustments,
+      concerns: a.findings
+        .filter((f) => f.present)
+        .map((f) => `${CONCERN_LABELS[f.concern]} · ${f.appearanceLevel}`),
+      summary: a.summary,
+      escalate: a.escalation.recommendProfessional,
+      confidence: a.overallConfidence,
+      limitations: a.limitations,
+      photoQuality: a.photoQuality,
+      routine: data.plan.routine,
+      adjustments: data.plan.adjustments,
     };
-  }, [data]);
+  }, [data.plan]);
+
+  if (!view) {
+    return (
+      <Screen contentStyle={{ paddingTop: spacing.lg }}>
+        <AppText variant="label" color={colors.primary}>
+          YOUR FULL PLAN
+        </AppText>
+        <AppText variant="title">Nothing to show yet</AppText>
+        <AppText variant="body" color={colors.inkMuted}>
+          Your assessment and routine live here once they have been built. It takes three photos
+          and a few questions.
+        </AppText>
+        <PrimaryButton label="Build my routine" onPress={() => router.push("/onboarding/photo")} />
+      </Screen>
+    );
+  }
 
   return (
     <Screen contentStyle={{ paddingTop: spacing.lg }}>
