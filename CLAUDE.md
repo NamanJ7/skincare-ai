@@ -99,9 +99,19 @@ pnpm --filter @pore/mobile typecheck
 
 Current baseline (keep it here): `pnpm test` → 8 files, 130 tests, all passing —
 `packages/shared` 95 (`safety` 12, `vision` 21, `progress` 21, `schedule` 41) and `apps/web` 35
-(`validateImages` 11, `rateLimit` 10, `consent` 10, `plan-boundary` 4). `pnpm typecheck` →
-clean in all three packages. `pnpm lint` → 0 errors, 6 pre-existing `no-unused-vars` warnings
-(`components/ui/Button.tsx`, `lib/mock.ts`). Don't let a change add errors; the warnings are known.
+(`validateImages` 11, `rateLimit` 10, `consent` 10, `plan-boundary` 4). `pnpm typecheck` → clean in
+all three packages. `pnpm lint` → 0 errors, **0 warnings**: the rule now recognises the
+leading-underscore convention this codebase already used for deliberately-unused bindings, so the
+six long-standing warnings are gone and the script runs with `--max-warnings 0`. A lint step that
+cannot fail is decoration — keep it able to.
+
+**CI runs all four on every pull request** (`.github/workflows/ci.yml`): typecheck, test, lint,
+build, cheap checks first so a failure reports in under a minute rather than after the Next.js
+build. It runs on Node 22 — Node 20 went end-of-life in April 2026, and a gate that validates a
+runtime nobody develops against is checking the wrong thing. It needs no `ANTHROPIC_API_KEY` — the
+pipeline builds its client inside a function and falls back to the mock. Note it is not a
+*required* check until branch protection is enabled on `main`; until then it reports rather than
+blocks.
 
 `apps/web`'s tests cover only the trust boundaries — the two guards in front of the paid endpoint
 (`lib/validateImages.ts`, `lib/rateLimit.ts`), the intake schema that bounds what that endpoint
@@ -153,10 +163,9 @@ paths. Do not reorder, relax or remove any of this without reading `lib/plan-bou
 image rules as units but not the handler's ordering, so a reordering refactor passes the suite while
 quietly undoing the protection.
 
-One consequence the server cannot fix: `fetchPlan` collapses every non-ok outcome to `null` — it now
-logs the status and body first, so the failure is visible in the client log, but the caller still
-cannot tell a 429 from a 400, and `onboarding/intake.tsx` proceeds regardless. A throttled user is
-handed no plan and shown the local fallback. See `TODOS.md`.
+Every rejection carries CORS headers, including the 411 and 413 that fire before `req.json()`.
+Without them a cross-origin caller sees an opaque network error instead of the specific message,
+so the reason would be written and never read — which is the same failure as not writing one.
 
 1. **Vision assessment** — up to 3 photos + intake JSON go to Claude (`client.messages.parse` with a
    Zod `output_config.format`, model `claude-opus-4-8`) using `ASSESSMENT_SYSTEM`, producing a
@@ -195,15 +204,31 @@ handed no plan and shown the local fallback. See `TODOS.md`.
    confidence there too. **Preserve this fallback when changing the pipeline.**
 
 The mobile app calls the same endpoint via `apps/mobile/src/lib/api.ts` (`fetchPlan`), pointed at
-`EXPO_PUBLIC_API_URL` (e.g. your dev machine's LAN IP). If that's unset or the request fails,
-`fetchPlan` returns `null` rather than throwing. `today.tsx` then resolves its routine down a
-three-step chain — the journal's persisted (adapted) routine, else the generated plan, else its own
-local draft through `applySafetyRules` — so the app always has a real, safety-clamped routine to
-schedule, with or without a reachable API.
+`EXPO_PUBLIC_API_URL` (e.g. your dev machine's LAN IP). `fetchPlan` never throws; it returns a
+`PlanOutcome` — either the plan, or a `PlanError` carrying `offline | busy | rejected | unknown`
+and a `retryable` flag. That distinction exists because the only thing the person watching the
+spinner needs to know is whether trying again could work, and the route is built to answer it: on
+an upstream failure `/api/plan` maps to **503 when a retry might succeed and 500 when it will
+not**, and never returns the upstream error text (which can carry request ids and rate-limit
+detail).
 
-That fallback is deliberate but must stay **noisy**: `fetchPlan` logs the status and body on a
-non-ok response before returning `null`. A swallowed 4xx otherwise renders a plausible mock routine
-with no sign the real pipeline refused it, which is indistinguishable from working software.
+**There is deliberately no local fallback routine.** `today.tsx` resolves down two steps — the
+journal's persisted (adapted) routine, else the generated plan — and shows an empty state if it
+has neither. It used to have a third step that synthesised a hardcoded draft through
+`applySafetyRules`, and `/plan` invented three findings to go with it, so a failed or missing plan
+rendered as the user's own personalised routine and assessment. That turned every upstream failure
+into a silent one. A plan we did not build is not a plan we get to show; if you find yourself
+adding a fallback here, add an honest empty state instead.
+
+The route also exports an `OPTIONS` handler. Mobile calls it cross-origin with
+`content-type: application/json`, which is not CORS-simple, so the browser preflights — without it
+the preflight 405s and the request never happens.
+
+The typed outcome is what the UI acts on; `fetchPlan` also logs the status and response body on a
+non-ok reply, which is what a *developer* acts on. The server writes a specific reason into every
+rejection (`intake.age: ...`, `images[0] exceeds the 1MB limit`) and the user-facing copy
+deliberately does not repeat it, so without that line the one piece of information identifying the
+bug is discarded on arrival. Keep it.
 
 ## Architecture: parental consent (16-17)
 

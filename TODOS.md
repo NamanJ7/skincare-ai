@@ -376,22 +376,54 @@ means auth on the endpoint, which means an account system that does not exist
 yet — `clientKey()` already returns a caller identity string, so it becomes a
 user id the day that lands.
 
-### The mobile client cannot see a 429 — fix this next
-**This is a prerequisite the rate limiter created, and it is the highest-value
-mobile change outstanding.** `fetchPlan` in `apps/mobile/src/lib/api.ts` now logs
-the status and body of any non-ok response — so the failure is at least visible
-in the client log rather than silent — but it still returns `null` for every
-outcome alike (no API URL, offline, 400, 429, 500), and `onboarding/intake.tsx`
-proceeds regardless of whether a plan came back. So a throttled user finishes the
-questionnaire and is handed the local fallback with nothing on screen saying why.
+### ~~`/api/plan` does not validate `intake`~~ — done
+`IntakeSchema` in `apps/web/lib/schemas.ts` length- and count-caps every
+free-text field, is `.strict()` so an unknown key is rejected rather than
+forwarded into a prompt, and enforces the `<16` age gate server-side. The
+truthiness check is gone. Worst case is now a ~5.4KB / ~1.5k-token intake per
+prompt instead of unbounded, which matters because the intake is
+`JSON.stringify`'d into *both* Claude calls — the throttle caps how many
+requests are paid for, this caps what each one costs. Covered by
+`lib/plan-boundary.test.ts`.
 
-That was already true for every other failure; the limiter just adds one more way
-to reach it. The fix is to make `fetchPlan` return a discriminated outcome
-(`ok` / `unconfigured` / `offline` / `timeout` / `server` / `busy`), give it an
-`AbortController` deadline so a stalled request cannot spin forever, and stop
-`intake.tsx` navigating onward on failure. There is a working implementation of
-exactly this in the abandoned branch at `801a832` (`apps/mobile/src/lib/api.ts`)
-if it is useful as a starting point.
+What is still uncovered: the route handler's own status codes, headers and
+**gate ordering**. The order is the protection — moving the `content-length`
+check after `req.json()` would undo it — and no test would notice. Manual curl
+probes only; see the entry above on `apps/web` route handlers.
+
+### ~~The mobile client cannot see a 429~~ — done
+`fetchPlan` returns a discriminated `PlanOutcome`: either the plan, or a
+`PlanError` carrying `offline | busy | rejected | unknown` and a `retryable`
+flag, with an `AbortSignal.timeout` deadline so a stalled request cannot spin
+forever. A 429 maps to `busy`/retryable, and `onboarding/intake.tsx` no longer
+navigates onward on failure — it shows what happened and offers a retry that
+re-sends the same answers.
+
+The kinds differ slightly from what this entry originally proposed:
+`unconfigured`, `offline` and `timeout` are one `offline` kind, because the
+person watching the spinner cannot act on the difference, and `rejected` was
+added for the one case where retrying is pointless. The endpoint cooperates —
+it maps upstream failures to 503 when a retry might work and 500 when it will
+not, and its 429 and error responses now carry CORS headers, without which a
+cross-origin caller cannot read the status at all and every throttle would look
+like being offline.
+
+### CI reports but does not block
+`.github/workflows/ci.yml` runs typecheck, test, lint and build on every pull
+request, but GitHub will not stop a merge on a red run until branch protection
+is enabled on `main` — Settings → Branches → require the
+`typecheck · test · lint · build` check. That is a repository setting, not
+something a commit can do. Until it is on, the gate is advisory.
+
+### CI's actions still target the deprecated Node 20 runtime
+`actions/checkout@v4`, `actions/setup-node@v4` and `pnpm/action-setup@v4` all
+declare Node 20 as their JS runtime. GitHub currently force-runs them on Node 24
+and prints a deprecation warning on every run; when it stops doing that, the
+workflow breaks. The fix is bumping each action to the major that targets Node
+24 — deliberately not done blind, because naming a tag that does not exist turns
+the gate red for a warning that is not yet failing anything. Check the current
+majors and bump them together. (The build itself already runs on Node 22; only
+the actions' own runtime is stale.)
 
 ### `maxDuration` is 60s and unverified against the deploy target
 `apps/web/app/api/plan/route.ts:8` sets `maxDuration = 60`. Two sequential Opus

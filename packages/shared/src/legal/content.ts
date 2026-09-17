@@ -64,10 +64,18 @@ export const PRIVACY_POLICY: LegalDocument = {
           text: "In the Pore app you tell us your age, your skin goals and concerns, how sensitive your skin is, any ingredient allergies, and whether you are pregnant or breastfeeding. If you are 17 or younger we also ask for a parent or guardian's email address, and we send that address one message asking them to approve. We do not keep the address after that: your device stores only a masked version of it alongside the date approval was given.",
         },
         {
-          // Disclosure. state/onboarding.tsx holds this in a plain useState
-          // with no persistence layer, and there is no account backend.
+          // Disclosure. state/onboarding.tsx writes these answers to
+          // profile.json in the app's own document directory via writeProfile()
+          // in lib/profile.ts, so they survive the app closing. There is still
+          // no account backend and nothing is uploaded; deleteProfile() removes
+          // them, and /plan offers that.
+          //
+          // This sentence previously said the answers were held "for the length
+          // of the session", citing a useState that no longer exists. Persisting
+          // them was the right fix; leaving this paragraph behind made the
+          // policy describe an app we no longer ship.
           kind: "paragraph",
-          text: "Your answers are held on your device for the length of the session. Pore has no accounts yet, so nothing is saved to a profile.",
+          text: "Your answers are saved on your phone, inside the app, so your routine is still there when you come back. Pore has no accounts yet, so they are never uploaded and nothing is saved to an online profile. You can erase them from your plan screen, and removing the app removes them.",
         },
         {
           // Disclosure. apps/mobile/src/lib/journal.ts writes journal.json to
