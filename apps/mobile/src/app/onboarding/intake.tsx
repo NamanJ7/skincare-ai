@@ -109,7 +109,27 @@ export default function Intake() {
       return;
     }
 
-    const answers = {
+    const answers = answersFromForm();
+    update(answers);
+
+    // The photos were taken first, but the assessment needs these answers, so
+    // generation happens here rather than running on questionnaire defaults.
+    // `data` is this closure's value and predates the update() above, so the
+    // answers are merged in explicitly rather than read back from it.
+    await generate({ ...data, ...answers });
+  }
+
+  /**
+   * The questionnaire's answers, read off local state.
+   *
+   * Both the first attempt and the retry go through here. They used to build
+   * the payload differently — the retry passed `data` alone and was correct
+   * only because update() had re-rendered by the time a thumb reached the
+   * button. A retry that sends something other than what failed is not a
+   * retry, and that difference would have been invisible until it mattered.
+   */
+  function answersFromForm() {
+    return {
       goals,
       skinType: skinType ?? "combination",
       sensitivity: sensitivity ?? "medium",
@@ -119,11 +139,6 @@ export default function Intake() {
       // It is what lets the next cold start go straight to the routine.
       onboardedAt: new Date().toISOString(),
     } as const;
-    update(answers);
-
-    // The photos were taken first, but the assessment needs these answers, so
-    // generation happens here rather than running on questionnaire defaults.
-    await generate({ ...data, ...answers });
   }
 
   /**
@@ -176,6 +191,11 @@ export default function Intake() {
   }
 
   function back() {
+    // Reconsidering an answer is the other way out of a failure, so the stale
+    // error card goes with it. Without this the card outlives the answers it
+    // was about: `planError` was only ever cleared inside generate(), which a
+    // non-retryable failure never calls.
+    setPlanError(null);
     if (step === 0) router.back();
     else setStep((s) => s - 1);
   }
@@ -289,7 +309,7 @@ export default function Intake() {
             {planError.retryable && (
               <PrimaryButton
                 label="Try again"
-                onPress={() => void generate({ ...data })}
+                onPress={() => void generate({ ...data, ...answersFromForm() })}
               />
             )}
             <GhostButton
@@ -309,6 +329,14 @@ export default function Intake() {
         </View>
       ) : (
         <View style={{ gap: spacing.sm, marginTop: spacing.lg }}>
+          {/*
+            While the error card is up it owns the forward action, so the
+            primary button stands down rather than offering a second way to
+            do the same thing. Back never stands down: a `rejected` failure
+            offers no "Try again", and hiding both left "Retake my photos" as
+            the only exit — sending someone back to the camera over an answer
+            they might rather have changed.
+          */}
           {!planError && (
             <PrimaryButton
               label={step < STEP_COUNT - 1 ? "Next" : "Build my routine"}
@@ -316,7 +344,7 @@ export default function Intake() {
               disabled={!canAdvance}
             />
           )}
-          {!planError && <GhostButton label="Back" onPress={back} />}
+          <GhostButton label="Back" onPress={back} />
         </View>
       )}
     </Screen>
