@@ -14,8 +14,16 @@ import { PhotoQualitySchema } from "./schemas";
 
 /** The guided capture takes three shots; anything more is not a real client. */
 export const MAX_IMAGES = 3;
-/** ~8MB of decoded image bytes. Base64 inflates by 4/3. */
-export const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
+/**
+ * 1MB of decoded image bytes per image. Base64 inflates by 4/3.
+ *
+ * Sized so three images at the cap still fit under Vercel's ~4.5MB platform
+ * body limit. A higher number here would be fiction: the platform would reject
+ * the request with an opaque 413 before this function ever ran, so the caller
+ * would never see the message below. The mobile client delivers 1280px / 0.75
+ * JPEGs, which land far under this.
+ */
+export const MAX_IMAGE_BYTES = 1024 * 1024;
 export const ALLOWED_MEDIA_TYPES: ImageMediaType[] = [
   "image/jpeg",
   "image/png",

@@ -2,7 +2,7 @@
  * A speed bump in front of a paid endpoint.
  *
  * `/api/plan` is public, unauthenticated, and makes two Opus calls per request
- * with up to three 8MB images attached. Anyone with the URL can spend the API
+ * with up to three images attached. Anyone with the URL can spend the API
  * budget, and until now nothing stopped them.
  *
  * **Be honest about what this is.** The counters live in the process, so on

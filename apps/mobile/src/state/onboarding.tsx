@@ -13,7 +13,6 @@ import type { CapturedPhoto } from "@/lib/photos";
 import { readProfile, writeProfile } from "@/lib/profile";
 
 export type OnboardingData = Partial<IntakeResponse> & {
-  parentEmail?: string;
   /**
    * Guided-capture photos. Base64 is held in memory only for the /api/plan
    * request; the JPEGs live in the app's document directory until deleted, and
@@ -26,6 +25,13 @@ export type OnboardingData = Partial<IntakeResponse> & {
   onboardedAt?: string;
   /** Hour of the evening reminder, 0-23. Absent means the reminder is off. */
   reminderHour?: number;
+  /**
+   * Set only once a parent has actually opened the approval email and read back
+   * the code. Absent means no approval, and for a 16-17 year old that must
+   * block capture — see onboarding/photo.tsx. The address is stored masked;
+   * the raw one is not needed after the exchange.
+   */
+  parentalConsent?: { approvedAt: string; parentEmailMasked: string };
 };
 
 interface OnboardingContextValue {

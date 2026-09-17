@@ -1,0 +1,55 @@
+import { z } from "zod";
+
+import { verifyCode } from "@/lib/consent";
+import { check, clientKey, createStore } from "@/lib/rateLimit";
+
+export const runtime = "nodejs";
+
+/**
+ * Check the code the parent read off the approval page.
+ *
+ * Rate limited because a 6-character code over a 32-character alphabet is
+ * roughly a billion combinations — plenty against a human, not against an
+ * unthrottled loop.
+ */
+const VerifySchema = z
+  .object({ token: z.string().max(2048), code: z.string().max(16) })
+  .strict();
+
+/**
+ * This route's own counters — see the note in `../request/route.ts`.
+ *
+ * Separate from the approve route too: guessing codes here must not be able to
+ * lock a parent out of pressing approve.
+ */
+const store = createStore();
+
+export async function POST(req: Request) {
+  const key = clientKey(req.headers);
+  const gate = check(store, key, Date.now());
+  if (!gate.allowed) {
+    console.warn(`/api/consent/verify rate limited (${gate.reason}): ${key}`);
+    return Response.json(
+      { error: "Too many attempts. Please wait a few minutes and try again." },
+      { status: 429, headers: { "Retry-After": String(gate.retryAfterSeconds) } },
+    );
+  }
+
+  let body: unknown;
+  try {
+    body = await req.json();
+  } catch {
+    return Response.json({ error: "Invalid JSON body" }, { status: 400 });
+  }
+
+  const parsed = VerifySchema.safeParse(body);
+  if (!parsed.success) return Response.json({ error: "Invalid request" }, { status: 400 });
+
+  // verifyCode returns false for a missing secret, a bad signature, an expired
+  // token and a wrong code alike. Nothing here can throw its way to an approval.
+  const approved = verifyCode(parsed.data.token, parsed.data.code);
+  if (!approved) {
+    return Response.json({ error: "That code is not right, or it has expired." }, { status: 400 });
+  }
+  return Response.json({ approved: true });
+}

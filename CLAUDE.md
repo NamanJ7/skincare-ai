@@ -70,7 +70,7 @@ pnpm build            # turbo run build     (web only defines `build`; mobile/sh
 pnpm dev              # turbo run dev       (persistent, uncached)
 pnpm lint             # turbo run lint      (web only; eslint-config-next flat config)
 pnpm typecheck        # turbo run typecheck (all three packages: tsc --noEmit)
-pnpm test             # turbo run test      (packages/shared only, via vitest)
+pnpm test             # turbo run test      (packages/shared + apps/web, via vitest)
 ```
 
 Single-package / single-test invocations:
@@ -89,6 +89,7 @@ pnpm --filter @pore/shared typecheck
 pnpm --filter web dev                        # next dev, http://localhost:3000
 pnpm --filter web lint
 pnpm --filter web build
+pnpm --filter web test                       # vitest run (lib/**, app/** *.test.ts)
 
 # mobile (run from apps/mobile, or pnpm --filter @pore/mobile <script>)
 pnpm --filter @pore/mobile start             # expo start
@@ -96,12 +97,13 @@ pnpm --filter @pore/mobile ios / android / web
 pnpm --filter @pore/mobile typecheck
 ```
 
-Current baseline (keep it here): `pnpm test` → 6 files, 116 tests, all passing — `packages/shared`
-95 (`safety` 12, `vision` 21, `progress` 21, `schedule` 41) and `apps/web` 21 (`validateImages` 11,
-`rateLimit` 10). `pnpm typecheck` → clean in all three packages. `pnpm lint` → 0 errors,
-**0 warnings**: the rule now recognises the leading-underscore convention this codebase already
-used for deliberately-unused bindings, so the six long-standing warnings are gone and the script
-runs with `--max-warnings 0`. A lint step that cannot fail is decoration — keep it able to.
+Current baseline (keep it here): `pnpm test` → 8 files, 130 tests, all passing —
+`packages/shared` 95 (`safety` 12, `vision` 21, `progress` 21, `schedule` 41) and `apps/web` 35
+(`validateImages` 11, `rateLimit` 10, `consent` 10, `plan-boundary` 4). `pnpm typecheck` → clean in
+all three packages. `pnpm lint` → 0 errors, **0 warnings**: the rule now recognises the
+leading-underscore convention this codebase already used for deliberately-unused bindings, so the
+six long-standing warnings are gone and the script runs with `--max-warnings 0`. A lint step that
+cannot fail is decoration — keep it able to.
 
 **CI runs all four on every pull request** (`.github/workflows/ci.yml`): typecheck, test, lint,
 build, cheap checks first so a failure reports in under a minute rather than after the Next.js
@@ -111,10 +113,15 @@ pipeline builds its client inside a function and falls back to the mock. Note it
 *required* check until branch protection is enabled on `main`; until then it reports rather than
 blocks.
 
-`apps/web`'s tests cover only the two guards in front of the paid endpoint — `lib/validateImages.ts`
-and `lib/rateLimit.ts` — and that is the intended scope: the rest of that app is a marketing site.
-`apps/mobile` has no tests; the logic there worth testing belongs in `packages/shared`, which is why
-the pure parts of capture measurement live in `vision/` rather than beside the camera.
+`apps/web`'s tests cover only the trust boundaries — the two guards in front of the paid endpoint
+(`lib/validateImages.ts`, `lib/rateLimit.ts`), the intake schema that bounds what that endpoint
+pays for (`lib/plan-boundary.test.ts`), and the parental-consent tokens and codes including every
+fail-closed path (`lib/consent.test.ts`). That is the intended scope: the rest of that app is a
+marketing site. **Nothing covers the route handlers themselves** — their status codes, headers and
+gate ordering are manual probes only, tracked in `TODOS.md`, which matters because the ordering is
+where the protection lives. `apps/mobile` has no tests; the logic there worth testing belongs in
+`packages/shared`, which is why the pure parts of capture measurement live in `vision/` rather than
+beside the camera.
 
 ## Architecture: the plan-generation pipeline
 
@@ -122,27 +129,43 @@ the pure parts of capture measurement live in `vision/` rather than beside the c
 `POST /api/plan` (`apps/web/app/api/plan/route.ts`, Node runtime — the Anthropic SDK needs Node,
 not edge — with `maxDuration: 60` since it makes two model calls).
 
-**The route is a trust boundary and is explicit about it.** `validateImages` (`apps/web/lib/validateImages.ts`,
-extracted from the route so it can be tested) caps the request at 3 images and ~8MB decoded each,
-rejects `data:` URI prefixes, allowlists media types, and parses client-supplied `quality` through
-`PhotoQualitySchema` rather than trusting it. The size check reads the base64 string length *before*
-allocating anything — allocating first is how a size limit becomes the denial of service. Each rule
-returns its own message; "invalid request" tells a legitimate client nothing. Keep both properties.
+**The route is a cost boundary as well as a correctness one, and the gate ORDER is the protection.**
+`route.ts` runs four gates: rate limit → `content-length` → `IntakeSchema` → `validateImages`. The
+first two run before `req.json()`, so a rejected caller never gets a body buffered into memory, and
+a missing `content-length` is a 411 rather than an unbounded read.
+
+`IntakeSchema` (`lib/schemas.ts`) matters most: the intake is `JSON.stringify`'d into *both* Claude
+prompts, so every free-text field is length- and count-capped and the object is `.strict()`. An
+unbounded intake is an unbounded bill — rate limiting caps only how many requests you pay for, not
+how much each one costs.
+
+`validateImages` (`apps/web/lib/validateImages.ts`, extracted from the route so it can be tested)
+caps the request at 3 images and 1MB decoded each — sized so three at the cap still fit under
+Vercel's ~4.5MB platform body limit, which is what makes the number reachable — rejects `data:` URI
+prefixes, allowlists media types, and parses client-supplied `quality` through `PhotoQualitySchema`
+rather than trusting it. The size check reads the base64 string length *before* allocating anything
+— allocating first is how a size limit becomes the denial of service.
 
 **It is also rate limited** (`apps/web/lib/rateLimit.ts`): 5 requests per IP per 10 minutes and 4
 concurrent generations, because the endpoint is public, unauthenticated, and makes two Opus calls per
 request. Be accurate about what that is — **the counters live in the process**, so on serverless each
 instance enforces its own limit and a cold start resets it, and `x-forwarded-for` is spoofable by
 anyone reaching the origin directly. It stops a retry loop or a careless scraper. It is **not a
-security control** and must not be described as one; real protection needs auth on the endpoint.
-When this takes real traffic, move the counters to Redis/KV — `check()` is pure apart from the store
-it is handed, so only the store changes. 500s return a generic message and log the detail: SDK errors
-carry key state and internal paths.
+security control** and must not be described as one; it is the backstop, and `IntakeSchema` is the
+primary cost control. When this takes real traffic, move the counters to Redis/KV — `check()` is pure
+apart from the store it is handed, so only the store changes.
 
-One consequence the server cannot fix: `fetchPlan` collapses every outcome to `null`, so the mobile
-client cannot tell a 429 from anything else and `onboarding/intake.tsx` proceeds regardless. A
-throttled user is silently handed no plan. That was already true of every other failure; the limiter
-adds one more route to it. See `TODOS.md`.
+Each rule returns its own message — "invalid request" tells a legitimate client nothing, and this is
+the surface a mobile build hits when its encoding is off. Keep that property. 500s return a fixed
+message; the real error is logged, never returned, because SDK errors carry key state and internal
+paths. Do not reorder, relax or remove any of this without reading `lib/plan-boundary.test.ts`,
+`lib/rateLimit.test.ts` and `lib/validateImages.test.ts` first: they cover the schema, limiter and
+image rules as units but not the handler's ordering, so a reordering refactor passes the suite while
+quietly undoing the protection.
+
+Every rejection carries CORS headers, including the 411 and 413 that fire before `req.json()`.
+Without them a cross-origin caller sees an opaque network error instead of the specific message,
+so the reason would be written and never read — which is the same failure as not writing one.
 
 1. **Vision assessment** — up to 3 photos + intake JSON go to Claude (`client.messages.parse` with a
    Zod `output_config.format`, model `claude-opus-4-8`) using `ASSESSMENT_SYSTEM`, producing a
@@ -200,6 +223,51 @@ adding a fallback here, add an honest empty state instead.
 The route also exports an `OPTIONS` handler. Mobile calls it cross-origin with
 `content-type: application/json`, which is not CORS-simple, so the browser preflights — without it
 the preflight 405s and the request never happens.
+
+The typed outcome is what the UI acts on; `fetchPlan` also logs the status and response body on a
+non-ok reply, which is what a *developer* acts on. The server writes a specific reason into every
+rejection (`intake.age: ...`, `images[0] exceeds the 1MB limit`) and the user-facing copy
+deliberately does not repeat it, so without that line the one piece of information identifying the
+bug is discarded on arrival. Keep it.
+
+## Architecture: parental consent (16-17)
+
+`apps/web/lib/consent.ts` + `app/api/consent/{request,approve,verify}` +
+`app/consent/approve` + `apps/mobile/src/app/onboarding/consent.tsx`.
+
+Under-16 is blocked outright in `onboarding/age.tsx`. 16-17 must have a parent approve before the
+camera opens, and that approval is real: the app asks the server to email the parent a signed link,
+the parent presses approve, the server reveals a 6-character code, and the teen types it back.
+
+**There is no database, so the flow carries its state in an HMAC-signed token.** `issueToken`
+signs `{emailHash, age, issuedAt, expiresAt}` with `CONSENT_SECRET`; `codeFor` derives the code
+from that same token and secret, so nothing needs storing between the two requests. The parent's
+address is hashed into the token, never carried in it, so a leaked link cannot harvest addresses.
+
+Three properties hold this up. Do not remove any of them without replacing it:
+
+1. **It fails closed, everywhere.** A missing or short `CONSENT_SECRET`, an unconfigured mailer, an
+   expired token, a forged signature and a wrong code all end at "not approved". `readToken` and
+   `verifyCode` return null/false rather than throwing past the caller, and `sendConsentEmail`
+   throws in production when unconfigured. The bug this replaced was a gate that let people through
+   when the check never ran; a second fail-open gate would be no better.
+2. **The camera is guarded, not just the route.** `onboarding/photo.tsx` checks
+   `data.parentalConsent` before any stage renders, because that screen is reachable by deep link,
+   by back-navigation and from the "recheck" entry on `/today`. Routing alone is not a gate.
+   `parentalConsent` is written in exactly one place — `onboarding/consent.tsx`, after the server
+   confirms.
+3. **Revealing the code is a POST, never a GET.** Mail scanners and link-preview bots fetch every
+   URL in an email; if opening the link exposed the code, a scanner would approve on the parent's
+   behalf. `/consent/approve` renders a button, and only the button's POST returns the code.
+
+Required env (`apps/web/.env.example`): `CONSENT_SECRET` (32+ chars), `RESEND_API_KEY`,
+`CONSENT_EMAIL_FROM`, and `CONSENT_APP_ORIGIN` in production. With them unset no minor can finish
+onboarding — intended, but it looks like a bug if nobody sets them. Outside production the approve
+URL is logged instead of emailed so the flow is testable without an account.
+
+`lib/consent.test.ts` covers the fail-closed paths specifically. The consent record is stored
+on-device only (`profile.json`), which means there is no server-side audit trail — see `TODOS.md`
+for that limit and for why email confirmation is not the strictest form of verifiable consent.
 
 ## Architecture: guided capture (the other half)
 
@@ -361,7 +429,7 @@ Expo Router, file-based under `apps/mobile/src/app`. `@/*` maps to `src/*`, `@/a
 index.tsx              splash animation -> landing -> sign-up / sign-in
 (auth)/sign-up|sign-in  STUB: no backend. Any valid-looking input routes on. Real auth is a later increment.
 onboarding/age         age gate; <16 blocked, <=17 detours through consent
-onboarding/consent     parental-consent email capture (records the address; does not yet verify)
+onboarding/consent     REAL parental consent: emails the parent, they approve, teen enters the code
 onboarding/photo       guided 3-angle capture (the big one — ~420 lines, single screen, shared camera mount)
 onboarding/intake      questionnaire; calls fetchPlan at the end, records the progress baseline
 today.tsx              THE primary surface: one session at a time, from planDay. One check-in tap.
@@ -386,7 +454,7 @@ calibrates the camera, not as one more anonymous questionnaire step.
   `resolveFontFamily(family, weight)` picks the right face. The root layout holds the native splash
   up until fonts are ready.
 - **State**: `src/state/onboarding.tsx` is a React context (`OnboardingProvider` / `useOnboarding`)
-  carrying `Partial<IntakeResponse>` + `parentEmail` + `photos` + the generated `plan`. It is
+  carrying `Partial<IntakeResponse>` + `photos` + `parentalConsent` + the generated `plan`. It is
   **not** in-memory only — it hydrates from `src/lib/profile.ts` synchronously on mount and writes
   back on every `update`. See the cadence-engine section above for why that is a safety property
   and not a convenience; do not "simplify" it back to `useState({})`.

@@ -135,3 +135,54 @@ export function normalizeDraft(draft: RoutineDraft): Routine {
   });
   return { am: draft.am.map(map), pm: draft.pm.map(map), notes: draft.notes };
 }
+
+/**
+ * Inbound intake validation.
+ *
+ * `/api/plan` is a trust boundary in front of two paid Opus calls, and the intake
+ * is JSON-stringified straight into both prompts (see pipeline.ts). Without bounds
+ * here, one anonymous request can put an unbounded number of tokens through the
+ * model — rate limiting caps how many requests you pay for, this caps how much
+ * each one can cost. Every free-text field is therefore length- and count-capped,
+ * and the object is `.strict()` so unknown keys are rejected rather than forwarded
+ * into a prompt.
+ *
+ * The shape mirrors `IntakeResponse` in @pore/shared. It is checked against that
+ * type at the `generatePlan` call site, so drift fails `pnpm typecheck`.
+ */
+const skinGoal = z.enum([
+  "acne",
+  "post_acne_marks",
+  "hyperpigmentation",
+  "oiliness",
+  "dryness",
+  "texture",
+  "redness",
+  "fine_lines",
+  "general_health",
+]);
+
+/** Free-text the user types. Capped so it cannot become a token bomb. */
+const shortText = z.string().max(80);
+
+export const IntakeSchema = z
+  .object({
+    // The <16 gate is enforced on the client (onboarding/age.tsx); enforce it
+    // here too, because the client is not the only thing that can call this.
+    age: z.number().int().min(16).max(120),
+    goals: z.array(skinGoal).max(9),
+    skinType: z.enum(["oily", "dry", "combination", "normal"]),
+    sensitivity: z.enum(["low", "medium", "high"]),
+    currentProducts: z.array(shortText).max(30),
+    allergies: z.array(shortText).max(30),
+    budget: z.enum(["low", "medium", "high"]),
+    fragrancePreference: z.enum(["fragrance_free", "no_preference"]),
+    pregnancyOrBreastfeeding: z.boolean(),
+    skinTone: z.enum(["very_fair", "fair", "medium", "olive", "brown", "deep"]),
+    darkMarkProne: z.boolean(),
+    climate: z.enum(["dry", "humid", "temperate", "cold"]),
+    location: z.string().max(120).optional(),
+  })
+  .strict();
+
+export type ParsedIntake = z.infer<typeof IntakeSchema>;

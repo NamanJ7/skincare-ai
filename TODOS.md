@@ -280,33 +280,116 @@ Onboarding is now photo-first, which matches `apps/web/components/sections/HowIt
 and `FeatureCards.tsx`. Check no other marketing copy still describes an order
 the app no longer uses.
 
-### ~~`apps/web` has no tests~~ — the trust boundary is covered now
-`apps/web` has vitest and 21 tests over the two things guarding a paid endpoint:
-`lib/validateImages.ts` (extracted from the route so it could be tested at all)
-and `lib/rateLimit.ts`. Everything else in `apps/web` is still untested, which is
-fine — it is a marketing site.
+### `apps/web` route handlers are untested at the HTTP layer
+`apps/web` now has four suites, run by `pnpm test`, all on trust boundaries:
+`lib/validateImages.test.ts` and `lib/rateLimit.test.ts` (the two guards in front
+of the paid endpoint), `lib/plan-boundary.test.ts` (`IntakeSchema`, the bound on
+what that endpoint pays for) and `lib/consent.test.ts` (the parental-consent
+tokens and codes, every fail-closed path). Everything else in `apps/web` is
+untested, which is fine — it is a marketing site.
+
+What is still uncovered is the **handlers themselves**: the status codes, the
+`Retry-After` header, and the ordering of the gates in `app/api/plan/route.ts`
+were verified by manual curl probes, not by a test. A refactor that reorders the
+gates — say, moving the body-size check after `req.json()` — would pass the
+current suite while undoing the protection. That gap matters more here than the
+untested marketing pages, because on this route the ordering *is* the control.
+`apps/mobile` still has no tests at all.
+
+## Security & cost hardening — deferred items
+
+Recorded during the pre-production hardening pass. The pass itself bounded
+`/api/plan`'s input, rate limited it, stopped it leaking error detail, and closed
+the env-config gaps. These were found in the same audit and deliberately left.
+
+### Parental consent — done, with two limits worth naming
+`apps/mobile/src/app/onboarding/consent.tsx` now runs a real exchange: the app
+asks `/api/consent/request` to email the parent a signed link, the parent opens
+`/consent/approve` and presses approve, the server reveals a 6-character code
+derived from the same secret, and the teen enters it. `onboarding/photo.tsx`
+refuses to mount the camera unless `data.parentalConsent` is set, and that field
+is written in exactly one place, after the server confirms. State lives in
+HMAC-signed tokens (`apps/web/lib/consent.ts`), so this needed no database.
+
+The whole path fails closed: a missing `CONSENT_SECRET`, an unconfigured mailer,
+an expired or forged token and a wrong code all leave the field unset and the
+camera shut. `lib/consent.test.ts` covers each of those.
+
+Two limits, both deliberate:
+
+- **The consent record is on-device only.** It sits in `profile.json` next to
+  the other answers. Nothing is written server-side, so if a regulator or a
+  parent later asks you to *prove* consent was given, there is no trail to show
+  — and clearing app data clears the record. An auditable trail needs the
+  datastore this repo does not have, and would mean storing a parent's address
+  on your servers, which is a new breach surface and another privacy-policy
+  change.
+- **Email confirmation is not "verifiable parental consent" in the strictest
+  sense.** It proves someone with access to that mailbox approved. It does not
+  prove they are the parent, and a determined teen can supply their own address.
+  Stronger methods (card check, ID) exist and are what US COPPA demands for
+  under-13 — not the population here, since under-16 is blocked outright, but
+  get this reviewed by a lawyer against GDPR Art. 8, the UK Age Appropriate
+  Design Code and the US state minor-privacy laws before launch.
+
+Also still true: `CONSENT_SECRET`, `RESEND_API_KEY` and `CONSENT_EMAIL_FROM`
+must be set in the deployment or no minor can ever finish onboarding. That is
+the intended failure direction, but it will look like a bug if nobody sets them.
+
+### `/waitlist/confirmed` confirms a waitlist nobody joined
+`apps/web/app/(auth)/signup/page.tsx:43` (and the Google button's `href` at `:138`)
+navigate to `/waitlist/confirmed` without ever touching Tally. The waitlist lives
+entirely in Tally (`lib/tally.ts`, form `LZVOM2`), so a user who fills in the signup
+form is told "You're on the list" by a list that never received their email. Either
+route signup through `openWaitlist()` or change the copy.
+
+### The consent card contradicts the privacy policy
+`consent.tsx:44-45` reads "Photos stay on your phone and are never saved on our
+servers." The second clause is true; the first is not, once `EXPO_PUBLIC_API_URL`
+is set — photos go to Pore's server and on to Anthropic. The formal policy
+(`packages/shared/src/legal/content.ts:87`) discloses this correctly. The in-flow
+card is the one users actually read, so it is the one that has to be right.
+
+### Prompt caching on the two Opus calls
+`ASSESSMENT_SYSTEM` / `ROUTINE_SYSTEM` are static and re-sent every request, so
+`cache_control: { type: "ephemeral" }` on the system block of both `messages.parse`
+calls in `apps/web/lib/pipeline.ts` is the natively-correct caching answer — one
+line each, no dependency. Not done yet because the cache TTL is 5 minutes and an
+app with no users has no two requests inside 5 minutes; today's hit rate is ~0.
+It also silently no-ops below the model's minimum cacheable prefix. **Trigger:**
+add it when traffic is bursty enough that requests land within 5 minutes of each
+other, and verify with `usage.cache_read_input_tokens > 0` rather than assuming.
 
 ### `/api/plan` rate limiting is a speed bump, not a wall
-`lib/rateLimit.ts` counts per-IP requests (5 per 10 minutes) and concurrent
-generations (4) **in the process**, so on serverless each instance enforces its
-own limit and a cold start resets it. `x-forwarded-for` is also spoofable by
+`apps/web/lib/rateLimit.ts` counts per-IP requests (5 per 10 minutes) and
+concurrent generations (4) **in the process**, so on Vercel each lambda enforces
+its own limit and a cold start resets it. `x-forwarded-for` is also spoofable by
 anyone talking to the origin directly. It stops the accidental case — a retry
 loop, a stuck client, a scraper that does not care — and it is the most that can
-be done without shared state. Before this endpoint carries real traffic, move
-the counters to Redis/KV; `check()` is pure apart from the store it is handed,
-so only the store changes. Real protection means auth on the endpoint, which
-means an account system that does not exist yet.
+be done without shared state. The durable cost control is the input bound in
+`IntakeSchema`, not this.
 
-### `/api/plan` still does not validate `intake`
-The throttle above closed the volume half of this; the shape half is open.
-`validateImages` is thorough about the image array — count, size, media type,
-and the client-measured `quality` parsed rather than trusted. `intake` gets none
-of that: the body is cast `as Partial<PlanInput>` (a compile-time claim, not a
-runtime check) and the route only tests it for truthiness, so any truthy value
-reaches `JSON.stringify` in `pipeline.ts` and goes into the prompt verbatim.
-`IntakeResponse` carries free-text fields, so this is the field that reaches the
-model as text. An `IntakeResponseSchema` in `apps/web/lib/schemas.ts` — which
-already mirrors the domain enums for outputs — is the shape of the fix.
+Before this endpoint carries real traffic, move the counters to Redis/KV;
+`check()` is pure apart from the store it is handed, so only the store changes.
+Vercel Firewall rate-limit rules are the no-code alternative. Real protection
+means auth on the endpoint, which means an account system that does not exist
+yet — `clientKey()` already returns a caller identity string, so it becomes a
+user id the day that lands.
+
+### ~~`/api/plan` does not validate `intake`~~ — done
+`IntakeSchema` in `apps/web/lib/schemas.ts` length- and count-caps every
+free-text field, is `.strict()` so an unknown key is rejected rather than
+forwarded into a prompt, and enforces the `<16` age gate server-side. The
+truthiness check is gone. Worst case is now a ~5.4KB / ~1.5k-token intake per
+prompt instead of unbounded, which matters because the intake is
+`JSON.stringify`'d into *both* Claude calls — the throttle caps how many
+requests are paid for, this caps what each one costs. Covered by
+`lib/plan-boundary.test.ts`.
+
+What is still uncovered: the route handler's own status codes, headers and
+**gate ordering**. The order is the protection — moving the `content-length`
+check after `req.json()` would undo it — and no test would notice. Manual curl
+probes only; see the entry above on `apps/web` route handlers.
 
 ### ~~The mobile client cannot see a 429~~ — done
 `fetchPlan` returns a discriminated `PlanOutcome`: either the plan, or a
@@ -341,3 +424,30 @@ workflow breaks. The fix is bumping each action to the major that targets Node
 the gate red for a warning that is not yet failing anything. Check the current
 majors and bump them together. (The build itself already runs on Node 22; only
 the actions' own runtime is stale.)
+
+### `maxDuration` is 60s and unverified against the deploy target
+`apps/web/app/api/plan/route.ts:8` sets `maxDuration = 60`. Two sequential Opus
+4.8 calls at `max_tokens: 16000` can plausibly exceed that, and the failure mode
+is the expensive one: a gateway timeout *after* both model calls have been paid
+for and after the user has already waited a minute.
+
+Left at 60 because the app is not deployed yet, so there is nothing to measure
+against. The ceiling is plan-dependent and could not be verified from the dev
+container (Vercel's docs are blocked by the egress proxy, and the public
+summaries contradict each other on whether the Hobby ceiling is 60s or 300s).
+Check the real limit in the Vercel dashboard on first deploy and raise it there
+rather than trusting a number written here.
+
+### `metadataBase` points at `pore.skin`, the app is served from `poreai.vercel.app`
+`apps/web/app/layout.tsx:22` sets `metadataBase: new URL("https://pore.skin")`.
+Next resolves every Open Graph image and canonical URL against it, so if the site
+is served from `poreai.vercel.app` and `pore.skin` is not mapped to it, every
+social preview points at a domain that does not serve the assets.
+
+Deliberately not changed: whether `pore.skin` is a domain that is owned and will
+be mapped, or an aspiration, is not knowable from the repo. If it is owned and
+mapped, the current value is already correct and switching it to the Vercel URL
+would be the regression. Decide, then it is a one-line change.
+
+(`components/mockups/DashboardMock.tsx:23` also renders `app.pore.skin`, but that
+is display text inside an illustration of the product, not a resolved URL.)
