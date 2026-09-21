@@ -10,10 +10,17 @@ import {
   type Routine,
   type RoutineStep,
 } from "@pore/shared";
+import { exportBundle, importBundle } from "@/lib/backup";
 import { buildIntake } from "@/lib/intake";
 import { deleteJournal, readJournal, recordedDays } from "@/lib/journal";
 import { deleteProfile } from "@/lib/profile";
-import { REMINDER_HOURS, disableReminder, enableReminder, formatHour } from "@/lib/reminder";
+import {
+  REMINDER_HOURS,
+  cancelRecheck,
+  disableReminder,
+  enableReminder,
+  formatHour,
+} from "@/lib/reminder";
 import { deleteStoredPhotos, listSessions, storedPhotoCount } from "@/lib/photos";
 import { useOnboarding } from "@/state/onboarding";
 import {
@@ -102,10 +109,12 @@ export default function Plan() {
           style: "destructive",
           onPress: () => {
             try {
-              // The reminder is scheduled with the OS, not stored with the
+              // Both reminders are scheduled with the OS, not stored with the
               // profile, so erasing the profile alone would leave a nightly
-              // notification for a routine that no longer exists.
+              // notification — and a pending "new photos are due" — for a
+              // routine that no longer exists.
               void disableReminder();
+              void cancelRecheck();
               deleteProfile();
               deleteJournal();
               reset();
@@ -158,6 +167,44 @@ export default function Plan() {
     );
   }
 
+  async function saveCopy() {
+    const outcome = await exportBundle();
+    if (!outcome.ok) Alert.alert("Couldn't save a copy", outcome.reason);
+  }
+
+  /**
+   * Restore replaces; it does not merge.
+   *
+   * Two devices' journals cannot be reconciled without a rule for which tick-off
+   * wins, and any rule would put days into the adherence record nobody claimed —
+   * the number that gates whether the routine is allowed to get stronger. So the
+   * destructive shape is the honest one, and it is confirmed before it runs.
+   */
+  function confirmRestore() {
+    Alert.alert(
+      "Restore from a copy?",
+      "This replaces the answers and record on this phone with the ones in the file. Your photos stay where they are.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Choose a file",
+          style: "destructive",
+          onPress: () => {
+            void (async () => {
+              const outcome = await importBundle();
+              if (outcome.ok) {
+                Alert.alert("Restored", "Reopen Pore to pick up from your restored record.");
+                return;
+              }
+              if (outcome.canceled) return;
+              Alert.alert("Couldn't restore", outcome.reason);
+            })();
+          },
+        },
+      ],
+    );
+  }
+
   // No local fallback. This screen used to synthesise a routine *and* three
   // invented findings ("Acne-like breakouts · moderate") whenever the real plan
   // was missing, and present them as the user's own assessment. A plan we did
@@ -190,7 +237,12 @@ export default function Plan() {
           Your assessment and routine live here once they have been built. It takes three photos
           and a few questions.
         </AppText>
-        <PrimaryButton label="Build my routine" onPress={() => router.push("/onboarding/photo")} />
+        {/*
+         * Today owns the recovery path — it can see the stored capture session
+         * and finish a plan that failed after the photos were taken. Sending
+         * someone to the camera from here would throw away a perfectly good set.
+         */}
+        <PrimaryButton label="Back to today" onPress={() => router.replace("/today")} />
       </Screen>
     );
   }
@@ -229,6 +281,52 @@ export default function Plan() {
         These are the steps and weekly frequencies your routine is built from. Which of them you do
         on any given night is worked out for you on Today — you never have to plan one yourself.
       </AppText>
+
+      {/*
+       * Top-level, not inside "Your data".
+       *
+       * Sensitivity, pregnancy and allergies are the three answers the safety
+       * engine leans on hardest, and all three change. Filing the only way to
+       * correct them under a data-management accordion made "I am pregnant now"
+       * a setting nobody would find — and the fallback was Erase everything and
+       * start over, which is not a correction, it is a loss.
+       */}
+      {/*
+       * Photos, at the top level.
+       *
+       * Taking another set is the single most important recurring action in the
+       * product — it is the only thing that produces a measurement — and it used
+       * to sit two taps deep inside a collapsed accordion labelled "Your data",
+       * next to the delete buttons. Filing the core loop under data management
+       * is how a feature stops existing.
+       */}
+      <Card>
+        <AppText variant="bodyStrong">Your photos</AppText>
+        <AppText variant="caption" color={colors.inkMuted}>
+          {sessionCount >= 2
+            ? `${sessionCount} sets taken. Each new set is read on its own, with no knowledge of the last — that is what makes comparing them mean anything.`
+            : "One set so far. A second set is what lets us put your skin side by side with where it started."}
+        </AppText>
+        {sessionCount >= 2 && (
+          <GhostButton label="See what changed" onPress={() => router.push("/compare")} />
+        )}
+        <GhostButton
+          label="Take a new set"
+          onPress={() => router.push("/onboarding/photo?mode=recheck")}
+        />
+      </Card>
+
+      <Card>
+        <AppText variant="bodyStrong">Has anything changed?</AppText>
+        <AppText variant="caption" color={colors.inkMuted}>
+          Pregnancy, sensitivity, a new reaction to an ingredient — tell us and your routine is
+          re-checked against it straight away. No new photos needed.
+        </AppText>
+        <GhostButton
+          label="Update my answers"
+          onPress={() => router.push("/onboarding/intake?mode=edit")}
+        />
+      </Card>
 
       {/*
        * The receipt. Everything under here is the chain that produced the
@@ -292,7 +390,7 @@ export default function Plan() {
       {/* Settings and stored data. One section, all the erase paths together. */}
       <Disclosure
         title="Your data"
-        summary="Photos, your record, reminders — and how to erase any of it."
+        summary="What's stored on this phone, and how to erase any of it."
       >
         {photoCount > 0 && (
           <View style={{ gap: spacing.xs }}>
@@ -301,13 +399,6 @@ export default function Plan() {
               {photoCount} {photoCount === 1 ? "photo is" : "photos are"} saved on this phone,
               inside the app. They were never uploaded to photo storage and are not on our servers.
             </AppText>
-            {sessionCount >= 2 && (
-              <GhostButton label="See what changed" onPress={() => router.push("/compare")} />
-            )}
-            <GhostButton
-              label="Take a new set"
-              onPress={() => router.push("/onboarding/photo?mode=recheck")}
-            />
             <GhostButton label="Delete my photos" onPress={confirmDeletePhotos} />
           </View>
         )}
@@ -347,6 +438,28 @@ export default function Plan() {
           {data.reminderHour !== undefined && (
             <GhostButton label="Turn the reminder off" onPress={() => void setReminder(null)} />
           )}
+        </View>
+
+        {/*
+         * Keeping a copy is a data control, so it sits with the erase paths.
+         *
+         * The baseline assessment is written once and never replaced — it is the
+         * zero every later measurement subtracts from. It lived in one file on
+         * one phone with no backup, so a reinstall did not cost a routine, it
+         * permanently cost the ability to measure anything ever again. There is
+         * no server to fix that with and adding one would contradict every
+         * sentence above, so the user gets the file.
+         */}
+        <View style={{ gap: spacing.xs }}>
+          <Divider />
+          <AppText variant="bodyStrong">Keep a copy</AppText>
+          <AppText variant="caption" color={colors.inkMuted}>
+            Save your answers and your record to a file you keep — so a new phone doesn&apos;t
+            start you over. Your photos aren&apos;t in it; the first reading of your skin is, and
+            that&apos;s the part nothing can rebuild.
+          </AppText>
+          <GhostButton label="Save a copy" onPress={() => void saveCopy()} />
+          <GhostButton label="Restore from a copy" onPress={confirmRestore} />
         </View>
 
         <View style={{ gap: spacing.xs }}>

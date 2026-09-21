@@ -2,6 +2,38 @@
 
 Deferred work that is real. If it is not written here, it does not exist.
 
+## Marketing and product have drifted apart
+
+Three claims on the marketing site are not true of the app, and each needs a decision rather than a
+patch. None is fixed by the current branch.
+
+### The pricing page charges for things that are free and shipped
+`apps/web/lib/pricing.ts` puts "Measured before / after" and "Routine adapts to what changed" behind
+**Pore Plus**. Both are `packages/shared/src/progress`, both are shipped in the mobile app, and both
+are free — there is no auth, no payments and no server, so no gate is possible even in principle.
+`PRICING_FAQ` also commits, in writing, that the Free plan stays free "with no time limit".
+Either build the gate (accounts + payments + a backend, which contradicts the privacy content that
+is currently the strongest thing about the product) or rewrite the tiers to describe what is
+actually differentiated. Do not leave a page up that sells a paywall that cannot exist.
+
+### "Advanced compatibility checks" does not exist in any form
+Sold on `/features`, mocked in `apps/web/components/mockups/CompatibilityMock.tsx` (a pairwise grid
+with "Works well together" / "Space to alternate nights"), and priced as a Plus feature. There is no
+pairwise compatibility logic in `packages/shared`. The safety engine knows three booleans per active
+(`isExfoliatingAcid`, `isRetinoid`, `isBenzoylPeroxide`) — a classification, not a graph.
+
+It is the most obviously *right* next feature for this codebase: deterministic, unit-testable, pure
+`packages/shared`, no SKUs and no backend, and it is the only thing that would give someone a reason
+to open the app that is not "tick a box". It is also the one honest use for
+`IntakeResponse.currentProducts`, which is still inert. The blocker is that twelve actives with
+eight booleans each is not enough to answer a real question, so the `ACTIVES` table has to grow
+first. Not started.
+
+### The store badges are not links
+`apps/web/components/sections/AppDownload.tsx` renders App Store and Google Play badges as inert
+`<div>`s. There is no published build. Until there is, the badges are a promise the funnel cannot
+keep.
+
 ## Before launch
 
 ### Tune `CAPTURE_TUNING` on real devices
@@ -146,16 +178,25 @@ match would make one of them wrong. The `/compare` subtitle now names what its
 number spans: "N weeks between these two photo sets". The numbers can still
 differ; they no longer look like the same fact contradicting itself.
 
-### Only two assessments are ever kept
-`baseline` and `latest`, matching the two-photo-session model. That is the right
-scope for the feature, but it means the middle of a six-month journey is not
-recoverable and a trend line is impossible. Storing every assessment is cheap
-(they are small JSON); the reason not to is that it needs a retention and
-per-session delete story first, same gap the photos already have below.
+### ~~Only two assessments are ever kept~~ — every reading is kept now
+Done. `journal.assessments` is an ordered array; `baseline` is element zero and
+still write-once, `latest` is the last element. The migration off the old
+two-slot shape lives in `packages/shared/src/progress/history.ts` with 11 tests,
+deliberately not beside the app's storage: a migration that silently drops a
+baseline is indistinguishable from a working one until the comparison it ruins.
+
+`recordInHistory` replaces in place when the same `sessionId` is re-filed, so a
+retried assessment of one capture set is a correction rather than a second point
+in time — otherwise any trend drawn from this would carry a fake interval.
+
+**Still open**: nothing draws the trend yet. `/compare` remains baseline vs
+latest, which is the right verdict surface; a per-concern line over 3+ points is
+now possible and is not built. Retention is also still unsolved — the history
+grows without bound, same gap as the photos below.
 
 ### Re-assessment burns a full plan generation
-`runReassessment` calls `fetchPlan`, which runs *both* model calls and throws the
-returned routine away — only `.assessment` is used. That is a deliberate trade:
+`runReassessment` calls `buildPlan` (which calls `fetchPlan`), running *both*
+model calls and throwing the returned routine away — only `.assessment` is used. That is a deliberate trade:
 reusing the endpoint verbatim is what keeps the second reading blind and required
 zero backend change. If the cost matters, add an assessment-only mode to
 `/api/plan` rather than a second endpoint, and keep it ignorant of history.
@@ -229,14 +270,24 @@ adherence rate, which gates whether the routine is allowed to get *stronger*; th
 existing comment in `journal.ts` is explicit that under-counting is the safe
 direction to be wrong in.
 
-### `/compare` is still hard to reach
-Done enough. `/today` now links to it directly once two capture sessions exist,
-and separately offers a re-capture when the ramp reaches full strength. It is no
-longer three levels deep behind `/plan` -> "Your photos" -> "See what changed",
-gated on a session count the user was never told about.
+### ~~`/compare` is still hard to reach~~ — and the six-week wait is gone too
+Done. `/today` links to it once two capture sessions exist, and the re-capture
+invitation is no longer gated on the ramp reaching full strength: `recheckDue`
+(`FIRST_RECHECK_WEEK` = 2, then every 4) runs off the last capture date instead.
+Six weeks of identical screens before the only thing that ever unlocked was not a
+loop anybody stays in. `plan.tsx` also lifts "Take a new set" out of the
+collapsed "Your data" accordion to a top-level card — filing the core loop under
+data management is how a feature stops existing.
+
+`scheduleRecheck` in `reminder.ts` books one dated notification when a set comes
+due, so the product can finally ask for the thing it is built around instead of
+waiting to be discovered.
 
 What is still untested is the bet itself: whether "we couldn't measure this"
-reads as integrity or as the app looking broken. That needs people, not code.
+reads as integrity or as the app looking broken. `/compare` now hedges it by
+rendering the before/after photographs above the verdict and unconditionally —
+a record claims nothing, so it survives a refusal — but whether that lands is a
+question for people, not code.
 
 ### Dynamic Type
 Done, and smaller than it was written up to be. A re-audit found four of the
@@ -272,6 +323,79 @@ Also not proposed: a streak-maximising retention layer. The consecutive-day
 streak that used to sit on `/today` was replaced with a count of sessions this
 week, because an unbroken chain punishes the one behaviour the deload engine
 exists to encourage — stopping when your skin says stop.
+
+## From the trust-and-retention pass
+
+### ~~The safety profile could not be corrected~~ — done
+Sensitivity, the pregnancy flag and declared allergies are the three inputs
+`applySafetyRules` leans on hardest, and all three change over a life. The only
+way to correct any of them was "Erase everything and start over" on `/plan`, so a
+user who became pregnant had no way to tell the app and the safety engine went on
+doing exactly the right thing to the wrong answers — the failure `profile.ts` was
+written to prevent, one level up. `onboarding/intake.tsx?mode=edit` now re-opens
+the same five questions prefilled and re-runs the engine.
+
+**Known limitation, stated in the UI rather than hidden**: re-clamping is
+monotonic. `applySafetyRules` removes and caps and has no path that restores a
+step an earlier answer removed, so someone who un-sets the pregnancy flag does not
+get their retinoid back — they are told to build a new routine from fresh photos.
+A genuine "reconsider this step" would mean a second routine-draft call, which is
+a bigger change than an edit screen.
+
+### ~~The baseline could not survive the phone~~ — exportable now
+`src/lib/backup.ts` writes `{ profile, journal }` to a file and hands it to the
+system share sheet; `importBundle` reads one back and replaces both stores. The
+baseline assessment is written once and never replaced, so losing it never cost a
+routine — it permanently cost the ability to measure anything again.
+
+**Open**: photos are not in the bundle, deliberately (two orders of magnitude
+larger, and the unrebuildable part is the assessment). If people expect their
+photos to travel, that needs a zip and a size story. Restore is also a replace
+and not a merge — reconciling two journals needs a rule for which tick-off wins,
+and any such rule inflates the adherence record that gates whether the routine
+may get *stronger*. Unverified on hardware: whether the iOS share sheet and the
+Android document picker both behave through `expo-sharing` +
+`File.pickFileAsync`.
+
+### ~~The re-assessment could never produce a verdict~~ — fixed
+This was the serious one. `runReassessment` in `compare.tsx` built its own
+`fetchPlan` payload and omitted each photo's measured `quality`. The pipeline
+attaches `photoQuality` to the assessment straight from the request
+(`apps/web/lib/pipeline.ts`), and the progress engine's comparability gate is its
+only consumer: an angle counts only if it was flagged clean **and** its
+illuminant came back `screen_flash`. With the field missing, every re-assessment
+landed carrying an empty `photoQuality`, no angle was ever measurable, and the
+verdict the entire screen exists for could not be produced — the engine refused
+every single time, correctly, for a reason that had nothing to do with the
+photos. Both capture paths now go through `buildPlan` (`src/lib/plan.ts`) so the
+payload shape cannot drift again.
+
+**Never verified end to end against a real key.** The fix is structurally right
+and typechecks, but nobody has watched a real second capture produce a real
+comparable report. Do that before trusting any of the progress numbers.
+
+### The auth stubs are gone, and nothing replaces them
+`(auth)/sign-up` and `(auth)/sign-in` were deleted. Neither created, checked or
+stored anything; the Apple and Google buttons called the same no-op as email;
+sign-in let a fresh install straight through to an empty `/today`; and sign-up
+promised "save your skin scans and routine, and track your progress over time"
+when nothing is saved anywhere but the phone. A screen that asks for a password
+it throws away is not a placeholder for accounts, it is a false statement about
+where the user's data lives.
+
+Real accounts remain unbuilt and remain the gate on: a baseline that survives a
+lost phone without the user remembering to export, any paid tier at all, and real
+protection on `/api/plan` (see below). Web `/login` and `/signup` still exist and
+are honest — they say "launching soon, waitlist members first".
+
+### Parental consent still is not consent
+`onboarding/consent.tsx` records the guardian's email and a `parentConsentAt`
+timestamp on the device and sends nothing. The copy now says exactly that rather
+than "add their email so we can reach them for approval", which was a claim that
+a 16-year-old's parent had been contacted when no code in the app ever contacted
+anybody. Verifiable parental consent needs an email service and a server, so it
+needs the accounts work above. Until then this is a notice, not a consent record,
+and the legal position should be reviewed by someone qualified.
 
 ## Housekeeping
 

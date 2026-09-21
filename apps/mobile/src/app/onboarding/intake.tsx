@@ -1,12 +1,20 @@
-import { router } from "expo-router";
+import { router, useLocalSearchParams } from "expo-router";
 import { useState, type ReactNode } from "react";
-import { ActivityIndicator, Pressable, View } from "react-native";
+import { ActivityIndicator, Alert, Pressable, View } from "react-native";
 
-import { ACTIVES, type ActiveKey, type Sensitivity, type SkinGoal, type SkinType } from "@pore/shared";
-import { fetchPlan, type PlanError } from "@/lib/api";
+import {
+  ACTIVES,
+  applySafetyRules,
+  type ActiveKey,
+  type SafetyAdjustment,
+  type Sensitivity,
+  type SkinGoal,
+  type SkinType,
+} from "@pore/shared";
+import { type PlanError } from "@/lib/api";
 import { buildIntake } from "@/lib/intake";
-import { recordAssessment } from "@/lib/journal";
-import { CAPTURE_STEPS, listSessions, type CapturedPhoto } from "@/lib/photos";
+import { readJournal, saveRoutine } from "@/lib/journal";
+import { buildPlan } from "@/lib/plan";
 import { REMINDER_HOURS, enableReminder, formatHour } from "@/lib/reminder";
 import { useOnboarding } from "@/state/onboarding";
 import {
@@ -69,7 +77,21 @@ const STEP_COUNT = 5;
 
 export default function Intake() {
   const { data, update } = useOnboarding();
+  /**
+   * `edit` re-opens the same five questions against the answers already stored,
+   * with no photos and no model call.
+   *
+   * Sensitivity, the pregnancy flag and declared allergies are the three inputs
+   * `applySafetyRules` cares most about, and all three change over a life. Until
+   * this existed the only way to correct any of them was `Erase everything and
+   * start over` on /plan — so a user who became pregnant had no way to tell the
+   * app, and the safety engine went on doing exactly the right thing to the
+   * wrong answers. That is the failure `profile.ts` was written to prevent, one
+   * level up.
+   */
+  const editing = useLocalSearchParams<{ mode?: string }>().mode === "edit";
   const [step, setStep] = useState(0);
+  const [saved, setSaved] = useState<SafetyAdjustment[] | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
   const [planError, setPlanError] = useState<PlanError | null>(null);
   /**
@@ -78,12 +100,24 @@ export default function Intake() {
    * something worth being reminded about, which is the only honest time to ask.
    */
   const [askingReminder, setAskingReminder] = useState(false);
-  const [goals, setGoals] = useState<SkinGoal[]>([]);
-  const [skinType, setSkinType] = useState<SkinType | null>(null);
-  const [sensitivity, setSensitivity] = useState<Sensitivity | null>(null);
-  const [pregnant, setPregnant] = useState<boolean | null>(null);
+  /*
+   * Seeded from what is already stored, not from empty.
+   *
+   * These answers are persisted the moment the questionnaire completes, but the
+   * form itself always started blank — so anyone who came back through this
+   * screen (after a failed plan, or now to edit) re-answered five questions the
+   * app could already see. Editing needs the prefill to be an edit at all.
+   */
+  const [goals, setGoals] = useState<SkinGoal[]>(() => data.goals ?? []);
+  const [skinType, setSkinType] = useState<SkinType | null>(() => data.skinType ?? null);
+  const [sensitivity, setSensitivity] = useState<Sensitivity | null>(() => data.sensitivity ?? null);
+  const [pregnant, setPregnant] = useState<boolean | null>(
+    () => data.pregnancyOrBreastfeeding ?? null,
+  );
   /** null until answered; [] is the real answer "none of these". */
-  const [allergies, setAllergies] = useState<ActiveKey[] | null>(null);
+  const [allergies, setAllergies] = useState<ActiveKey[] | null>(
+    () => (data.allergies as ActiveKey[] | undefined) ?? null,
+  );
 
   const canAdvance =
     (step === 0 && goals.length > 0) ||
@@ -112,11 +146,49 @@ export default function Intake() {
     const answers = answersFromForm();
     update(answers);
 
+    if (editing) {
+      reclamp({ ...data, ...answers });
+      return;
+    }
+
     // The photos were taken first, but the assessment needs these answers, so
     // generation happens here rather than running on questionnaire defaults.
     // `data` is this closure's value and predates the update() above, so the
     // answers are merged in explicitly rather than read back from it.
     await generate({ ...data, ...answers });
+  }
+
+  /**
+   * Re-run the safety engine against the edited answers.
+   *
+   * No model call: the assessment describes the photos, and the photos have not
+   * changed. What has changed is what is *allowed*, and that question is settled
+   * in code — `applySafetyRules` is the same function the pipeline ends with, so
+   * an edit gets exactly the treatment the original routine got.
+   *
+   * The result is written to both stores on purpose. `today.tsx` prefers
+   * `journal.routine` when it exists and `plan.tsx` reads `data.plan`, so
+   * writing one and not the other would leave the two screens disagreeing about
+   * what the routine is — with the safety-relevant one being whichever the user
+   * happened not to be looking at.
+   *
+   * This can only ever take things away. `applySafetyRules` removes and caps; it
+   * has no path that restores a step an earlier answer removed. So a user who
+   * un-sets the pregnancy flag does not get their retinoid back here, and the
+   * screen says so rather than letting them assume otherwise.
+   */
+  function reclamp(withAnswers: typeof data) {
+    const current = readJournal().routine ?? data.plan?.routine;
+    if (!current) {
+      router.back();
+      return;
+    }
+    const result = applySafetyRules(current, buildIntake(withAnswers));
+    saveRoutine(result.routine);
+    if (data.plan) {
+      update({ plan: { ...data.plan, routine: result.routine, adjustments: result.adjustments } });
+    }
+    setSaved(result.adjustments);
   }
 
   /**
@@ -152,14 +224,10 @@ export default function Intake() {
     setAnalyzing(true);
     setPlanError(null);
     try {
-      const photos = data.photos ?? [];
-      const ordered = CAPTURE_STEPS.map((s) => photos.find((p) => p.angle === s.angle)).filter(
-        (p): p is CapturedPhoto => p !== undefined,
-      );
-      const outcome = await fetchPlan({
-        images: ordered.map((p) => ({ data: p.data, mediaType: "image/jpeg", quality: p.quality })),
-        intake: buildIntake(withAnswers),
-      });
+      // `buildPlan` owns the payload shape and files the baseline assessment.
+      // The recovery path on /today calls the same function against the same
+      // stored photos, so a retry cannot quietly become a different request.
+      const outcome = await buildPlan(withAnswers, data.photos ?? []);
 
       // A failed plan used to fall through to /today anyway, where a hardcoded
       // demo routine stood in for the one we never built. Say what happened.
@@ -169,16 +237,6 @@ export default function Intake() {
       }
 
       update({ plan: outcome.plan });
-      // This first reading is the zero every later measurement subtracts from,
-      // so it is filed away the moment it exists. Without it there is nothing
-      // to compare a return visit against.
-      recordAssessment({
-        // The capture screen has already written its manifest, so the newest
-        // stored session is the set this assessment was made from.
-        sessionId: listSessions()[0]?.id ?? "baseline",
-        capturedAt: ordered[0]?.capturedAt ?? new Date().toISOString(),
-        assessment: outcome.plan.assessment,
-      });
       setAskingReminder(true);
     } finally {
       setAnalyzing(false);
@@ -186,8 +244,27 @@ export default function Intake() {
   }
 
   async function chooseReminder(hour: number | null) {
-    if (hour !== null && (await enableReminder(hour))) update({ reminderHour: hour });
-    router.replace("/today");
+    if (hour === null) {
+      router.replace("/today");
+      return;
+    }
+    if (await enableReminder(hour)) {
+      update({ reminderHour: hour });
+      router.replace("/today");
+      return;
+    }
+    /*
+     * Say it. This used to navigate on regardless, so someone who tapped "9pm"
+     * and then declined the system permission left onboarding believing they had
+     * a reminder set — and the one thing standing between this app and being
+     * forgotten simply never arrived. `plan.tsx` already alerts on the same
+     * failure; the two paths now agree.
+     */
+    Alert.alert(
+      "No reminder set",
+      "Notifications are turned off for Pore, so we can't send the evening nudge. You can turn them on in Settings and set it from your plan screen.",
+      [{ text: "OK", onPress: () => router.replace("/today") }],
+    );
   }
 
   function back() {
@@ -198,6 +275,55 @@ export default function Intake() {
     setPlanError(null);
     if (step === 0) router.back();
     else setStep((s) => s - 1);
+  }
+
+  if (saved) {
+    return (
+      <Screen contentStyle={{ paddingTop: spacing.section }}>
+        <AppText variant="label" color={colors.primary}>
+          SAVED
+        </AppText>
+        <AppText variant="title">
+          {saved.length > 0 ? "Your routine has changed" : "Your answers are updated"}
+        </AppText>
+
+        {saved.length > 0 ? (
+          <Card>
+            <AppText variant="bodyStrong">What we adjusted</AppText>
+            <View style={{ gap: spacing.xs, marginTop: spacing.xxs }}>
+              {saved.map((a, i) => (
+                <AppText key={`${a.rule}-${i}`} variant="caption" color={colors.ink}>
+                  • {a.detail}
+                </AppText>
+              ))}
+            </View>
+          </Card>
+        ) : (
+          <AppText variant="body" color={colors.inkMuted}>
+            Nothing in your routine needed to change for those answers.
+          </AppText>
+        )}
+
+        {/*
+          Said plainly rather than left to be discovered. The safety engine only
+          ever removes, so a loosened answer cannot restore a step it took away
+          on a stricter one — and someone who set the pregnancy flag by mistake
+          would otherwise sit and wait for a retinoid that is never coming back.
+        */}
+        <AppText variant="caption" color={colors.inkMuted}>
+          Answers can only make your routine gentler. To have a step considered again, build a new
+          routine from a fresh set of photos.
+        </AppText>
+
+        <View style={{ gap: spacing.sm, marginTop: spacing.lg }}>
+          <PrimaryButton label="Back to my plan" onPress={() => router.back()} />
+          <GhostButton
+            label="Build a new routine from photos"
+            onPress={() => router.replace("/onboarding/photo")}
+          />
+        </View>
+      </Screen>
+    );
   }
 
   if (askingReminder) {
@@ -339,7 +465,9 @@ export default function Intake() {
           */}
           {!planError && (
             <PrimaryButton
-              label={step < STEP_COUNT - 1 ? "Next" : "Build my routine"}
+              label={
+                step < STEP_COUNT - 1 ? "Next" : editing ? "Save changes" : "Build my routine"
+              }
               onPress={next}
               disabled={!canAdvance}
             />

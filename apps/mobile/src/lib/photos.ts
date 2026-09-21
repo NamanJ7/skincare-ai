@@ -250,3 +250,64 @@ export function deleteStoredPhotos(): void {
   const dir = photosDir();
   if (dir.exists) dir.delete();
 }
+
+/** What `writeManifest` wrote, as read back. */
+interface StoredManifest {
+  version: number;
+  id: string;
+  capturedAt: string;
+  photos: { angle: CaptureAngle; capturedAt: string; quality: PhotoQuality }[];
+}
+
+function readManifest(sessionId: string): StoredManifest | undefined {
+  try {
+    const file = new File(sessionDir(sessionId), MANIFEST);
+    if (!file.exists) return undefined;
+    return JSON.parse(file.textSync()) as StoredManifest;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Re-read a stored session as a deliverable payload.
+ *
+ * The base64 copy of a photo is deliberately transient — it exists for one
+ * /api/plan request and is never written to the profile. The JPEGs themselves
+ * are not: they land in `<sessionId>/` at capture time, before the questionnaire
+ * is even answered. So a plan that failed after capture can be retried from what
+ * is already on disk, and the user never re-shoots a set of photos that were
+ * fine. The measured quality comes back from the manifest rather than being
+ * re-derived, because it describes the frame the camera saw, not the compressed
+ * copy that survived — re-measuring a 1280px JPEG would answer a different
+ * question and would quietly change the illuminant the progress engine gates on.
+ *
+ * Returns the angles that are actually present, in capture order. An empty
+ * result means there is nothing to retry with and the user does need the camera.
+ */
+export function readSessionPhotos(sessionId: string): CapturedPhoto[] {
+  const manifest = readManifest(sessionId);
+  if (!manifest) return [];
+
+  const photos: CapturedPhoto[] = [];
+  for (const step of CAPTURE_STEPS) {
+    const entry = manifest.photos.find((p) => p.angle === step.angle);
+    if (!entry) continue;
+    try {
+      const file = new File(sessionDir(sessionId), `${step.angle}.jpg`);
+      if (!file.exists) continue;
+      photos.push({
+        angle: step.angle,
+        uri: file.uri,
+        data: file.base64Sync(),
+        quality: entry.quality,
+        capturedAt: entry.capturedAt,
+      });
+    } catch {
+      // A photo we cannot re-read is one angle missing, not a failed retry —
+      // the assessment prompt already handles a missing angle by lowering its
+      // own confidence and saying so in `limitations`.
+    }
+  }
+  return photos;
+}

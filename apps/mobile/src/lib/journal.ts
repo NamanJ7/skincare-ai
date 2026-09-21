@@ -11,13 +11,17 @@
  */
 import { Directory, File, Paths } from "expo-file-system";
 import {
+  assessmentHistory,
+  baselineOf,
+  latestOf,
+  recordInHistory,
   today,
-  type Assessment,
   type ProgressAdjustment,
   type Routine,
   type RoutineTime,
   type SkinCheckIn,
   type SkinFeel,
+  type StoredAssessment,
 } from "@pore/shared";
 
 const DIR_NAME = "journal";
@@ -33,12 +37,17 @@ interface Journal {
   finished: string[];
   checkIns: SkinCheckIn[];
   /**
-   * The first assessment, kept forever — it is the zero the whole product
-   * measures against. Nothing overwrites it but a full erase.
+   * Every blind assessment ever taken, oldest first.
+   *
+   * This used to be two slots — a write-once `baseline` and a `latest` that each
+   * new capture overwrote — which meant a third set of photos destroyed the
+   * second and the middle of a long routine was simply gone. `assessmentHistory`
+   * in @pore/shared migrates the old shape on read; see `readJournal`.
+   *
+   * The comparison still uses exactly two of these. Keeping the rest costs a few
+   * KB and is the only way a trend over more than two points is ever possible.
    */
-  baseline?: StoredAssessment;
-  /** The most recent re-assessment. Two points is the whole comparison. */
-  latest?: StoredAssessment;
+  assessments: StoredAssessment[];
   /**
    * The routine as it stands after any progress adaptation. Absent until the
    * first re-assessment, at which point it takes over from the plan the server
@@ -55,12 +64,7 @@ interface Journal {
   lastAdaptation?: ProgressAdjustment[];
 }
 
-/** One capture session's blind assessment, tagged with when it was taken. */
-export interface StoredAssessment {
-  sessionId: string;
-  capturedAt: string;
-  assessment: Assessment;
-}
+export type { StoredAssessment };
 
 function sessionKey(date: string, time: RoutineTime): string {
   return `${date}:${time}`;
@@ -75,7 +79,7 @@ function file(): File {
 }
 
 function empty(): Journal {
-  return { version: 1, startedOn: today(), completed: {}, finished: [], checkIns: [] };
+  return { version: 1, startedOn: today(), completed: {}, finished: [], checkIns: [], assessments: [] };
 }
 
 /**
@@ -99,8 +103,10 @@ export function readJournal(): Journal {
       completed: parsed.completed ?? {},
       finished: parsed.finished ?? [],
       checkIns: parsed.checkIns ?? [],
-      baseline: parsed.baseline,
-      latest: parsed.latest,
+      // Migrated on every read rather than in a one-shot upgrade step: this is
+      // the only reader, the function is pure and tested, and an install that
+      // never opens the app again is not left holding a shape nothing understands.
+      assessments: assessmentHistory(parsed as Parameters<typeof assessmentHistory>[0]),
       routine: parsed.routine,
       lastAdaptation: parsed.lastAdaptation,
     };
@@ -190,14 +196,40 @@ export function sessionsBetween(journal: Journal, from: string, to: string): num
 /**
  * File away one session's blind assessment.
  *
- * The first one ever recorded becomes the baseline and is never replaced —
- * comparing against a moving zero would let slow drift disappear. Everything
- * after it lands in `latest`.
+ * The first one ever recorded is the baseline and is never displaced —
+ * comparing against a moving zero would let slow drift disappear. Ordering and
+ * the same-session replace rule both live in `recordInHistory`, which is tested
+ * in @pore/shared.
  */
 export function recordAssessment(entry: StoredAssessment): Journal {
   const journal = readJournal();
-  if (!journal.baseline) journal.baseline = entry;
-  else journal.latest = entry;
+  journal.assessments = recordInHistory(journal.assessments, entry);
+  writeJournal(journal);
+  return journal;
+}
+
+/** The first reading ever taken — the zero every measurement subtracts from. */
+export function baselineAssessment(journal: Journal): StoredAssessment | undefined {
+  return baselineOf(journal.assessments);
+}
+
+/** The most recent reading, once there is more than the baseline. */
+export function latestAssessment(journal: Journal): StoredAssessment | undefined {
+  return latestOf(journal.assessments);
+}
+
+/**
+ * Persist a routine on its own, with no adaptation attached.
+ *
+ * Used when the answers change rather than the skin: re-running
+ * `applySafetyRules` against an edited intake produces a `SafetyAdjustment[]`,
+ * not a `ProgressAdjustment[]`, so it must not be squeezed through
+ * `saveAdaptation` — `lastAdaptation` is what `/compare` shows as "what changed
+ * because of your photos", and a pregnancy edit is not that.
+ */
+export function saveRoutine(routine: Routine): Journal {
+  const journal = readJournal();
+  journal.routine = routine;
   writeJournal(journal);
   return journal;
 }
@@ -250,6 +282,18 @@ export function recordedDays(journal: Journal): number {
   }
   for (const c of journal.checkIns) days.add(c.date);
   return days.size;
+}
+
+/**
+ * Replace the whole journal with one read from elsewhere.
+ *
+ * The restore half of `backup.ts`, and the only writer that does not start from
+ * `readJournal()`. Exported rather than inlined there so every write to this
+ * file still goes through the one function that owns the directory, the
+ * best-effort contract and the atomicity of the replace.
+ */
+export function writeJournalRaw(journal: Journal): void {
+  writeJournal(journal);
 }
 
 /** Wipe the journal — the "forget me" path, alongside deleting the photos. */

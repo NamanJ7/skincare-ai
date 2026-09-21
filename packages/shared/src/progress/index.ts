@@ -8,3 +8,10 @@ export type {
   ProgressDirection,
   ProgressReport,
 } from "./engine";
+export {
+  assessmentHistory,
+  baselineOf,
+  latestOf,
+  recordInHistory,
+} from "./history";
+export type { LegacyAssessmentStore, StoredAssessment } from "./history";

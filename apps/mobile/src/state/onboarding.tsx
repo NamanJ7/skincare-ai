@@ -15,6 +15,12 @@ import { readProfile, writeProfile } from "@/lib/profile";
 export type OnboardingData = Partial<IntakeResponse> & {
   parentEmail?: string;
   /**
+   * When the under-18 consent screen was completed. Nothing is emailed — see
+   * `onboarding/consent.tsx` — so this records that the user said they asked,
+   * not that a guardian approved.
+   */
+  parentConsentAt?: string;
+  /**
    * Guided-capture photos. Base64 is held in memory only for the /api/plan
    * request; the JPEGs live in the app's document directory until deleted, and
    * the base64 is never written to the profile.

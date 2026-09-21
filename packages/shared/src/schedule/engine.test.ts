@@ -4,7 +4,9 @@ import { ACTIVES } from "../safety/ingredients";
 import type { IntakeResponse } from "../types/intake";
 import type { ActiveKey, Routine, RoutineStep } from "../types/routine";
 import {
+  FIRST_RECHECK_WEEK,
   RAMP_WEEKS,
+  RECHECK_EVERY_WEEKS,
   addDays,
   currentSession,
   daysBetween,
@@ -13,6 +15,8 @@ import {
   rampWeekFor,
   rampWeeksHeld,
   rampedFrequency,
+  recheckDue,
+  recheckDueOn,
   spreadDays,
   type SkinCheckIn,
 } from "./engine";
@@ -388,5 +392,63 @@ describe("planWeek", () => {
   it("reports how far into the routine each day is", () => {
     const week = planWeek(routine(), intake(), ctx(addDays(START, 9)));
     expect(week.days.map((d) => d.dayIndex)).toEqual([7, 8, 9, 10, 11, 12, 13]);
+  });
+});
+
+describe("recheckDue", () => {
+  const first = (on: string) => ({ lastCaptureOn: START, on, captureCount: 1 });
+
+  it("is not due in the first week", () => {
+    expect(recheckDue(first(addDays(START, 6)))).toBe(false);
+  });
+
+  it("is not due the day before the first recheck week", () => {
+    expect(recheckDue(first(addDays(START, FIRST_RECHECK_WEEK * 7 - 1)))).toBe(false);
+  });
+
+  it("is due once the first recheck week is reached", () => {
+    expect(recheckDue(first(addDays(START, FIRST_RECHECK_WEEK * 7)))).toBe(true);
+  });
+
+  it("stays due until a capture actually happens", () => {
+    expect(recheckDue(first(addDays(START, 40)))).toBe(true);
+  });
+
+  it("resets to the longer gap once a second set exists", () => {
+    // The clock restarts from the new capture, not from the routine's start —
+    // so the day after shooting is never immediately due again.
+    const shotOn = addDays(START, FIRST_RECHECK_WEEK * 7);
+    const after = (on: string) => ({ lastCaptureOn: shotOn, on, captureCount: 2 });
+    expect(recheckDue(after(addDays(shotOn, 1)))).toBe(false);
+    expect(recheckDue(after(addDays(shotOn, RECHECK_EVERY_WEEKS * 7 - 1)))).toBe(false);
+    expect(recheckDue(after(addDays(shotOn, RECHECK_EVERY_WEEKS * 7)))).toBe(true);
+  });
+
+  it("names the date the next capture is due", () => {
+    expect(recheckDueOn(first(START))).toBe(addDays(START, FIRST_RECHECK_WEEK * 7));
+    expect(recheckDueOn({ lastCaptureOn: START, on: START, captureCount: 3 })).toBe(
+      addDays(START, RECHECK_EVERY_WEEKS * 7),
+    );
+  });
+
+  it("arrives well before the ramp finishes", () => {
+    // The whole point of the change. If the first invitation ever lands at or
+    // after full strength again, this product is back to asking for six weeks
+    // of compliance before anything happens.
+    expect(FIRST_RECHECK_WEEK).toBeLessThan(RAMP_WEEKS);
+  });
+
+  it("does not care whether the ramp was held", () => {
+    // A held ramp means the skin reported irritation, which is exactly when a
+    // fresh reading is most worth having. Gating the invitation on ramp
+    // progress would withhold it from precisely those users — so the two are
+    // computed from different inputs and this locks that separation in.
+    const flaring: SkinCheckIn[] = Array.from({ length: 6 }, (_, w) => ({
+      date: addDays(START, w * 7 + 1),
+      feel: "stinging" as const,
+    }));
+    const on = addDays(START, FIRST_RECHECK_WEEK * 7);
+    expect(rampWeekFor({ startedOn: START, on, checkIns: flaring })).toBe(1);
+    expect(recheckDue(first(on))).toBe(true);
   });
 });

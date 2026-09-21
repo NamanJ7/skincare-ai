@@ -1,5 +1,7 @@
 export {
+  FIRST_RECHECK_WEEK,
   RAMP_WEEKS,
+  RECHECK_EVERY_WEEKS,
   addDays,
   currentSession,
   daysBetween,
@@ -8,12 +10,15 @@ export {
   rampWeekFor,
   rampWeeksHeld,
   rampedFrequency,
+  recheckDue,
+  recheckDueOn,
   spreadDays,
   today,
   weekdayName,
 } from "./engine";
 export type {
   DayPlan,
+  RecheckContext,
   RampState,
   ScheduleContext,
   ScheduleNote,

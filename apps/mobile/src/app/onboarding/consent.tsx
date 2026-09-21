@@ -14,9 +14,18 @@ export default function ParentalConsent() {
 
   function onContinue() {
     if (!valid) return;
-    update({ parentEmail: email.trim() });
-    // Real build: send a verifiable consent request to the parent before any
-    // photo capture, and record approval. For now we proceed to capture.
+    /**
+     * Recorded on this phone, not sent anywhere.
+     *
+     * This screen used to say "add their email so we can reach them for
+     * approval", and nothing ever reached anybody — `parentEmail` was written
+     * to disk and read by no code in the app. Claiming a verification step that
+     * does not run is worse than having no step: it tells a 16-year-old their
+     * parent has been asked when their parent has not. The copy now says what
+     * actually happens, and the timestamp is stored so the field is at least
+     * read back when a real verifiable-consent flow replaces this.
+     */
+    update({ parentEmail: email.trim(), parentConsentAt: new Date().toISOString() });
     router.push("/onboarding/photo");
   }
 
@@ -25,7 +34,7 @@ export default function ParentalConsent() {
       <AppText variant="title">A parent needs to approve</AppText>
       <AppText variant="body" color={colors.inkMuted}>
         Since you&apos;re under 18, a parent or guardian needs to approve before Pore looks at any
-        photos. Add their email so we can reach them for approval.
+        photos. Ask them directly, then add their email below so it&apos;s on record.
       </AppText>
 
       <TextInput
@@ -42,8 +51,9 @@ export default function ParentalConsent() {
 
       <Card>
         <AppText variant="caption" color={colors.inkMuted}>
-          We only use this email to confirm consent. Pore never trains on or sells anyone&apos;s data.
-          Photos stay on your phone and are never saved on our servers.
+          We don&apos;t email them — the address is kept on this phone as a record that you asked.
+          Pore never trains on or sells anyone&apos;s data. Photos stay on your phone and are never
+          saved on our servers.
         </AppText>
         <Pressable
           onPress={() => router.push("/legal/privacy")}

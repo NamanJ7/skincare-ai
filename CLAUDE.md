@@ -48,7 +48,12 @@ pnpm's symlinked store. Don't "fix" that back to symlinks.
   - `schedule/` — `planDay`/`planWeek`, the deterministic cadence engine (see below) that turns a
     safety-clamped routine's weekly frequencies into "here is what you do tonight".
   - `progress/` — `compareAssessments`/`adaptRoutine`, the deterministic progress engine (see below)
-    that measures whether the routine is working and feeds the answer back into it.
+    that measures whether the routine is working and feeds the answer back into it, plus
+    `history.ts` (`StoredAssessment`, `assessmentHistory`, `baselineOf`/`latestOf`,
+    `recordInHistory`) — the shape of the stored run of readings and the migration off the old
+    two-slot `baseline`/`latest` record. It lives here rather than beside the app's storage because
+    a migration that silently loses a baseline is indistinguishable from a working one until the
+    comparison it ruins, so it needs tests.
   - `vision/` — `scoreFrame` / `captureHint` / `CAPTURE_TUNING`, the pure-maths capture-quality
     measurement. No I/O lives here on purpose, so vitest can cover it.
   - `legal/` — the privacy policy and terms **as data** (`PRIVACY_POLICY`, `TERMS_OF_USE`,
@@ -96,9 +101,9 @@ pnpm --filter @pore/mobile ios / android / web
 pnpm --filter @pore/mobile typecheck
 ```
 
-Current baseline (keep it here): `pnpm test` → 6 files, 116 tests, all passing — `packages/shared`
-95 (`safety` 12, `vision` 21, `progress` 21, `schedule` 41) and `apps/web` 21 (`validateImages` 11,
-`rateLimit` 10). `pnpm typecheck` → clean in all three packages. `pnpm lint` → 0 errors,
+Current baseline (keep it here): `pnpm test` → 7 files, 139 tests, all passing — `packages/shared`
+118 (`safety` 16, `vision` 21, `progress` 21 + `progress/history` 11, `schedule` 49) and `apps/web`
+21 (`validateImages` 11, `rateLimit` 10). `pnpm typecheck` → clean in all three packages. `pnpm lint` → 0 errors,
 **0 warnings**: the rule now recognises the leading-underscore convention this codebase already
 used for deliberately-unused bindings, so the six long-standing warnings are gone and the script
 runs with `--max-warnings 0`. A lint step that cannot fail is decoration — keep it able to.
@@ -169,6 +174,15 @@ adds one more route to it. See `TODOS.md`.
       first on ties.
    7. Sunscreen is always present in the AM routine (appended if missing).
 
+   **The engine is also run a second time, outside the pipeline**, by
+   `onboarding/intake.tsx?mode=edit`: when the user corrects an answer, `applySafetyRules` re-runs
+   against the routine already in effect rather than a fresh model draft, and the result is written
+   to *both* `journal.routine` and `data.plan` (the two screens read different ones, so writing one
+   would leave them disagreeing about what the routine is). Re-clamping is monotonic — it removes
+   and caps, never restores — so a loosened answer cannot bring back a step a stricter one took
+   away, and the confirmation screen says so out loud. `engine.test.ts` covers the re-clamp,
+   including that it is stable when nothing changed.
+
    Every adjustment is recorded as a `SafetyAdjustment` (`rule`, `action`, `active?`, `time?`,
    `detail`) returned alongside the routine — this audit trail is what the UI shows the user as "why
    we changed X", so `detail` strings are user-facing copy. When editing safety behavior, add/extend
@@ -190,8 +204,15 @@ not**, and never returns the upstream error text (which can carry request ids an
 detail).
 
 **There is deliberately no local fallback routine.** `today.tsx` resolves down two steps — the
-journal's persisted (adapted) routine, else the generated plan — and shows an empty state if it
-has neither. It used to have a third step that synthesised a hardcoded draft through
+journal's persisted (adapted) routine, else the generated plan — and shows an honest empty state if
+it has neither. That empty state is now a *recovery* rather than a dead end: when a capture session
+is on disk it reads the JPEGs back with `readSessionPhotos` and finishes the plan through
+`buildPlan`, because the base64 copy is transient but the photos never were. A plan that failed
+after capture used to strand the device permanently — `onboardedAt` is written when the
+questionnaire completes, so a relaunch went straight to an empty `/today` whose only button sent the
+user back to the camera to re-shoot a set that was fine and re-answer five questions the app could
+already see. (`hasProfile()` keying on the questionnaire rather than on a plan existing is correct
+and documented in `profile.ts`; the missing piece was the way back, not the flag.) It used to have a third step that synthesised a hardcoded draft through
 `applySafetyRules`, and `/plan` invented three findings to go with it, so a failed or missing plan
 rendered as the user's own personalised routine and assessment. That turned every upstream failure
 into a silent one. A plan we did not build is not a plan we get to show; if you find yourself
@@ -263,6 +284,14 @@ safety engine — it is code, not a prompt:
   walking the active to the next free day, or dropping it for the cycle if there is none.
 - Strong actives **ramp** from a single weekly use to their target frequency over `RAMP_WEEKS`
   (6). Gentle steps and SPF run at full frequency from day one.
+- **`recheckDue`/`recheckDueOn` (`FIRST_RECHECK_WEEK` = 2, `RECHECK_EVERY_WEEKS` = 4) decide when
+  to invite another set of photos**, and are deliberately independent of the ramp. The invitation
+  used to be gated on `atFullStrength` — roughly six weeks — which meant nothing whatsoever changed
+  in the product between day 2 and day 41, and the measurement waiting at the end might honestly
+  refuse to say anything. The clock runs from the *last capture*, so it resets when the user
+  actually shoots and there is no separate "last prompted" state to keep in sync. Tying it to ramp
+  progress would withhold the one thing that ever unlocks from exactly the users whose skin keeps
+  reacting; `engine.test.ts` locks that separation in.
 - A week only advances the ramp if the user reported nothing worse than `calm` during it. A week
   with no check-ins at all counts as calm — the product asks for feedback, it doesn't punish
   silence.
@@ -290,15 +319,30 @@ that:
   could be shown a retinoid. `OnboardingProvider` hydrates from it synchronously before anything
   renders. Base64 photo payloads are never written to it — they exist for one `/api/plan` request.
 
-`apps/mobile/src/lib/reminder.ts` owns the single local daily notification (one per day, hour
-chosen by the user, off switch on `/plan`). Its body deliberately never names tonight's active: a
-`DAILY` trigger fires unchanged, and a check-in can deload the routine and rename the session
-between scheduling and firing, so the banner could contradict the app. `feedback.ts` wraps
+`apps/mobile/src/lib/reminder.ts` owns two local notifications and no others: the daily evening
+nudge (hour chosen by the user, off switch on `/plan`) and one dated `scheduleRecheck` reminder that
+another set of photos is due. Its body deliberately never names tonight's active: a `DAILY` trigger
+fires unchanged, and a check-in can deload the routine and rename the session between scheduling and
+firing, so the banner could contradict the app. The recheck body promises no result for the same
+reason — a notification that said "see how much your skin improved" would be writing the verdict
+before the measurement. **Both are scheduled under stable identifiers and cancelled by identifier.**
+`enableReminder` used to call `cancelAllScheduledNotificationsAsync`, which was correct when the
+daily nudge was the only thing scheduled and became a silent bug the moment it was not — changing
+the reminder hour would have dropped a pending recheck with no trace. `feedback.ts` wraps
 `expo-haptics` for the tick/complete/select moments — best-effort, no-ops off-device.
 
 `apps/mobile/src/app/today.tsx` is the primary surface and shows **one session at a time**;
 `/plan` holds the full assessment and routine as a reference document. Keep it that way — the
 whole point is that the user makes no decisions except the single "how does your skin feel?" tap.
+
+`/today` also carries the record back to the user, which for a long time it did not: the week strip
+renders which days were *finished* (a ring around the dot, from `journal.finished`) as well as which
+are active days, and the header carries a permanent `Week N · M sessions logged` line built from
+`weeksOnRoutine` and `journal.finished`. Both numbers were computed in `journal.ts` and shown to
+nobody. The completion mark is deliberately positive-only — nothing marks a day that was missed,
+because the deload engine exists to tell people to stop when their skin says stop and a screen that
+scored them for stopping would be arguing with it. This is **not** a streak; the consecutive-day
+version was removed for exactly that reason and must not come back.
 
 The week strip is the navigation: tapping a day shows it, tapping the day already open flips
 morning/evening. **Only today can be written to.** Journal entries are keyed by calendar date and
@@ -348,9 +392,25 @@ active up twice. It runs **once**, when a measurement lands (`runReassessment` i
 and the result is persisted via `saveAdaptation`. Never call it during render.
 
 The baseline is recorded at signup (`onboarding/intake.tsx`) and never replaced — a moving zero
-would let slow drift vanish. `/compare` is the verdict surface and the one place the app uses a
-dark surface: measured concerns sit on the deep-green card, and anything the engine declined to
-call is listed separately below so a refusal can never be skimmed as a result.
+would let slow drift vanish. It is `assessments[0]`; every reading after it is appended rather than
+overwriting a single `latest` slot, so a third capture no longer destroys the second.
+
+**`/compare` separates the record from the verdict, and that separation is load-bearing.** The
+before/after photo pair renders first and unconditionally, for any two sessions: it is a record, it
+asserts nothing, so there is nothing for the engine to have to back. The measured verdict sits
+below it behind exactly the same comparability gate as always — this relaxes no threshold. Before
+the split, the whole screen was gated on a measurement that frequently and correctly cannot be made,
+which left a user who had done everything asked of them looking at a refusal and nothing else. The
+headline follows the same rule: a measured report gets `report.headline`, an unmeasurable one gets
+"Then and now", which describes two photographs rather than skin. The live risk is someone reading
+the pair *as* a verdict; the heading and the caption under the photos are what stand between here
+and there, so do not soften them. The photo pair is anchored to the same two readings the verdict
+uses (baseline vs latest), not to the two most recent sessions — with three or more sets those are
+not the same pair.
+
+It is the one place the app uses a dark surface: measured concerns sit on the deep-green card, and
+anything the engine declined to call is listed separately so a refusal can never be skimmed as a
+result.
 
 ## Mobile app
 
@@ -358,12 +418,21 @@ Expo Router, file-based under `apps/mobile/src/app`. `@/*` maps to `src/*`, `@/a
 `assets/*`.
 
 ```
-index.tsx              splash animation -> landing -> sign-up / sign-in
-(auth)/sign-up|sign-in  STUB: no backend. Any valid-looking input routes on. Real auth is a later increment.
+index.tsx              splash animation -> landing -> straight into onboarding
+                       There are no auth screens. `(auth)/sign-up|sign-in` existed and were deleted:
+                       neither created, checked or stored anything, the Apple/Google buttons called
+                       the same no-op as email, sign-in let a fresh install through to an empty
+                       /today, and sign-up promised "save your skin scans and routine" when nothing
+                       is saved anywhere but the phone. Do not reinstate a placeholder that states
+                       something false about where the user's data lives.
 onboarding/age         age gate; <16 blocked, <=17 detours through consent
-onboarding/consent     parental-consent email capture (records the address; does not yet verify)
+onboarding/consent     parental-consent email capture. Records the address + `parentConsentAt` on
+                       the device and sends nothing — the copy says so. Do not reword it back into
+                       implying a verification step that does not run.
 onboarding/photo       guided 3-angle capture (the big one — ~420 lines, single screen, shared camera mount)
-onboarding/intake      questionnaire; calls fetchPlan at the end, records the progress baseline
+onboarding/intake      questionnaire; calls buildPlan at the end, records the progress baseline.
+                       `?mode=edit` re-opens the same five questions against the stored answers,
+                       with no photos and no model call, and re-runs `applySafetyRules` — see below.
 today.tsx              THE primary surface: one session at a time, from planDay. One check-in tap.
                        The week strip navigates days; only today is writable (see above).
 plan.tsx               the reference document — full assessment, routine, safety adjustments, privacy rows
@@ -393,11 +462,30 @@ calibrates the camera, not as one more anonymous questionnaire step.
 - **Durable on-device state is three stores, all plain JSON in the app's document directory, all
   best-effort on write, and none ever uploaded**: `src/lib/photos.ts` (capture sessions, above),
   `src/lib/journal.ts` (`journal.json` — routine start date, per-session tick-offs, skin check-ins,
-  stored assessments and the persisted adaptation) and `src/lib/profile.ts` (`profile.json` — the
-  intake answers and the generated plan). The journal is what makes the cadence engine reactive
-  rather than static; the profile is what keeps the safety engine running against real answers. All
-  three are disclosed in the privacy content and all three must keep offering erasure —
-  `deleteJournal()`, `deleteStoredPhotos()` and `deleteProfile()`, surfaced on `/plan`.
+  the full run of stored assessments and the persisted adaptation) and `src/lib/profile.ts`
+  (`profile.json` — the intake answers and the generated plan). The journal is what makes the
+  cadence engine reactive rather than static; the profile is what keeps the safety engine running
+  against real answers. All three are disclosed in the privacy content and all three must keep
+  offering erasure — `deleteJournal()`, `deleteStoredPhotos()` and `deleteProfile()`, surfaced on
+  `/plan`.
+- **`src/lib/backup.ts` is the answer to "what happens when the phone is gone".** The baseline
+  assessment is written once and never replaced, so losing it does not cost a routine — it
+  permanently costs the ability to measure anything again. `exportBundle()` writes
+  `{ profile, journal }` to the *cache* directory (not documents, or "delete my data" would not
+  know about the copy) and hands it to the system share sheet via `expo-sharing`; `importBundle()`
+  reads one back through `File.pickFileAsync` and **replaces** both stores. Photos are deliberately
+  not in the bundle. Restore is a replace and not a merge on purpose: reconciling two journals needs
+  a rule for which tick-off wins, and any such rule puts days into the adherence record that nobody
+  claimed — the number that gates whether the routine may get *stronger*.
+- **`src/lib/plan.ts` (`buildPlan`) is the one way a plan is built.** Three callers reach it —
+  the end of the questionnaire, the recovery path in `NoRoutineYet`, and the re-assessment on
+  `/compare` — and they must not drift, because the payload shape *is* the request. It fixes the
+  angle order, carries each photo's measured `quality`, files the assessment, and books the next
+  recheck notification. **The `quality` field is not optional decoration**: `pipeline.ts` attaches
+  `photoQuality` to the assessment straight from the request, and the progress engine's
+  comparability gate is its only consumer. `/compare` used to build its own payload without it, so
+  every re-assessment landed with an empty `photoQuality`, no angle was ever measurable, and the
+  verdict the screen exists for could not be produced at all.
 - `src/lib/intake.ts` (`buildIntake`) fills an `IntakeResponse` from partial onboarding answers with
   sensible defaults, including defaulting `darkMarkProne` from skin tone rather than assuming it of
   everyone.

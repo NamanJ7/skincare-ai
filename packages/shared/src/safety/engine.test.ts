@@ -207,3 +207,63 @@ describe("a gentle routine is left intact (only SPF added)", () => {
     expect(removals).toHaveLength(0);
   });
 });
+
+/**
+ * Re-clamping an already-clamped routine.
+ *
+ * `/plan` → "Update my answers" runs `applySafetyRules` a second time, against
+ * the routine already in effect rather than a fresh model draft. That path did
+ * not exist before — the only way to correct an answer was to erase everything —
+ * so the engine had never been asked to be safe on its own output.
+ */
+describe("re-clamping when the answers change", () => {
+  it("removes a retinoid once the pregnancy flag is set", () => {
+    // The case the whole edit path exists for. Sensitivity, pregnancy and
+    // allergies all change over a life, and until this ran the engine went on
+    // doing exactly the right thing to the wrong answers.
+    const before = applySafetyRules(
+      routine([mk("cleanser")], [mk("treatment", "retinoid", 3)]),
+      intake(),
+    );
+    expect(before.routine.pm.some((s) => s.active === "retinoid")).toBe(true);
+
+    const after = applySafetyRules(before.routine, intake({ pregnancyOrBreastfeeding: true }));
+    expect(after.routine.pm.some((s) => s.active === "retinoid")).toBe(false);
+    expect(after.adjustments.some((a) => a.rule === "pregnancy_unsafe_removed")).toBe(true);
+  });
+
+  it("removes an active the user has newly reacted to", () => {
+    const before = applySafetyRules(
+      routine([mk("cleanser")], [mk("exfoliant", "salicylic_acid", 3)]),
+      intake(),
+    );
+    const after = applySafetyRules(before.routine, intake({ allergies: ["salicylic_acid"] }));
+    expect(after.routine.pm.some((s) => s.active === "salicylic_acid")).toBe(false);
+    expect(after.adjustments.some((a) => a.rule === "allergy_removed")).toBe(true);
+  });
+
+  it("is stable when nothing changed", () => {
+    // A re-clamp with identical answers must not keep taking things away, or
+    // every visit to the edit screen would quietly strip the routine further.
+    const once = applySafetyRules(
+      routine([mk("cleanser")], [mk("exfoliant", "salicylic_acid", 3)]),
+      intake(),
+    );
+    const twice = applySafetyRules(once.routine, intake());
+    expect(twice.routine).toEqual(once.routine);
+    expect(twice.adjustments).toEqual([]);
+  });
+
+  it("tightens the retinoid cadence when sensitivity is raised", () => {
+    const before = applySafetyRules(
+      routine([mk("cleanser")], [mk("treatment", "retinoid", 7)]),
+      intake({ sensitivity: "low" }),
+    );
+    const relaxed = before.routine.pm.find((s) => s.active === "retinoid");
+    expect(relaxed?.frequencyPerWeek).toBe(3);
+
+    const after = applySafetyRules(before.routine, intake({ sensitivity: "high" }));
+    const tightened = after.routine.pm.find((s) => s.active === "retinoid");
+    expect(tightened?.frequencyPerWeek).toBe(2);
+  });
+});

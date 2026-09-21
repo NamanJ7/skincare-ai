@@ -13,14 +13,15 @@
  */
 import { router, useFocusEffect } from "expo-router";
 import { useCallback, useMemo, useState } from "react";
-import { Pressable, View } from "react-native";
+import { ActivityIndicator, Pressable, View } from "react-native";
 
 import {
   ACTIVES,
-  applySafetyRules,
+  FIRST_RECHECK_WEEK,
   currentSession,
   planDay,
   planWeek,
+  recheckDue,
   today as todayDate,
   weekdayName,
   type ProductCategory,
@@ -33,7 +34,9 @@ import { CheckCircle } from "@/components/CheckCircle";
 import { completed, selected, tapped } from "@/lib/feedback";
 import { WeekStrip } from "@/components/WeekStrip";
 import { buildIntake } from "@/lib/intake";
-import { listSessions } from "@/lib/photos";
+import { type PlanError } from "@/lib/api";
+import { listSessions, readSessionPhotos } from "@/lib/photos";
+import { buildPlan } from "@/lib/plan";
 import {
   checkInFor,
   completedSteps,
@@ -41,6 +44,7 @@ import {
   recordCheckIn,
   sessionsBetween,
   toggleStep,
+  weeksOnRoutine,
 } from "@/lib/journal";
 import { useOnboarding } from "@/state/onboarding";
 import {
@@ -92,7 +96,8 @@ function TodaySession({ routine }: { routine: Routine }) {
    */
   const [viewingDate, setViewingDate] = useState(() => todayDate());
   /** Two capture sessions is what makes /compare able to say anything at all. */
-  const [sessionCount] = useState(() => listSessions().length);
+  const [sessions, setSessions] = useState(() => listSessions());
+  const sessionCount = sessions.length;
 
   const date = todayDate();
   const intake = useMemo(() => buildIntake(data), [data]);
@@ -104,6 +109,11 @@ function TodaySession({ routine }: { routine: Routine }) {
       setJournal(readJournal());
       setTime(currentSession());
       setViewingDate(todayDate());
+      // Re-counted here and not only on mount: a return capture happens on
+      // another screen and comes back to this one, so a mount-time snapshot hid
+      // "See what changed" until the next cold start — right after the user did
+      // the single thing the whole product is asking them to do.
+      setSessions(listSessions());
     }, []),
   );
 
@@ -132,6 +142,26 @@ function TodaySession({ routine }: { routine: Routine }) {
   );
   const week = useMemo(() => planWeek(routine, intake, weekCtx), [routine, intake, weekCtx]);
 
+  /**
+   * Whether to invite another set of photos.
+   *
+   * This used to be `atFullStrength` — roughly six weeks. Nothing else in the
+   * app ever unlocked, so a user's entire day-2-to-day-41 experience was
+   * identical and the one thing waiting at the end of it might honestly refuse
+   * to measure anything. `recheckDue` counts from the last capture instead, so
+   * the first invitation lands at week two and the clock resets each time the
+   * user actually shoots.
+   */
+  const dueForRecheck = useMemo(() => {
+    const last = sessions[0];
+    if (!last) return false;
+    return recheckDue({
+      lastCaptureOn: last.capturedAt.slice(0, 10),
+      on: date,
+      captureCount: sessions.length,
+    });
+  }, [sessions, date]);
+
   const session = time === "AM" ? day.am : day.pm;
   const done = completedSteps(journal, viewingDate, time);
   const allDone = session.steps.length > 0 && done.length >= session.steps.length;
@@ -142,6 +172,8 @@ function TodaySession({ routine }: { routine: Routine }) {
     week.days[6]?.date ?? date,
   );
   const feeling = checkInFor(journal, date);
+  /** Every session ever finished, not just this week's — the number that grows. */
+  const lifetimeSessions = journal.finished.length;
 
   const onToggle = useCallback(
     (order: number) => {
@@ -173,12 +205,23 @@ function TodaySession({ routine }: { routine: Routine }) {
           {`${(isToday ? "Today" : weekdayName(viewingDate)).toUpperCase()} · ${time === "AM" ? "MORNING" : "EVENING"}`}
         </AppText>
         <AppText variant="title">{session.headline}</AppText>
+        {/*
+          Always on, not only on a week you have already logged something in.
+          `weeksOnRoutine` and the completed-session count were both computed in
+          journal.ts and shown to nobody — the screen a user opens every day had
+          no way of telling them anything was accumulating. A week-1 user seeing
+          "Week 1 · 0 sessions logged" is being told the counter exists and is
+          theirs, which is the whole job; hiding it until it is flattering is how
+          it stays invisible for the eleven days that matter most.
+
+          Deliberately not a streak. The consecutive-day version was removed
+          because an unbroken chain punishes stopping, and stopping is exactly
+          what the deload engine exists to encourage.
+        */}
         {isToday ? (
-          doneThisWeek > 0 && (
-            <AppText variant="caption" color={colors.inkMuted}>
-              {`${doneThisWeek} ${doneThisWeek === 1 ? "session" : "sessions"} done this week.`}
-            </AppText>
-          )
+          <AppText variant="caption" color={colors.inkMuted}>
+            {`Week ${weeksOnRoutine(journal) + 1} · ${lifetimeSessions} ${lifetimeSessions === 1 ? "session" : "sessions"} logged${doneThisWeek > 0 ? `, ${doneThisWeek} this week` : ""}.`}
+          </AppText>
         ) : (
           <AppText variant="caption" color={colors.inkMuted}>
             A look ahead. You tick steps off on the day itself.
@@ -261,6 +304,7 @@ function TodaySession({ routine }: { routine: Routine }) {
           week={week}
           today={date}
           selected={viewingDate}
+          finished={journal.finished}
           // Tapping the day already open flips morning/evening — the switch
           // that used to be a ghost button at the bottom of the scroll.
           onSelectDay={(d) =>
@@ -275,14 +319,31 @@ function TodaySession({ routine }: { routine: Routine }) {
          */}
         <AppText variant="caption" color={colors.inkMuted}>
           {atFullStrength
-            ? "Your actives are at full strength. Take a new set of photos and we'll measure what actually changed."
+            ? "Your actives are at full strength. This is as strong as your routine gets."
             : "Every week your skin stays calm moves your actives one step closer to full strength. Weeks that don't, don't."}
         </AppText>
-        {atFullStrength && (
-          <GhostButton
-            label="Take a new set of photos"
-            onPress={() => router.push("/onboarding/photo?mode=recheck")}
-          />
+        {dueForRecheck && (
+          <View style={{ gap: spacing.xxs, marginTop: spacing.xs }}>
+            <AppText variant="bodyStrong">Time for a new set of photos</AppText>
+            {/*
+              Two different promises, and they must not be swapped.
+              At full strength there has been long enough for a measurable
+              change, so the verdict is worth offering. Before that the honest
+              offer is the record — two sets side by side — because the progress
+              engine will refuse to subtract sets it cannot compare, and
+              promising a measurement we may not be able to make is the exact
+              confabulation this product is built to avoid.
+            */}
+            <AppText variant="caption" color={colors.inkMuted}>
+              {atFullStrength
+                ? "We'll measure what actually changed, and adjust your routine from it."
+                : `It's been about ${FIRST_RECHECK_WEEK} weeks. You'll see both sets side by side — we'll only put a number on it once we can measure the two fairly.`}
+            </AppText>
+            <GhostButton
+              label="Take a new set of photos"
+              onPress={() => router.push("/onboarding/photo?mode=recheck")}
+            />
+          </View>
         )}
       </Card>
 
@@ -359,6 +420,52 @@ function TodaySession({ routine }: { routine: Routine }) {
  * inventing content.
  */
 function NoRoutineYet() {
+  const { data, update } = useOnboarding();
+  const [building, setBuilding] = useState(false);
+  const [error, setError] = useState<PlanError | null>(null);
+  /**
+   * The newest capture session still on disk, if any.
+   *
+   * This is what separates "we never got your photos" from "we got them and the
+   * routine failed to build". The second case used to look exactly like the
+   * first: the only button sent the user back to the camera, and the plan they
+   * had already paid three photos and five questions for was thrown away. The
+   * JPEGs were on disk the whole time — only the base64 copy is transient.
+   */
+  const [recoverable] = useState(() => listSessions()[0]);
+
+  const retry = useCallback(async () => {
+    if (!recoverable) return;
+    setBuilding(true);
+    setError(null);
+    try {
+      const photos = readSessionPhotos(recoverable.id);
+      if (photos.length === 0) {
+        // The index knows about a session whose files are gone. Say so rather
+        // than spinning against nothing.
+        setError({ kind: "unknown", message: "Those photos aren't on this phone any more.", retryable: false });
+        return;
+      }
+      const outcome = await buildPlan(data, photos, recoverable.id);
+      if (!outcome.ok) setError(outcome.error);
+      else update({ plan: outcome.plan });
+    } finally {
+      setBuilding(false);
+    }
+  }, [recoverable, data, update]);
+
+  if (building) {
+    return (
+      <Screen contentStyle={{ paddingTop: spacing.lg }}>
+        <AppText variant="label" color={colors.primary}>
+          BUILDING
+        </AppText>
+        <AppText variant="title">Reading your photos</AppText>
+        <ActivityIndicator color={colors.primary} />
+      </Screen>
+    );
+  }
+
   return (
     <Screen contentStyle={{ paddingTop: spacing.lg }}>
       <AppText variant="label" color={colors.primary}>
@@ -366,10 +473,31 @@ function NoRoutineYet() {
       </AppText>
       <AppText variant="title">Your routine isn&apos;t built</AppText>
       <AppText variant="body" color={colors.inkMuted}>
-        We don&apos;t have a finished plan for you on this phone. Three photos and a few questions
-        is all it takes, and we&apos;ll keep the answers you already gave.
+        {recoverable
+          ? "Your photos and your answers are both on this phone — the routine itself never finished building. We can pick up from there."
+          : "We don't have a finished plan for you on this phone. Three photos and a few questions is all it takes, and we'll keep the answers you already gave."}
       </AppText>
-      <PrimaryButton label="Build my routine" onPress={() => router.push("/onboarding/photo")} />
+
+      {error && (
+        <Card>
+          <AppText variant="bodyStrong">We still couldn&apos;t finish it</AppText>
+          <AppText variant="caption" color={colors.inkMuted}>
+            {error.message}
+          </AppText>
+        </Card>
+      )}
+
+      {recoverable ? (
+        <>
+          <PrimaryButton label="Finish building my routine" onPress={retry} />
+          <GhostButton
+            label="Take new photos instead"
+            onPress={() => router.push("/onboarding/photo")}
+          />
+        </>
+      ) : (
+        <PrimaryButton label="Build my routine" onPress={() => router.push("/onboarding/photo")} />
+      )}
     </Screen>
   );
 }

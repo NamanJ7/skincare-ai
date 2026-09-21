@@ -281,6 +281,62 @@ export function rampWeekFor(ctx: ScheduleContext): number {
   return rampState(ctx).week;
 }
 
+/* ------------------------------------------------------------------- recheck */
+
+/**
+ * Weeks before the first return capture is invited.
+ *
+ * Deliberately far short of `RAMP_WEEKS`. The re-capture used to be gated on the
+ * actives reaching full strength, which put roughly six weeks of ticking boxes
+ * between a user and the only thing in the product that ever changes — and the
+ * measurement waiting at the end of it may honestly refuse to say anything,
+ * because two photo sets shot under different light are not subtractable. Six
+ * weeks of compliance for a possible "we can't call this one" is not a loop
+ * anybody stays in.
+ *
+ * Two weeks is not long enough for a cosmetic change to be measurable and that
+ * is fine: what arrives at week two is the *record* — two photo sets side by
+ * side, which claims nothing the engine has to back. The verdict stays gated
+ * exactly as strictly as it was. See `compare.tsx`.
+ */
+export const FIRST_RECHECK_WEEK = 2;
+
+/** Weeks between return captures after the first one. */
+export const RECHECK_EVERY_WEEKS = 4;
+
+export interface RecheckContext {
+  /** Date of the most recent capture session, `YYYY-MM-DD`. */
+  lastCaptureOn: string;
+  /** Date being asked about, `YYYY-MM-DD`. */
+  on: string;
+  /** How many capture sessions are stored. 1 means only the baseline. */
+  captureCount: number;
+}
+
+/** The date the next return capture becomes due. */
+export function recheckDueOn(ctx: RecheckContext): string {
+  const gap = ctx.captureCount <= 1 ? FIRST_RECHECK_WEEK : RECHECK_EVERY_WEEKS;
+  return addDays(ctx.lastCaptureOn, gap * 7);
+}
+
+/**
+ * Whether it is time to invite another set of photos.
+ *
+ * Measured from the last capture rather than from the routine's start date, so
+ * it resets itself each time the user actually shoots — no separate "last
+ * prompted" state to keep in sync, and no risk of the invitation becoming a
+ * permanent fixture on the screen once the first one is due.
+ *
+ * Deliberately independent of `rampState`. A held ramp means the skin reported
+ * irritation, which is exactly when a fresh reading is most worth having; tying
+ * the invitation to ramp progress would withhold it from the users who most
+ * need it, and would make the only thing that ever unlocks in the app
+ * unreachable for anyone whose skin keeps reacting.
+ */
+export function recheckDue(ctx: RecheckContext): boolean {
+  return ctx.on >= recheckDueOn(ctx);
+}
+
 /** Weeks the ramp was held back by a report of irritation. See `RampState.held`. */
 export function rampWeeksHeld(ctx: ScheduleContext): number {
   return rampState(ctx).held;

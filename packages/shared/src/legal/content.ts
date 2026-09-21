@@ -33,7 +33,7 @@ export const LEGAL_CONTACT_EMAIL = "reachporeai@gmail.com";
  * Revision date shown on both documents. There was no prior value in the
  * repo — bump this whenever any string in this file changes.
  */
-export const LEGAL_LAST_UPDATED = "August 2026";
+export const LEGAL_LAST_UPDATED = "September 2026";
 
 /** Badge copy. Both documents still describe themselves as placeholders. */
 const PRE_LAUNCH = "Pre-launch draft";
@@ -81,6 +81,16 @@ export const PRIVACY_POLICY: LegalDocument = {
           // It is what makes the schedule adapt, and deleteJournal() removes it.
           kind: "paragraph",
           text: "Once your routine starts, the app keeps a small record on your phone of which steps you ticked off each day and how you said your skin felt. That record is what lets the routine slow itself down when your skin reacts. It stays on your phone, is never uploaded, and you can erase it from your plan screen or by removing the app.",
+        },
+        {
+          // Disclosure. apps/mobile/src/lib/backup.ts writes a JSON bundle of
+          // profile.json and journal.json to the cache directory and hands it to
+          // the system share sheet via expo-sharing. Pore never sees it: where it
+          // goes is whatever app the user picks from that sheet. Photos are not
+          // in the bundle. importBundle() reads one back and replaces both
+          // stores.
+          kind: "paragraph",
+          text: "You can save a copy of your answers and that record to a file, so a new phone does not start you over. The file is handed to your phone's own share menu and goes wherever you send it — Pore never receives it and never stores it. Your photos are not included. You can load a copy back in from your plan screen, which replaces what is on the phone.",
         },
       ],
     },
