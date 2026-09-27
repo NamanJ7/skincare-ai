@@ -1,4 +1,5 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
+import * as Haptics from "expo-haptics";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Modal, Pressable, StyleSheet, View } from "react-native";
 
@@ -69,6 +70,7 @@ export function RoutineReactionSheet({
 
   async function choose(kind: RoutineReactionKind) {
     if (saving) return;
+    Haptics.selectionAsync().catch(() => {});
     setSaving(true);
     setSaveError(false);
     const persisted = await recordReaction(date, period, kind);

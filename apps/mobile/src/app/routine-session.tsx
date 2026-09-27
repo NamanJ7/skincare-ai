@@ -3,7 +3,14 @@ import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
 import { router, useLocalSearchParams } from "expo-router";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Modal, Pressable, StyleSheet, View } from "react-native";
+import {
+  AccessibilityInfo,
+  AppState,
+  Modal,
+  Pressable,
+  StyleSheet,
+  View,
+} from "react-native";
 
 import type { ThemeColors } from "@pore/shared";
 import { RoutineComplete } from "@/components/RoutineComplete";
@@ -30,7 +37,7 @@ import {
   routineFingerprint,
   scheduledStepInstances,
 } from "@/lib/routine-schedule";
-import { routineSessionExpired } from "@/lib/routine-session";
+import { routineSessionEntry } from "@/lib/routine-session";
 import { USAGE } from "@/lib/usage";
 import { useOnboarding } from "@/state/onboarding";
 import { useRoutineLog } from "@/state/routine-log";
@@ -94,6 +101,16 @@ export default function RoutineSessionScreen() {
   const resumedRef = useRef("");
   const endingRef = useRef(false);
 
+  // Re-render on return to the foreground so a screen left open across
+  // midnight or past the resume window re-resolves against the real clock.
+  const [, setForegroundTick] = useState(0);
+  useEffect(() => {
+    const subscription = AppState.addEventListener("change", (state) => {
+      if (state === "active") setForegroundTick((tick) => tick + 1);
+    });
+    return () => subscription.remove();
+  }, []);
+
   const now = new Date();
   const today = todayKey(now);
   const requestedPeriod: RoutinePeriod =
@@ -127,6 +144,14 @@ export default function RoutineSessionScreen() {
     () => routineShelfAssignments(data, routine),
     [data, routine],
   );
+  const entry = routineSessionEntry({
+    session,
+    requested: requestedPeriod,
+    explicit: params.period === "am" || params.period === "pm",
+    todayPeriod: log.days[today]?.[requestedPeriod],
+    dueCount: due.length,
+    now,
+  });
   const stale =
     !!session &&
     (session.routineFingerprint !== fingerprint ||
@@ -140,7 +165,21 @@ export default function RoutineSessionScreen() {
 
     async function initialize() {
       if (session) {
-        if (routineSessionExpired(session)) {
+        if (entry === "switch") {
+          const persisted = await abandonSession();
+          if (!persisted) {
+            setSaveError(true);
+            initializationRef.current = "";
+            return;
+          }
+          track("routine_session_abandoned", {
+            period: session.period,
+            source: session.source,
+            scheduled_count: session.stepKeys.length,
+          });
+          return;
+        }
+        if (entry === "expire") {
           const persisted = await abandonExpiredSession();
           if (!persisted) {
             setSaveError(true);
@@ -165,7 +204,7 @@ export default function RoutineSessionScreen() {
         }
         return;
       }
-      if (due.length === 0) return;
+      if (entry !== "start") return;
       const scheduleSaved = await ensureSchedule(fingerprint, today);
       if (!scheduleSaved) {
         setSaveError(true);
@@ -193,8 +232,10 @@ export default function RoutineSessionScreen() {
     void initialize();
   }, [
     abandonExpiredSession,
+    abandonSession,
     completion,
     due,
+    entry,
     ensureSchedule,
     fingerprint,
     requestedPeriod,
@@ -208,7 +249,25 @@ export default function RoutineSessionScreen() {
   const failSave = () => {
     setSaveError(true);
     setSaving(false);
+    // iOS does not read an accessibilityRole="alert" view on its own.
+    AccessibilityInfo.announceForAccessibility(
+      "Pore couldn’t save this change. Try again.",
+    );
   };
+
+  // Move screen-reader focus to the new step's heading after each transition,
+  // so VoiceOver/TalkBack do not stay on the button that was just pressed.
+  const stepHeadingRef = useRef<View>(null);
+  const focusKey = session ? `${session.id}:${session.currentIndex}` : "";
+  useEffect(() => {
+    if (!focusKey) return;
+    const timer = setTimeout(() => {
+      if (stepHeadingRef.current) {
+        AccessibilityInfo.sendAccessibilityEvent(stepHeadingRef.current, "focus");
+      }
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [focusKey]);
 
   if (completion) {
     const completionPeriodLog = log.days[completion.date]?.[completion.period];
@@ -311,7 +370,23 @@ export default function RoutineSessionScreen() {
       <Screen contentStyle={styles.screen}>
         <SessionHeader onClose={() => router.replace("/(tabs)")} />
         {saveError ? <SaveError /> : null}
-        {due.length === 0 ? (
+        {entry === "completed" ? (
+          <View style={styles.completion} accessibilityLiveRegion="polite">
+            <Ionicons
+              name="checkmark-circle"
+              size={42}
+              color={colors.success}
+            />
+            <AppText
+              variant="headline"
+              style={styles.centered}
+              accessibilityRole="header"
+            >
+              {requestedPeriod === "am" ? "Morning" : "Evening"} routine already
+              saved today
+            </AppText>
+          </View>
+        ) : due.length === 0 ? (
           <Callout title="Nothing scheduled right now" tone="info">
             <AppText variant="caption" color={colors.textPrimary}>
               Your full plan is still available in the Routine tab.
@@ -407,6 +482,11 @@ export default function RoutineSessionScreen() {
         Date.now() - Date.parse(activeSession.startedAt),
       ),
     });
+    AccessibilityInfo.announceForAccessibility(
+      full
+        ? "Routine complete."
+        : `Routine saved. ${completedCount} of ${activeSession.stepKeys.length} steps completed.`,
+    );
     setCompletion({
       completed: completedCount,
       total: activeSession.stepKeys.length,
@@ -502,8 +582,10 @@ export default function RoutineSessionScreen() {
           />
         ) : null}
         <View
+          ref={stepHeadingRef}
           style={styles.stepHeading}
           accessible
+          accessibilityRole="header"
           accessibilityLabel={`Step ${currentIndex + 1} of ${session.stepKeys.length}. ${stepLabel(step)}. ${product?.name ?? "No product mapped"}. Scheduled today. ${currentSkipped ? "Skipped" : periodLog?.done.includes(current.key) ? "Done" : "Not completed"}.`}
         >
           <AppText variant="overline" color={colors.textSecondary}>

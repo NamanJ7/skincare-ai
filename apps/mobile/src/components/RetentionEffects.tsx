@@ -1,5 +1,5 @@
 /** Headless retention subscriber: permission refresh, schedule reconciliation, and tap routing. */
-import { router, useRootNavigationState } from "expo-router";
+import { router, usePathname, useRootNavigationState } from "expo-router";
 import { useEffect, useRef } from "react";
 import { AppState, Platform } from "react-native";
 
@@ -17,6 +17,7 @@ export function RetentionEffects() {
   const { prefs, permission, refreshPermission } = useReminders();
   const response = useLastNotificationResponse();
   const rootState = useRootNavigationState();
+  const pathname = usePathname();
   const handledResponse = useRef<string | undefined>(undefined);
 
   useEffect(() => {
@@ -44,8 +45,15 @@ export function RetentionEffects() {
     handledResponse.current = responseKey;
     clearLastNotificationResponse();
     track("reminder_opened", { type });
+    // Already inside Guided Mode: retarget the open screen instead of stacking
+    // a second copy of it. The screen re-resolves resume/switch/completed from
+    // the new params, so a repeated or cross-period tap never duplicates.
+    if ((type === "am" || type === "pm") && pathname === "/routine-session") {
+      router.setParams({ period: type, source: "reminder" });
+      return;
+    }
     router.push(reminderHref(type));
-  }, [response, rootState?.key]);
+  }, [pathname, response, rootState?.key]);
 
   return null;
 }

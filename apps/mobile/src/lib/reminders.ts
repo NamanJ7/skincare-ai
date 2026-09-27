@@ -173,7 +173,8 @@ export function parseReminderTap(data: unknown): ReminderType | null {
 }
 
 export function reminderHref(type: ReminderType): string {
-  if (type === "am" || type === "pm") return `/(tabs)/routine?period=${type}`;
+  if (type === "am" || type === "pm")
+    return `/routine-session?period=${type}&source=reminder`;
   if (type === "weekly") return "/check-in";
   return "/(tabs)";
 }

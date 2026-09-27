@@ -11,6 +11,14 @@ import {
 
 export const ROUTINE_SESSION_RESUME_MS = 6 * 60 * 60 * 1000;
 
+/**
+ * How far in the future a session's start may sit before it counts as expired.
+ * A clock set backwards otherwise leaves negative elapsed time, which never
+ * crosses the resume window, so the session would resume forever. The slack
+ * absorbs ordinary network time corrections without expiring a live session.
+ */
+export const ROUTINE_SESSION_CLOCK_SKEW_MS = 5 * 60 * 1000;
+
 export interface StartRoutineSessionInput {
   id: string;
   date: DateKey;
@@ -26,10 +34,56 @@ export function routineSessionExpired(
   now = new Date(),
 ): boolean {
   const started = Date.parse(session.startedAt);
+  if (!Number.isFinite(started)) return true;
+  const elapsed = now.getTime() - started;
   return (
-    !Number.isFinite(started) ||
-    now.getTime() - started > ROUTINE_SESSION_RESUME_MS
+    elapsed > ROUTINE_SESSION_RESUME_MS ||
+    elapsed < -ROUTINE_SESSION_CLOCK_SKEW_MS
   );
+}
+
+/**
+ * What opening Guided Mode should do, given what is already persisted.
+ *
+ * - `expire`: the active session is past its resume window; close it without
+ *   recording completion.
+ * - `switch`: the caller asked for a specific period (a reminder tap, an
+ *   explicit button) and a different period is live. Closing the live session
+ *   loses nothing, since its outcomes are stored per step in the day log, and
+ *   the notified routine starts. No chooser: two live sessions only overlap at
+ *   the edges of the resume window, and a dialog on a cold-start tap costs
+ *   more than it saves.
+ * - `resume`: continue the live session. This includes a PM session that has
+ *   crossed midnight, which stays on its original date.
+ * - `completed`: this period was already finished today; show a quiet
+ *   completed state instead of a second session over the same steps.
+ * - `none`: nothing is scheduled for this period today.
+ * - `start`: begin a new session.
+ */
+export type RoutineSessionEntry =
+  | "expire"
+  | "switch"
+  | "resume"
+  | "completed"
+  | "none"
+  | "start";
+
+export function routineSessionEntry(input: {
+  session: ActiveRoutineSession | undefined;
+  requested: RoutinePeriod;
+  explicit: boolean;
+  todayPeriod: PeriodLog | undefined;
+  dueCount: number;
+  now: Date;
+}): RoutineSessionEntry {
+  const { session } = input;
+  if (session) {
+    if (routineSessionExpired(session, input.now)) return "expire";
+    if (input.explicit && session.period !== input.requested) return "switch";
+    return "resume";
+  }
+  if (input.todayPeriod?.completedAt) return "completed";
+  return input.dueCount === 0 ? "none" : "start";
 }
 
 export function sessionPeriod(log: RoutineLog): PeriodLog | undefined {

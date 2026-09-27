@@ -128,8 +128,8 @@ describe("tap routing", () => {
   });
 
   it("maps every type to its product destination", () => {
-    expect(reminderHref("am")).toBe("/(tabs)/routine?period=am");
-    expect(reminderHref("pm")).toBe("/(tabs)/routine?period=pm");
+    expect(reminderHref("am")).toBe("/routine-session?period=am&source=reminder");
+    expect(reminderHref("pm")).toBe("/routine-session?period=pm&source=reminder");
     expect(reminderHref("weekly")).toBe("/check-in");
     expect(reminderHref("sunscreen")).toBe("/(tabs)");
   });

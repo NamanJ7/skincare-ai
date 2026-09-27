@@ -2,11 +2,14 @@ import { describe, expect, it } from "vitest";
 
 import { emptyLog, normalizeLog } from "./log";
 import {
+  ROUTINE_SESSION_CLOCK_SKEW_MS,
   ROUTINE_SESSION_RESUME_MS,
+  abandonRoutineSession,
   finishRoutineSession,
   periodResolved,
   recordSessionDone,
   recordSessionSkip,
+  routineSessionEntry,
   routineSessionExpired,
   startRoutineSession,
 } from "./routine-session";
@@ -124,5 +127,85 @@ describe("guided routine session state", () => {
     });
     expect(updated.days["2026-09-12"].pm?.done).toContain("retired:base");
     expect(periodResolved(updated.days["2026-09-12"].pm)).toBe(false);
+  });
+
+  it("expires a session whose start sits in the future after a clock change", () => {
+    const session = started().activeSession!;
+    const at = (offset: number) => new Date(Date.parse(START) + offset);
+    expect(routineSessionExpired(session, at(-ROUTINE_SESSION_CLOCK_SKEW_MS))).toBe(false);
+    expect(routineSessionExpired(session, at(-ROUTINE_SESSION_CLOCK_SKEW_MS - 1))).toBe(true);
+    expect(routineSessionExpired(session, at(-24 * 60 * 60 * 1000))).toBe(true);
+  });
+});
+
+describe("routineSessionEntry", () => {
+  const live = () => started().activeSession!;
+  const base = {
+    requested: "pm" as const,
+    explicit: true,
+    todayPeriod: undefined,
+    dueCount: 2,
+    now: new Date("2026-09-13T00:30:00.000Z"),
+  };
+
+  it("resumes a PM session that crossed midnight on a PM reminder", () => {
+    expect(routineSessionEntry({ ...base, session: live() })).toBe("resume");
+  });
+
+  it("switches to the notified period instead of resuming a different one", () => {
+    expect(
+      routineSessionEntry({ ...base, session: live(), requested: "am" }),
+    ).toBe("switch");
+  });
+
+  it("resumes whatever is live when no period was asked for", () => {
+    expect(
+      routineSessionEntry({
+        ...base,
+        session: live(),
+        requested: "am",
+        explicit: false,
+      }),
+    ).toBe("resume");
+  });
+
+  it("expires before deciding anything else", () => {
+    expect(
+      routineSessionEntry({
+        ...base,
+        session: live(),
+        requested: "am",
+        now: new Date(Date.parse(START) + ROUTINE_SESSION_RESUME_MS + 1),
+      }),
+    ).toBe("expire");
+  });
+
+  it("shows a completed period instead of starting a duplicate session", () => {
+    expect(
+      routineSessionEntry({
+        ...base,
+        session: undefined,
+        todayPeriod: {
+          done: ["cleanser:base"],
+          total: 1,
+          completedAt: "2026-09-12T21:00:00.000Z",
+        },
+      }),
+    ).toBe("completed");
+  });
+
+  it("starts only when something is due", () => {
+    expect(routineSessionEntry({ ...base, session: undefined })).toBe("start");
+    expect(
+      routineSessionEntry({ ...base, session: undefined, dueCount: 0 }),
+    ).toBe("none");
+  });
+
+  it("keeps step outcomes when a switched-away session is closed", () => {
+    const log = abandonRoutineSession(
+      recordSessionDone(started(), "cleanser:base", 1, START),
+    );
+    expect(log.activeSession).toBeUndefined();
+    expect(log.days["2026-09-12"].pm?.done).toEqual(["cleanser:base"]);
   });
 });
