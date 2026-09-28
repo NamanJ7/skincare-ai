@@ -262,7 +262,11 @@ export default function RoutineSessionScreen() {
   useEffect(() => {
     if (!focusKey) return;
     const timer = setTimeout(() => {
-      if (stepHeadingRef.current) {
+      // react-native-web has no sendAccessibilityEvent; calling it there throws.
+      if (
+        stepHeadingRef.current &&
+        typeof AccessibilityInfo.sendAccessibilityEvent === "function"
+      ) {
         AccessibilityInfo.sendAccessibilityEvent(stepHeadingRef.current, "focus");
       }
     }, 300);

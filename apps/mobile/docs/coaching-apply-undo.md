@@ -42,3 +42,33 @@
 2. With storage writes failing, Apply shows the error and stays put.
 3. Apply, kill the app, reopen: the change and its Undo are still there.
 4. VoiceOver: the save error is spoken, and Undo is reachable and labelled.
+
+## Browser run (2026-09-28)
+
+The web build of the app was driven in headless Chromium, with a completed
+onboarding profile preloaded into storage. A page reload stood in for killing
+and relaunching the app. These all passed:
+
+- The guided routine resumes at the right step after a relaunch.
+- A routine can be completed offline, and the completion is saved.
+- A reminder for a routine already finished today shows the quiet completed
+  state and does not start a duplicate session.
+- A reminder for the other period closes the live session and keeps its
+  recorded steps.
+- Minimum Mode Apply survives a relaunch with Undo still offered. Undo clears
+  the change and marks the history entry.
+- A failed save keeps the screen in place, shows the retryable error, and
+  advances once storage recovers. This holds for both the guided step and Apply.
+- "Delete my data" removes the log, reminders and the analytics outbox.
+- The page throws no uncaught errors.
+
+The run found two bugs, both fixed:
+
+1. The step-focus call threw on web, where `sendAccessibilityEvent` does not
+   exist.
+2. A failed Minimum Mode Apply showed its error inside the banner that is
+   hidden when nothing was applied.
+
+This is a browser, not a phone. Notifications, haptics, VoiceOver/TalkBack,
+Dynamic Type, lock/unlock and a real process kill are still open in the manual
+matrix above.

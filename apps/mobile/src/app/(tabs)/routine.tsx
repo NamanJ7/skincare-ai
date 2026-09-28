@@ -274,16 +274,6 @@ export default function RoutineTab() {
                   }}
                 />
               ) : null}
-              {revisionSaveError ? (
-                <AppText
-                  variant="caption"
-                  color={colors.textPrimary}
-                  accessibilityRole="alert"
-                  accessibilityLiveRegion="assertive"
-                >
-                  Pore couldn’t save this change. Try again.
-                </AppText>
-              ) : null}
               {goodToKnow.map((note) => (
                 <AppText
                   key={note}
@@ -345,6 +335,17 @@ export default function RoutineTab() {
               />
             )}
           </View>
+
+          {revisionSaveError ? (
+            <AppText
+              variant="caption"
+              color={colors.textPrimary}
+              accessibilityRole="alert"
+              accessibilityLiveRegion="assertive"
+            >
+              Pore couldn’t save this change. Try again.
+            </AppText>
+          ) : null}
 
           <Segmented
             options={[
