@@ -131,6 +131,64 @@ a {
   }
 }
 
+/* Skin-scan flow (components/scan) */
+@keyframes scan-arrow-pulse {
+  0%,
+  100% {
+    opacity: 0.25;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@keyframes scan-ring-sweep {
+  from {
+    stroke-dashoffset: 0;
+  }
+  to {
+    stroke-dashoffset: var(--scan-ring-c, 251);
+  }
+}
+
+@keyframes scan-pop {
+  from {
+    opacity: 0;
+    transform: scale(1.35);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes scan-step-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.scan-arrow {
+  animation: scan-arrow-pulse 1.6s ease-in-out infinite;
+}
+.scan-ring {
+  animation: scan-ring-sweep 3s linear forwards;
+}
+.scan-pop {
+  animation: scan-pop 0.35s var(--ease-soft) both;
+}
+.scan-step-in {
+  animation: scan-step-in 0.25s var(--ease-soft) both;
+}
+.scan-fade-in {
+  animation: pore-fade-in 0.35s var(--ease-soft) both;
+}
+
 @keyframes pore-gradient-shift {
   0% {
     background-position: 0% 50%;
@@ -203,6 +261,20 @@ a {
   .animate-glow,
   .hero-emphasis-text {
     animation: none;
+  }
+  /* Scan flow: numeral-only countdown, no sweep/pulse motion */
+  .scan-ring {
+    display: none;
+  }
+  .scan-arrow {
+    animation: none;
+    opacity: 0.9;
+  }
+  .scan-pop,
+  .scan-step-in {
+    animation: none;
+    opacity: 1;
+    transform: none;
   }
   .reveal {
     opacity: 1;

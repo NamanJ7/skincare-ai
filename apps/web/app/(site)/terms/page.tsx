@@ -1,12 +1,14 @@
 import type { Metadata } from "next";
-import { TERMS_OF_USE } from "@pore/shared";
-import { LegalPage } from "@/components/legal/LegalPage";
+
+import { TERMS_OF_USE } from "@pore/shared/legal";
+
+import { LegalDocument } from "@/components/sections/LegalDocument";
 
 export const metadata: Metadata = {
-  title: "Terms of Use",
-  description: "The terms for using Pore.",
+  title: TERMS_OF_USE.title,
+  description: TERMS_OF_USE.lede,
 };
 
 export default function TermsPage() {
-  return <LegalPage doc={TERMS_OF_USE} />;
+  return <LegalDocument document={TERMS_OF_USE} />;
 }

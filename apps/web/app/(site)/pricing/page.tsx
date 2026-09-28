@@ -43,7 +43,7 @@ export default function PricingPage() {
                   <th className="px-5 py-4 text-sm font-semibold text-ink">
                     Feature
                   </th>
-                  {["Free", "Pore Plus", "Pore Pro"].map((c) => (
+                  {["Free", "Pore Plus"].map((c) => (
                     <th
                       key={c}
                       className="px-5 py-4 text-center text-sm font-semibold text-ink"
@@ -59,7 +59,6 @@ export default function PricingPage() {
                     <td className="px-5 py-3.5 text-sm text-ink">{row.label}</td>
                     <Cell value={row.free} />
                     <Cell value={row.plus} />
-                    <Cell value={row.pro} />
                   </tr>
                 ))}
               </tbody>

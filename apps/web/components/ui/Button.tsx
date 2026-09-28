@@ -38,6 +38,24 @@ type ButtonAsLink = CommonProps & {
   external?: boolean;
 };
 
+/**
+ * Schemes an href may use. `href` is typed `string`, so nothing stops a future
+ * caller passing a value that came from an API response or the CMS — and
+ * `javascript:` in an anchor executes on click. Relative paths, fragments and
+ * query-only hrefs have no scheme at all and are always fine.
+ */
+function isSafeHref(href: string): boolean {
+  const scheme = /^([a-z][a-z0-9+.-]*):/i.exec(href.trim());
+  if (!scheme) return true;
+  const protocol = `${scheme[1]!.toLowerCase()}:`;
+  return protocol === "https:" || protocol === "http:" || protocol === "mailto:";
+}
+
+/** True when the href leaves this origin, regardless of how it was declared. */
+function isExternalHref(href: string): boolean {
+  return /^(https?:|mailto:)/i.test(href.trim());
+}
+
 export function Button(props: ButtonAsButton | ButtonAsLink) {
   const {
     variant = "primary",
@@ -49,12 +67,22 @@ export function Button(props: ButtonAsButton | ButtonAsLink) {
 
   if ("href" in props && props.href !== undefined) {
     const { href, external } = props;
-    if (external || href.startsWith("http") || href.startsWith("#")) {
+    // Render the label without a destination rather than emitting an anchor we
+    // cannot vouch for. Silently dropping the href is the safe failure: the page
+    // still reads correctly and nothing executes.
+    if (!isSafeHref(href)) {
+      return <span className={classes}>{children}</span>;
+    }
+    if (external || isExternalHref(href) || href.startsWith("#")) {
+      // Keyed on the destination, not on the `external` prop: an https href
+      // opens a new tab whether or not the caller remembered to say so, and
+      // every new tab gets noopener/noreferrer.
+      const opensNewTab = external || isExternalHref(href);
       return (
         <a
           href={href}
           className={classes}
-          {...(external ? { target: "_blank", rel: "noopener noreferrer" } : {})}
+          {...(opensNewTab ? { target: "_blank", rel: "noopener noreferrer" } : {})}
         >
           {children}
         </a>
@@ -67,11 +95,14 @@ export function Button(props: ButtonAsButton | ButtonAsLink) {
     );
   }
 
-  const { variant: _v, size: _s, className: _c, children: _ch, href: _h, ...rest } =
-    props as ButtonAsButton;
+  const { children: buttonChildren, ...rest } = props as ButtonAsButton;
+  delete rest.variant;
+  delete rest.size;
+  delete rest.className;
+  delete rest.href;
   return (
     <button className={classes} {...rest}>
-      {children}
+      {buttonChildren}
     </button>
   );
 }

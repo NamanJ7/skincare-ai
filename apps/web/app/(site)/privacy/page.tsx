@@ -1,12 +1,14 @@
 import type { Metadata } from "next";
-import { PRIVACY_POLICY } from "@pore/shared";
-import { LegalPage } from "@/components/legal/LegalPage";
+
+import { PRIVACY_NOTICE } from "@pore/shared/legal";
+
+import { LegalDocument } from "@/components/sections/LegalDocument";
 
 export const metadata: Metadata = {
-  title: "Privacy Policy",
-  description: "How Pore handles your information.",
+  title: PRIVACY_NOTICE.title,
+  description: PRIVACY_NOTICE.lede,
 };
 
 export default function PrivacyPage() {
-  return <LegalPage doc={PRIVACY_POLICY} />;
+  return <LegalDocument document={PRIVACY_NOTICE} />;
 }

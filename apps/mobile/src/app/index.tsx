@@ -5,21 +5,24 @@ import { View } from "react-native";
 import { BrandMark } from "@/components/BrandMark";
 import { HeroDemo } from "@/components/HeroDemo";
 import { SplashAnimation } from "@/components/SplashAnimation";
-import { hasProfile } from "@/lib/profile";
-import { AppText, GhostButton, PrimaryButton, Screen, colors, spacing } from "@/theme";
+import { track } from "@/lib/analytics";
+import { useOnboarding } from "@/state/onboarding";
+import {
+  AppText,
+  PrimaryButton,
+  Screen,
+  spacing,
+  useThemeColors,
+} from "@/theme";
 
 export default function Landing() {
-  /**
-   * Someone who already has a routine is not a visitor. They opened the app to
-   * find out what to do tonight, and every launch used to put a brand animation
-   * and a marketing page between them and the answer. Read once, on mount, so
-   * the decision can't flip underneath a render.
-   */
-  const [returning] = useState(hasProfile);
+  const colors = useThemeColors();
+  const { data } = useOnboarding();
   const [splashDone, setSplashDone] = useState(false);
 
-  if (returning) {
-    return <Redirect href="/today" />;
+  // Returning users (persisted profile) skip the funnel entirely.
+  if (data.onboardingComplete) {
+    return <Redirect href="/(tabs)" />;
   }
 
   if (!splashDone) {
@@ -27,35 +30,80 @@ export default function Landing() {
   }
 
   return (
-    <Screen scroll={false} contentStyle={{ justifyContent: "space-between", paddingVertical: spacing.md }}>
-      {/* brand row */}
-      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: spacing.xs }}>
-        <BrandMark size={26} />
-        <AppText variant="heading" color={colors.primary}>
-          Pore
-        </AppText>
+    <Screen
+      contentStyle={{
+        justifyContent: "space-between",
+        paddingVertical: spacing.md,
+      }}
+    >
+      {/* prominent first-run brand lockup */}
+      <View
+        style={{
+          flexDirection: "row",
+          alignItems: "center",
+          justifyContent: "center",
+          gap: spacing.sm,
+        }}
+      >
+        <View
+          style={{
+            width: 74,
+            height: 74,
+            borderRadius: 37,
+            alignItems: "center",
+            justifyContent: "center",
+            backgroundColor: colors.surfaceElevated,
+            borderWidth: 1,
+            borderColor: colors.border,
+          }}
+        >
+          <BrandMark size={64} />
+        </View>
+        <View style={{ gap: spacing.xxs }}>
+          <AppText variant="title" color={colors.actionPrimary}>
+            Pore
+          </AppText>
+          <AppText variant="overline" color={colors.textSecondary}>
+            PERSONAL SKIN GUIDANCE
+          </AppText>
+        </View>
       </View>
 
       {/* live demo */}
-      <View style={{ alignItems: "center", justifyContent: "center", flexShrink: 1 }}>
+      <View
+        style={{
+          alignItems: "center",
+          justifyContent: "center",
+          flexShrink: 1,
+        }}
+      >
         <HeroDemo />
       </View>
 
       {/* headline */}
       <View style={{ gap: spacing.xs }}>
         <AppText variant="hero" style={{ textAlign: "center" }}>
-          Know exactly what your skin needs
+          See your skin more clearly
         </AppText>
-        <AppText variant="body" color={colors.inkMuted} style={{ textAlign: "center" }}>
-          Scan your skin, answer a few questions, and get a personalized routine — with a clear reason
-          for every step.
+        <AppText
+          variant="body"
+          color={colors.textSecondary}
+          style={{ textAlign: "center" }}
+        >
+          Take quality-checked photos, understand visible patterns, and get a
+          routine built around you.
         </AppText>
       </View>
 
       {/* auth */}
       <View style={{ gap: spacing.sm }}>
-        <PrimaryButton label="Get started" onPress={() => router.push("/sign-up")} />
-        <GhostButton label="I already have an account" onPress={() => router.push("/sign-in")} />
+        <PrimaryButton
+          label="Get started"
+          onPress={() => {
+            track("onboarding_started", { source: "landing" });
+            router.push("/onboarding/age");
+          }}
+        />
       </View>
     </Screen>
   );

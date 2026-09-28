@@ -1,252 +1,149 @@
 /**
- * Capture, measure, compress and store one guided photo.
+ * On-device progress photos. Everything is best-effort (like storage.ts):
+ * a failed copy means a missing thumbnail, never a crash — and on web, where
+ * the new expo-file-system classes are unavailable, every call is a no-op.
  *
- * Photos are written to the app's own document directory and never uploaded to
- * storage. The base64 copy exists only for the duration of one /api/plan
- * request. The user can delete everything from inside the app.
+ * Only RELATIVE file names are ever persisted; iOS rewrites the app container
+ * path on updates, so absolute URIs go stale. Resolve with photoUri() at read
+ * time.
  */
-import type { CameraCapturedPicture } from "expo-camera";
 import { Directory, File, Paths } from "expo-file-system";
-import { ImageManipulator, SaveFormat } from "expo-image-manipulator";
-import {
-  captureHint,
-  classifyIlluminant,
-  type CaptureAngle,
-  type PhotoQuality,
-  type SkinTone,
-} from "@pore/shared";
-import { measureCapture } from "./photoQuality";
 
-/**
- * Claude downsamples vision inputs to a ~1568px max edge, so anything larger is
- * bytes burned for no resolution gain. 1280 leaves headroom and keeps each
- * photo around 200KB.
- */
-const DELIVERY_PX = 1280;
-const DELIVERY_COMPRESS = 0.75;
+import { setScanPhotoDisposer } from "./scan-session";
 
-const DIR_NAME = "skin-photos";
-const MANIFEST = "manifest.json";
-
-export const CAPTURE_STEPS: { angle: CaptureAngle; title: string; hint: string }[] = [
-  { angle: "front", title: "Look straight ahead", hint: "Fill the oval, chin level" },
-  { angle: "left", title: "Turn slowly to your left", hint: "About 45° — keep your eyes on the screen" },
-  { angle: "right", title: "Turn slowly to your right", hint: "About 45° — keep your eyes on the screen" },
-];
-
-export interface CapturedPhoto {
-  angle: CaptureAngle;
-  /** Local file URI in the app's document directory. */
-  uri: string;
-  /** base64 JPEG, held in memory for the request only — never written to disk. */
-  data: string;
-  quality: PhotoQuality;
-  capturedAt: string;
-}
-
-/** A frame the gate rejected, with the one instruction that fixes it. */
-export interface RejectedCapture {
-  rejected: true;
-  hint: string;
-  quality: PhotoQuality;
-}
-
-export type CaptureOutcome = CapturedPhoto | RejectedCapture;
-
-export function isRejected(o: CaptureOutcome): o is RejectedCapture {
-  return "rejected" in o;
-}
+const PHOTOS_DIR = "photos";
 
 function photosDir(): Directory {
-  return new Directory(Paths.document, DIR_NAME);
+  return new Directory(Paths.document, PHOTOS_DIR);
 }
 
-function sessionDir(sessionId: string): Directory {
-  return new Directory(photosDir(), sessionId);
-}
-
-/** A filesystem-safe id for a new capture session, ordered by capture time. */
-export function newSessionId(): string {
-  return new Date().toISOString().replace(/[:.]/g, "-");
-}
-
-/**
- * Measure a raw camera frame, and if it passes, compress and store it.
- *
- * The illuminant is **measured, not declared**. `referenceLuma` is the mean luma
- * of an ambient frame captured moments earlier, with none of our light on it;
- * comparing it against this frame's luma is what decides whether our light
- * actually dominated. That distinction used to be a compile-time constant, and
- * the progress engine trusts it as the only gate on whether two sessions may be
- * subtracted — so "we asked for a flash" was standing in for "the light was
- * controlled and repeatable", which are not the same claim in daylight.
- */
-export async function processCapture(
-  picture: CameraCapturedPicture,
-  angle: CaptureAngle,
-  tone: SkinTone,
-  /**
-   * Mean luma of an ambient reference frame taken just before this one. Pass
-   * `NaN` when no reference could be captured — `classifyIlluminant` then falls
-   * back to `ambient`, which costs a comparison rather than inventing one.
-   */
-  referenceLuma: number,
-  /** Which capture session this photo belongs to — see `newSessionId`. */
-  sessionId: string,
-  /**
-   * Deliver the photo even if the gate rejected it. Used by the escape hatch
-   * after two failed attempts on the same angle — the flags still travel with
-   * the photo, so the model lowers its own confidence rather than us pretending
-   * the shot was fine. Delivery runs through this one path either way, so a
-   * forced photo carries real base64 like any other.
-   */
-  force = false,
-): Promise<CaptureOutcome> {
-  const score = await measureCapture(picture.uri, picture.width, picture.height, tone);
-  const quality: PhotoQuality = {
-    angle,
-    score: score.score,
-    flags: score.flags,
-    illuminant: classifyIlluminant(referenceLuma, score.metrics.meanLuma),
-  };
-
-  const hint = captureHint(score.flags);
-  if (hint && !force) return { rejected: true, hint, quality };
-
-  const rendered = await ImageManipulator.manipulate(picture.uri)
-    .resize({ width: DELIVERY_PX })
-    .renderAsync();
-  const delivered = await rendered.saveAsync({
-    compress: DELIVERY_COMPRESS,
-    format: SaveFormat.JPEG,
-    base64: true,
-  });
-  if (!delivered.base64) throw new Error("Image manipulator returned no base64 data");
-
-  return {
-    angle,
-    uri: await persist(delivered.uri, angle, sessionId),
-    data: delivered.base64,
-    quality,
-    capturedAt: new Date().toISOString(),
-  };
-}
-
-/**
- * Copy a rendered photo into this session's own folder.
- *
- * Each session keeps its own `<sessionId>/` folder rather than sharing one flat
- * directory, so an earlier visit's photos survive a later one instead of being
- * overwritten — that history is what a future comparison view needs.
- *
- * Storage failures are not fatal: the capture still works, the photo is still
- * analysed, it just is not kept for later. Returning the source uri means the
- * review thumbnails keep rendering either way.
- */
-async function persist(sourceUri: string, angle: CaptureAngle, sessionId: string): Promise<string> {
+/** Resolve a stored relative name to a renderable file:// URI (null on web). */
+export function photoUri(name: string): string | null {
   try {
-    const dir = sessionDir(sessionId);
-    if (!dir.exists) dir.create({ intermediates: true });
-
-    const dest = new File(dir, `${angle}.jpg`);
-    if (dest.exists) dest.delete();
-    new File(sourceUri).copy(dest);
-    return dest.uri;
+    return new File(Paths.document, PHOTOS_DIR, name).uri;
   } catch {
-    return sourceUri;
+    return null;
   }
 }
 
-/** One completed capture session, as recorded in the top-level session index. */
-export interface StoredSession {
-  id: string;
-  capturedAt: string;
-}
-
-const SESSIONS_INDEX = "sessions.json";
-
-function readSessionIndex(): StoredSession[] {
-  try {
-    const file = new File(photosDir(), SESSIONS_INDEX);
-    if (!file.exists) return [];
-    const parsed = JSON.parse(file.textSync()) as { sessions?: StoredSession[] };
-    return parsed.sessions ?? [];
-  } catch {
-    return [];
-  }
-}
-
-/** Every capture session stored on this device, most recent first. */
-export function listSessions(): StoredSession[] {
-  return [...readSessionIndex()].reverse();
-}
-
-/** URI of one angle's photo from a past session, or undefined if it isn't there. */
-export function sessionPhotoUri(sessionId: string, angle: CaptureAngle): string | undefined {
-  const file = new File(sessionDir(sessionId), `${angle}.jpg`);
-  return file.exists ? file.uri : undefined;
-}
-
-function appendToSessionIndex(session: StoredSession): void {
+/** Copy a temp photo into the photos dir; returns the NAME (not URI) or null. */
+export async function persistPhoto(
+  sourceUri: string,
+  name: string,
+): Promise<string | null> {
   try {
     const dir = photosDir();
-    if (!dir.exists) dir.create({ intermediates: true });
-    const sessions = [...readSessionIndex(), session];
-    const file = new File(dir, SESSIONS_INDEX);
-    if (file.exists) file.delete();
-    file.create();
-    file.write(JSON.stringify({ version: 1, sessions }));
+    dir.create({ idempotent: true, intermediates: true });
+    await new File(sourceUri).copy(new File(dir, name));
+    return name;
   } catch {
-    // The index is a convenience for a future session, never a blocker now.
+    return null;
   }
+}
+
+/** Capture order, named by the cheek shown to the camera (turning your head
+ * LEFT shows your RIGHT cheek) — must match STEP_ORDER in @pore/shared/scan. */
+const SCAN_ANGLES = ["front", "right", "left"] as const;
+
+/**
+ * Persist up to three scan shots. A timeline entry is only returned when the
+ * front image succeeds, so a side angle can never be mislabeled as the front
+ * comparison photo.
+ */
+export async function persistScanShots(uris: string[]): Promise<string[]> {
+  const ts = Date.now();
+  if (!uris[0]) return [];
+  const front = await persistPhoto(uris[0], `${ts}-${SCAN_ANGLES[0]}.jpg`);
+  if (!front) return [];
+
+  const names: string[] = [front];
+  for (let i = 1; i < uris.length && i < SCAN_ANGLES.length; i++) {
+    const name = await persistPhoto(uris[i], `${ts}-${SCAN_ANGLES[i]}.jpg`);
+    if (name) names.push(name);
+  }
+  return names;
+}
+
+export async function persistCheckInPhoto(uri: string): Promise<string | null> {
+  return persistPhoto(uri, `checkin-${Date.now()}.jpg`);
+}
+
+/** Remove selected persisted photos without exposing absolute container paths. */
+export function deletePhotos(names: readonly string[]): boolean {
+  let deleted = true;
+  for (const name of names) {
+    try {
+      const file = new File(Paths.document, PHOTOS_DIR, name);
+      if (file.exists) file.delete();
+    } catch {
+      deleted = false;
+      // Best effort. The history record is still removed so stale files cannot
+      // appear in the product; Delete all data remains a second cleanup path.
+    }
+  }
+  return deleted;
 }
 
 /**
- * Record what was captured and under what conditions, for later comparison,
- * and register the session in the top-level index so it can be listed later.
+ * Delete transient capture files.
+ *
+ * The camera and every ImageManipulator encode write full-resolution face JPEGs
+ * into the app's cache/tmp directory. Nothing used to remove them, so they
+ * survived "Delete my data" indefinitely — iOS evicts a cache directory only
+ * under storage pressure, which may never arrive. Accepts `file://` URIs and
+ * is best-effort per file: one failure must not strand the rest.
  */
-export function writeManifest(photos: CapturedPhoto[], sessionId: string): void {
-  const capturedAt = photos[0]?.capturedAt ?? new Date().toISOString();
-  try {
-    const dir = sessionDir(sessionId);
-    if (!dir.exists) dir.create({ intermediates: true });
-    const file = new File(dir, MANIFEST);
-    if (file.exists) file.delete();
-    file.create();
-    file.write(
-      JSON.stringify({
-        version: 1,
-        id: sessionId,
-        capturedAt,
-        photos: photos.map((p) => ({
-          angle: p.angle,
-          capturedAt: p.capturedAt,
-          quality: p.quality,
-        })),
-      }),
-    );
-  } catch {
-    // The manifest is a convenience for a future session, never a blocker now.
+export function discardTempPhotos(uris: readonly (string | undefined)[]): void {
+  for (const uri of uris) {
+    if (!uri) continue;
+    try {
+      const file = new File(uri);
+      if (file.exists) file.delete();
+    } catch {
+      // Already gone, or outside our sandbox. Nothing useful to do.
+    }
   }
-  appendToSessionIndex({ id: sessionId, capturedAt });
 }
 
-/** How many photos are on this device right now, across every session. Drives the "Your photos" row. */
-export function storedPhotoCount(): number {
+/** Remove the photos dir and everything in it (Delete-all-data path). */
+export function deleteAllPhotos(): boolean {
+  let ok = true;
   try {
     const dir = photosDir();
-    if (!dir.exists) return 0;
-    return dir
-      .list()
-      .filter((e): e is Directory => e instanceof Directory)
-      .reduce((total, session) => total + session.list().filter((f) => f.name.endsWith(".jpg")).length, 0);
+    if (dir.exists) dir.delete();
   } catch {
-    return 0;
+    // Callers performing a user-requested deletion must surface this failure.
+    ok = false;
   }
+  // The documents dir is only half the story: full-resolution stills and
+  // analysis encodes live in the cache dir. "Delete my data" claims to remove
+  // every locally saved photo, so it has to reach those too.
+  try {
+    const cache = new Directory(Paths.cache);
+    if (cache.exists) {
+      for (const entry of cache.list()) {
+        if (entry instanceof File && isImageName(entry.name)) entry.delete();
+      }
+    }
+  } catch {
+    ok = false;
+  }
+  return ok;
 }
 
-/** Remove every photo this app has stored, across every session. The user's copy of "forget me". */
-export function deleteStoredPhotos(): void {
-  const dir = photosDir();
-  if (dir.exists) dir.delete();
+/**
+ * Wire temp-file disposal into the scan session store.
+ *
+ * scan-session.ts stays free of native imports (it is pure in-memory state that
+ * unit tests load directly), so it takes its disposer by registration — the
+ * same pattern as setStorageMirror and setAnalyticsSink. Called once at app
+ * start from app/_layout.tsx.
+ */
+export function installScanPhotoDisposer(): void {
+  setScanPhotoDisposer(discardTempPhotos);
+}
+
+/** Cache entries we own well enough to delete: image encodes, nothing else. */
+function isImageName(name: string): boolean {
+  return /\.(jpe?g|png|webp|heic)$/i.test(name);
 }

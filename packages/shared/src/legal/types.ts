@@ -1,39 +1,49 @@
 /**
- * Structure for Pore's legal documents.
+ * Renderer-agnostic legal document model.
  *
- * The documents are modelled as data rather than markup so the marketing site
- * and the mobile app render byte-identical text from one source. Presentation
- * (typography, cards, the section index) belongs to each client; the wording
- * belongs here.
+ * One document, two renderers: `apps/web` paints it as marketing-site prose and
+ * `apps/mobile` paints it with the app's own primitives. The alternative — a
+ * hand-maintained copy per platform — is how the Terms and the Privacy Notice
+ * drifted apart before, and how the app ended up pointing at a URL that no
+ * longer described what the app did.
  */
 
-/** A single unit of content inside a section. */
-export type LegalBlock =
-  /** Running prose. The default. */
-  | { kind: "paragraph"; text: string }
-  /** A highlighted gap/limitation the document itself calls out. */
-  | { kind: "note"; title: string; text: string }
-  /** The standing medical disclaimer, rendered in its own quiet panel. */
-  | { kind: "disclaimer"; text: string }
-  /** A contact hand-off. `text` is UI chrome; `email` is the real address. */
-  | { kind: "contact"; text: string; email: string };
-
-export type LegalSection = {
-  /** Stable anchor/scroll id. Used as the `#hash` on web. */
+export interface LegalSection {
+  /** Stable anchor/key. Never reuse one across documents. */
   id: string;
-  title: string;
-  blocks: LegalBlock[];
-};
+  heading: string;
+  /** Paragraphs, in order. Every entry must be non-empty prose. */
+  body: string[];
+  /** Optional bulleted list rendered after `body`. */
+  bullets?: string[];
+}
 
-export type LegalDocument = {
-  id: string;
-  /** Document title, shown as the page H1. */
+export interface LegalDocument {
+  id: LegalDocumentId;
+  /** Canonical user-facing name. The only name any surface may use. */
   title: string;
-  /** Short status line describing the document's maturity. */
+  /** One-sentence summary for page heroes and screen subtitles. */
   lede: string;
-  /** Badge copy, e.g. "Pre-launch draft". */
-  status: string;
-  /** Human-readable revision date shown under the title. */
+  /** ISO `YYYY-MM-DD`. When these terms began to apply. */
+  effectiveDate: string;
+  /** ISO `YYYY-MM-DD`. Must be >= `effectiveDate`. */
   lastUpdated: string;
+  intro: string[];
   sections: LegalSection[];
-};
+}
+
+export type LegalDocumentId = "terms" | "privacy";
+
+/** Render an ISO date as the long form used in the document headers. */
+export function formatLegalDate(iso: string): string {
+  const [year, month, day] = iso.split("-").map(Number);
+  if (!year || !month || !day) return iso;
+  // Constructed in UTC and formatted in UTC so the printed date matches the
+  // string regardless of the reader's timezone.
+  return new Date(Date.UTC(year, month - 1, day)).toLocaleDateString("en-US", {
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+    timeZone: "UTC",
+  });
+}

@@ -18,39 +18,39 @@ import {
 export const metadata: Metadata = {
   title: "Features",
   description:
-    "Guided three-photo capture, a routine clamped by deterministic safety rules, paced actives, and a before-and-after Pore refuses to fake - explore everything Pore does.",
+    "Guided face photos, personalized routines, a product shelf you understand, active compatibility, and directional progress tracking.",
 };
 
 const HIGHLIGHTS = [
   {
     icon: <CameraIcon size={20} />,
-    title: "Guided capture",
-    body: "Three angles under your screen's own light, each measured before it counts.",
+    title: "Guided face photo",
+    body: "Start by taking a clear picture of your face so Pore can read visible skin cues.",
   },
   {
     icon: <DropIcon size={20} />,
-    title: "Personalized routine",
-    body: "Simple AM / PM steps shaped by your photos, your goals, and how your skin reacts.",
-  },
-  {
-    icon: <CheckIcon size={20} />,
-    title: "Deterministic safety",
-    body: "Sunscreen always, allergens removed, pregnancy-unsafe actives stripped - in code.",
+    title: "Personalized routines",
+    body: "Simple AM / PM routines shaped by your face photo, goals, and products.",
   },
   {
     icon: <LeafIcon size={20} />,
-    title: "Paced actives",
-    body: "One strong active a day, ramped over six weeks, pulled back when your skin protests.",
+    title: "Product shelf",
+    body: "Catalog what you own so Pore builds around your real routine.",
+  },
+  {
+    icon: <CheckIcon size={20} />,
+    title: "Active compatibility",
+    body: "Check supported actives for major conflicts, irritation risk, and duplication.",
   },
   {
     icon: <ChartIcon size={20} />,
-    title: "Measured progress",
-    body: "Two blind readings subtracted in code - and a refusal when they aren't comparable.",
+    title: "Progress tracking",
+    body: "Compare consistency, self-reports, and standardized photos over time.",
   },
   {
     icon: <SparkleIcon size={20} />,
-    title: "A reason for everything",
-    body: "Every step and every adjustment says why - education, never a diagnosis.",
+    title: "AI guidance",
+    body: "Personalized guidance as your skin changes - education, not diagnosis.",
   },
 ];
 

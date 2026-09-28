@@ -8,9 +8,10 @@
   "exports": {
     ".": "./src/index.ts",
     "./design": "./src/design/index.ts",
+    "./legal": "./src/legal/index.ts",
     "./safety": "./src/safety/index.ts",
-    "./types": "./src/types/index.ts",
-    "./legal": "./src/legal/index.ts"
+    "./scan": "./src/scan/index.ts",
+    "./types": "./src/types/index.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

@@ -4,8 +4,6 @@
  * must return.
  */
 
-import type { PhotoQualityFlag } from "../vision/quality";
-
 export type ConcernKey =
   | "acne_like_breakouts"
   | "oiliness"
@@ -20,16 +18,50 @@ export type ConcernKey =
 /** Deliberately avoids clinical severity words. "noticeable" is the top band. */
 export type AppearanceLevel = "none" | "mild" | "moderate" | "noticeable";
 
+/** The three guided capture angles, in the order they are shown to the model. */
+export type ScanPose = "front" | "right" | "left";
+
+/**
+ * One region's own reading of a concern.
+ *
+ * Ordinal only, and deliberately so: the same four appearance bands the whole
+ * concern uses. A per-region *number* would be invented precision — nothing in
+ * the pipeline measures a region's severity, the model is only ranking what it
+ * can see.
+ */
+export interface RegionObservation {
+  region: string;
+  appearanceLevel: AppearanceLevel;
+}
+
 export interface ConcernFinding {
   concern: ConcernKey;
   present: boolean;
+  /** The strongest band across `regionDetail`; the whole-face headline. */
   appearanceLevel: AppearanceLevel;
   /** 0..1 model confidence. */
   confidence: number;
   /** Plain-language, non-diagnostic possible contributors. */
   contributingFactors: string[];
-  /** Rough face regions, e.g. "forehead", "cheeks". */
+  /**
+   * Rough face regions, e.g. "forehead", "cheeks".
+   *
+   * Derived from `regionDetail` by the normalizer, never sent by the model, so
+   * the two can never disagree. Kept because it is the shape every existing
+   * consumer reads.
+   */
   regions: string[];
+  /** Per-region breakdown. Empty when the concern is not present. */
+  regionDetail: RegionObservation[];
+  /**
+   * Which of the three captures the concern was actually visible in.
+   *
+   * This is the anti-lighting-artifact signal: a tone or shine that shows up at
+   * exactly one angle is far more likely to be how the light fell than a
+   * property of the skin, so a single-pose sighting of a lighting-fakeable
+   * concern gets its confidence damped downstream. Empty when not present.
+   */
+  observedInPoses: ScanPose[];
 }
 
 export interface EscalationResult {
@@ -39,27 +71,6 @@ export interface EscalationResult {
   reasons: string[];
 }
 
-/** Which guided angle a photo was taken from. */
-export type CaptureAngle = "front" | "left" | "right";
-
-/**
- * What the on-device capture gate measured for one photo. Client-supplied and
- * attached to the assessment after parsing — the model is told about it so it
- * can lower its own confidence, but it is never asked to invent it.
- */
-export interface PhotoQuality {
-  angle: CaptureAngle;
-  /** 0..1 composite from the capture gate. */
-  score: number;
-  flags: PhotoQualityFlag[];
-  /**
-   * Whether the shot was lit by the app's screen flash (a known, repeatable
-   * illuminant) or whatever light the room happened to have. Only screen-flash
-   * captures are comparable to each other across sessions.
-   */
-  illuminant: "screen_flash" | "ambient";
-}
-
 export interface Assessment {
   findings: ConcernFinding[];
   escalation: EscalationResult;
@@ -67,14 +78,4 @@ export interface Assessment {
   summary: string;
   /** Standard non-diagnostic disclaimer shown with every assessment. */
   disclaimer: string;
-  /** What the capture gate measured, echoed back so the UI can explain itself. */
-  photoQuality: PhotoQuality[];
-  /** 0..1. Must fall when photos are flagged, rather than answering confidently anyway. */
-  overallConfidence: number;
-  /**
-   * Plain-language list of what could NOT be assessed and why — a region out of
-   * frame, an angle that came out soft. Saying so is more credible than a
-   * confident number with nothing behind it.
-   */
-  limitations: string[];
 }

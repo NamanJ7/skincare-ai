@@ -4,457 +4,82 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-Pore — a skincare app that turns guided face photos + an intake questionnaire into a personalized
-AM/PM routine. Two clients (marketing/waitlist website + Expo mobile app) share one domain package
-that owns the design tokens, the legal copy, the capture-quality measurement, and the deterministic
-engines governing every routine.
+"Pore" — an AI skincare app. pnpm + Turborepo monorepo with three workspaces:
 
-**The load-bearing parts of this product are code, not prompts**, and that is deliberate. Four
-layers, all unit-tested in `packages/shared`:
-
-| layer | module | question it answers |
-| --- | --- | --- |
-| capture gate | `vision/` | is this photo good enough to assess? |
-| safety engine | `safety/` | what belongs in the routine, and how often? |
-| cadence engine | `schedule/` | which of those steps happen today? |
-| progress engine | `progress/` | is any of this working? |
-
-Treat model output as a draft that these layers correct. The safety, cadence and progress engines
-run in that order, each one clamping what the previous produced.
-
-## Monorepo layout
-
-pnpm workspaces + Turborepo, TypeScript throughout. `.npmrc` sets `node-linker=hoisted` +
-`shamefully-hoist=true` — Expo/Metro and Next resolve a flat `node_modules` far more reliably than
-pnpm's symlinked store. Don't "fix" that back to symlinks.
-
-- `apps/web` — Next.js 16 (App Router, React 19) marketing site + waitlist + the `/api/plan`
-  pipeline endpoint. Tailwind v4.
-- `apps/mobile` — Expo SDK 56 / React Native 0.85, Expo Router. Has its own `AGENTS.md` (imported by
-  its `CLAUDE.md` via `@AGENTS.md`) — **read it before touching Expo code**: Expo has changed
-  recently enough that you must check the versioned docs at
-  https://docs.expo.dev/versions/v56.0.0/ before writing anything, not rely on training knowledge.
-  `metro.config.js` is monorepo-aware (watches the workspace root, resolves the hoisted store) —
-  keep it that way.
-- `packages/shared` (`@pore/shared`) — the single source of truth consumed by both apps. Ships TS
-  source, not a build; `apps/web/next.config.ts` lists it in `transpilePackages`. Subpath exports:
-  `.`, `./design`, `./safety`, `./types`, `./legal` (note: **no** `./vision`, `./schedule` or
-  `./progress` subpath — those three are reachable from the root barrel only).
-  - `design/` — color/spacing/radius/typography/shadow tokens (`tokens.ts`) plus a Tailwind preset.
-  - `types/` — the domain model (`IntakeResponse`, `Routine`/`RoutineStep`, `Assessment`,
-    `PhotoQuality`).
-  - `safety/` — `applySafetyRules`, the deterministic routine-safety engine, and the `ACTIVES`
-    ingredient metadata table + `activeRelevanceScore` it runs against.
-  - `schedule/` — `planDay`/`planWeek`, the deterministic cadence engine (see below) that turns a
-    safety-clamped routine's weekly frequencies into "here is what you do tonight".
-  - `progress/` — `compareAssessments`/`adaptRoutine`, the deterministic progress engine (see below)
-    that measures whether the routine is working and feeds the answer back into it.
-  - `vision/` — `scoreFrame` / `captureHint` / `CAPTURE_TUNING`, the pure-maths capture-quality
-    measurement. No I/O lives here on purpose, so vitest can cover it.
-  - `legal/` — the privacy policy and terms **as data** (`PRIVACY_POLICY`, `TERMS_OF_USE`,
-    `LEGAL_DOCUMENTS`, `MEDICAL_DISCLAIMER`, `LEGAL_CONTACT_EMAIL`, `LEGAL_LAST_UPDATED`), so web and
-    mobile render byte-identical text.
-
-Also at the root: `TODOS.md` — deferred work that is real, including thresholds that must be tuned
-on hardware before launch. It is treated as authoritative ("if it is not written here, it does not
-exist"). Update it when you finish or defer something.
+- `apps/web` — Next.js 16 (App Router): marketing site (`app/(site)`), browser scan flow (`app/scan`), and the server-side AI pipeline (`app/api/plan`).
+- `apps/mobile` — Expo 56 / expo-router app (`@pore/mobile`), the primary product surface.
+- `packages/shared` — `@pore/shared`: design tokens, the safety engine, scan-quality logic, and domain types. Ships raw TypeScript source (no build step); consumed via subpath exports `@pore/shared/{design,safety,scan,types}`.
 
 ## Commands
 
-Run from the repo root (Turborepo fans out per package; pnpm workspaces link `@pore/shared`).
+pnpm 9, Node >= 20. Run from the repo root (path contains a space — quote it in shell commands).
 
 ```bash
-pnpm install          # install everything
+pnpm dev / build / lint / typecheck / test    # turbo, all workspaces
 
-pnpm build            # turbo run build     (web only defines `build`; mobile/shared have none)
-pnpm dev              # turbo run dev       (persistent, uncached)
-pnpm lint             # turbo run lint      (web only; eslint-config-next flat config)
-pnpm typecheck        # turbo run typecheck (all three packages: tsc --noEmit)
-pnpm test             # turbo run test      (packages/shared only, via vitest)
+pnpm --filter web dev                          # Next.js on :3000 (needs ANTHROPIC_API_KEY for /api/plan)
+pnpm --filter @pore/mobile start               # expo start
+pnpm --filter @pore/shared test                # vitest run
+
+# Single test file (vitest — works in web, mobile, shared):
+pnpm --filter @pore/shared test src/safety/engine.test.ts
+pnpm --filter @pore/mobile test src/lib/gate.test.ts
 ```
 
-Single-package / single-test invocations:
+Tests are co-located `*.test.ts` vitest files next to the modules they cover (heavily used in `apps/mobile/src/lib` and `packages/shared/src`).
 
-```bash
-# shared package
-pnpm --filter @pore/shared test              # vitest run
-pnpm --filter @pore/shared test:watch        # vitest watch mode
-pnpm --filter @pore/shared exec vitest run src/safety/engine.test.ts
-pnpm --filter @pore/shared exec vitest run src/vision/quality.test.ts
-pnpm --filter @pore/shared exec vitest run src/schedule/engine.test.ts
-pnpm --filter @pore/shared exec vitest run src/progress/engine.test.ts
-pnpm --filter @pore/shared typecheck
+`.npmrc` sets `node-linker=hoisted` + `shamefully-hoist` deliberately — Metro and Next need a flat `node_modules` (especially on Windows). Don't change it. `apps/mobile/metro.config.js` makes Metro watch the workspace root to resolve `@pore/shared`.
 
-# web
-pnpm --filter web dev                        # next dev, http://localhost:3000
-pnpm --filter web lint
-pnpm --filter web build
+Mobile native builds use EAS dev clients (`apps/mobile/eas.json`); MLKit face detection requires a real iOS device (no arm64 simulator slice). Expo APIs changed at v56 — check https://docs.expo.dev/versions/v56.0.0/ before writing Expo code (see `apps/mobile/AGENTS.md`).
 
-# mobile (run from apps/mobile, or pnpm --filter @pore/mobile <script>)
-pnpm --filter @pore/mobile start             # expo start
-pnpm --filter @pore/mobile ios / android / web
-pnpm --filter @pore/mobile typecheck
-```
+## Core architecture
 
-Current baseline (keep it here): `pnpm test` → 6 files, 116 tests, all passing — `packages/shared`
-95 (`safety` 12, `vision` 21, `progress` 21, `schedule` 41) and `apps/web` 21 (`validateImages` 11,
-`rateLimit` 10). `pnpm typecheck` → clean in all three packages. `pnpm lint` → 0 errors,
-**0 warnings**: the rule now recognises the leading-underscore convention this codebase already
-used for deliberately-unused bindings, so the six long-standing warnings are gone and the script
-runs with `--max-warnings 0`. A lint step that cannot fail is decoration — keep it able to.
+### The plan pipeline (server-only, `apps/web/lib/pipeline.ts`)
 
-**CI runs all four on every pull request** (`.github/workflows/ci.yml`): typecheck, test, lint,
-build, cheap checks first so a failure reports in under a minute rather than after the Next.js
-build. It runs on Node 22 — Node 20 went end-of-life in April 2026, and a gate that validates a
-runtime nobody develops against is checking the wrong thing. It needs no `ANTHROPIC_API_KEY` — the
-pipeline builds its client inside a function and falls back to the mock. Note it is not a
-*required* check until branch protection is enabled on `main`; until then it reports rather than
-blocks.
+photos + intake → Claude vision call (structured `Assessment`, cosmetic-only, never diagnostic) → Claude routine call (draft `Routine`) → deterministic safety engine from `@pore/shared` → final routine + `SafetyAdjustment[]` audit trail. Structured outputs use `zodOutputFormat` against schemas in `apps/web/lib/schemas.ts`; prompts live in `apps/web/lib/prompts.ts`.
 
-`apps/web`'s tests cover only the two guards in front of the paid endpoint — `lib/validateImages.ts`
-and `lib/rateLimit.ts` — and that is the intended scope: the rest of that app is a marketing site.
-`apps/mobile` has no tests; the logic there worth testing belongs in `packages/shared`, which is why
-the pure parts of capture measurement live in `vision/` rather than beside the camera.
+### Fail-closed scan analysis — the non-negotiable invariant
 
-## Architecture: the plan-generation pipeline
+A scan result is never faked, cached, mocked, or substituted. Analysis accepts only a quality-validated three-pose session: the server re-hashes each image and matches it against the session's accepted captures (`apps/web/lib/scan-analysis-guard.ts`) before the model is invoked. If the vision service is unconfigured or unreachable, the client gets an explicit `unconfigured`/`error` outcome and the app shows a clearly-labeled answer-based fallback — never a fabricated scan. Mobile reaches the pipeline via `EXPO_PUBLIC_API_URL` (dev machine's LAN IP, e.g. `http://192.168.x.x:3000`); `ANALYSIS_CONFIGURED` in `apps/mobile/src/lib/api.ts` drives honest privacy copy. Full design: `docs/scan-quality-architecture.md`.
 
-`apps/web/lib/pipeline.ts` (`generatePlan`, server-only) is the core flow, hit via
-`POST /api/plan` (`apps/web/app/api/plan/route.ts`, Node runtime — the Anthropic SDK needs Node,
-not edge — with `maxDuration: 60` since it makes two model calls).
+**The guard is an integrity check, not an anti-abuse control — do not confuse the two.** Both the session and the images come from the same untrusted request, and `contentDigest` is the *only* value the server independently recomputes; perceptual hashes, yaw angles, timestamps and per-metric verdicts are all caller claims. It reliably rejects mismatched, reordered, reused, stale and near-duplicate captures, but a caller who reads the client source can assemble a self-consistent session over arbitrary images — pinned by `apps/web/lib/__tests__/scan-analysis-guard.test.ts`. Cost is therefore bounded by identity and quota, never by this module.
 
-**The route is a trust boundary and is explicit about it.** `validateImages` (`apps/web/lib/validateImages.ts`,
-extracted from the route so it can be tested) caps the request at 3 images and ~8MB decoded each,
-rejects `data:` URI prefixes, allowlists media types, and parses client-supplied `quality` through
-`PhotoQualitySchema` rather than trusting it. The size check reads the base64 string length *before*
-allocating anything — allocating first is how a size limit becomes the denial of service. Each rule
-returns its own message; "invalid request" tells a legitimate client nothing. Keep both properties.
+### Paid-path abuse controls (`/api/plan`)
 
-**It is also rate limited** (`apps/web/lib/rateLimit.ts`): 5 requests per IP per 10 minutes and 4
-concurrent generations, because the endpoint is public, unauthenticated, and makes two Opus calls per
-request. Be accurate about what that is — **the counters live in the process**, so on serverless each
-instance enforces its own limit and a cold start resets it, and `x-forwarded-for` is spoofable by
-anyone reaching the origin directly. It stops a retry loop or a careless scraper. It is **not a
-security control** and must not be described as one; real protection needs auth on the endpoint.
-When this takes real traffic, move the counters to Redis/KV — `check()` is pure apart from the store
-it is handed, so only the store changes. 500s return a generic message and log the detail: SDK errors
-carry key state and internal paths.
+One analysis is two Opus calls (~$0.30–1.70), so the endpoint is metered in layers and **every layer fails closed**. Order in `apps/web/app/api/plan/route.ts` is deliberate — cheapest rejection first, the model call last:
 
-One consequence the server cannot fix: `fetchPlan` collapses every outcome to `null`, so the mobile
-client cannot tell a 429 from anything else and `onboarding/intake.tsx` proceeds regardless. A
-throttled user is silently handed no plan. That was already true of every other failure; the limiter
-adds one more route to it. See `TODOS.md`.
+`Content-Length cap → verifyBearer (required) → in-process IP bucket → shape + per-image size validation → claim_analysis_slot → generatePlan → release_analysis_slot`
 
-1. **Vision assessment** — up to 3 photos + intake JSON go to Claude (`client.messages.parse` with a
-   Zod `output_config.format`, model `claude-opus-4-8`) using `ASSESSMENT_SYSTEM`, producing a
-   structured, explicitly *cosmetic-not-diagnostic* `Assessment`. Every image is preceded by a text
-   block naming its **angle, illuminant and measured quality score** — handing the model three
-   anonymous photos is how a finding ends up attached to the wrong side of a face. The prompt
-   requires `overallConfidence` to fall and `limitations` to be populated when photos arrive flagged
-   or an angle is missing.
-2. **Routine draft** — the assessment + intake go to Claude again with `ROUTINE_SYSTEM`, producing a
-   draft `Routine` (also schema-constrained), normalized by `normalizeDraft`.
-3. **Deterministic safety clamp** — `applySafetyRules` (`packages/shared/src/safety/engine.ts`)
-   post-processes the draft and guarantees the invariants no matter what the model returns. Applied
-   in this order (order matters — allergy/pregnancy removals happen before the caps count actives):
-   1. User-listed allergens are removed.
-   2. Pregnancy/breastfeeding strips `avoid` actives and flags `caution` ones.
-   3. Duplicate actives within one session are merged.
-   4. Retinoid frequency is clamped to a slow starting cadence (2x/week if sensitivity is high, else
-      3x/week), adding a `rampSchedule` if the draft had none.
-   5. At most one strong exfoliating active (acid / retinoid / benzoyl peroxide) per AM/PM session —
-      extras move to the other session if it's free, otherwise they're dropped. PM is capped before
-      AM.
-   6. Sensitivity caps the total distinct strong actives across the whole routine (low: 3, medium: 2,
-      high: 1) — lowest `activeRelevanceScore` against the user's goals is dropped first, harsher
-      first on ties.
-   7. Sunscreen is always present in the AM routine (appended if missing).
+- **Identity** — `verifyBearer` (`lib/supabase-auth.ts`) requires a real Supabase JWT. Mobile signs in *anonymously* at boot (`src/state/session.tsx`) so the pre-account onboarding funnel still works and every device is meterable; signing up converts that same `auth.uid()` in place via `updateUser`. An absent, invalid, or unverifiable token never reaches the model.
+- **Quota, replay and breaker** — one atomic `claim_analysis_slot` RPC (`supabase/migrations/20260817000008_analysis_quota.sql`) checks the breaker, claims a `(user_id, request_hash)` row for idempotency, and debits per-user and deployment-wide daily counters in a single transaction. Race safety comes from conditional upserts, so concurrent requests cannot each see the last slot. Tune caps or stop spend instantly by editing `service_flags` — no redeploy.
+- **`lib/rate-limit.ts` is layer 1 only.** It is in-process, so it resets on cold start and multiplies by instance count. Never treat it as the spend bound. Its key comes from `trustedClientIp`, which reads the *right-hand* end of `x-forwarded-for` — hop 0 is caller-writable text.
+- **Refunds** — an `AnalysisRequestError` is only ever raised before the Anthropic client is constructed, so it releases the slot as `refunded`; anything else may have been billed and keeps the debit.
 
-   Every adjustment is recorded as a `SafetyAdjustment` (`rule`, `action`, `active?`, `time?`,
-   `detail`) returned alongside the routine — this audit trail is what the UI shows the user as "why
-   we changed X", so `detail` strings are user-facing copy. When editing safety behavior, add/extend
-   cases in `packages/shared/src/safety/engine.test.ts` rather than only eyeballing output.
-4. When `ANTHROPIC_API_KEY` is unset, `generatePlan` skips both Claude calls entirely and uses a
-   deterministic mock (`apps/web/lib/mock.ts`) fed through the *same* safety engine, so the full flow
-   (including safety adjustments) works end-to-end without a key. The mock draft is deliberately
-   over-loaded (two acids at night, a daily retinoid, no SPF) so the engine has visible work to do,
-   and it mirrors the real pipeline's honesty rules — a missing angle or flagged shot costs
-   confidence there too. **Preserve this fallback when changing the pipeline.**
+When adding an expensive endpoint, reuse this spine. When adding a *free* one, still give it `trustedClientIp` + a bucket.
 
-The mobile app calls the same endpoint via `apps/mobile/src/lib/api.ts` (`fetchPlan`), pointed at
-`EXPO_PUBLIC_API_URL` (e.g. your dev machine's LAN IP). `fetchPlan` never throws; it returns a
-`PlanOutcome` — either the plan, or a `PlanError` carrying `offline | busy | rejected | unknown`
-and a `retryable` flag. That distinction exists because the only thing the person watching the
-spinner needs to know is whether trying again could work, and the route is built to answer it: on
-an upstream failure `/api/plan` maps to **503 when a retry might succeed and 500 when it will
-not**, and never returns the upstream error text (which can carry request ids and rate-limit
-detail).
+### Safety engine (`packages/shared/src/safety/engine.ts`)
 
-**There is deliberately no local fallback routine.** `today.tsx` resolves down two steps — the
-journal's persisted (adapted) routine, else the generated plan — and shows an empty state if it
-has neither. It used to have a third step that synthesised a hardcoded draft through
-`applySafetyRules`, and `/plan` invented three findings to go with it, so a failed or missing plan
-rendered as the user's own personalised routine and assessment. That turned every upstream failure
-into a silent one. A plan we did not build is not a plan we get to show; if you find yourself
-adding a fallback here, add an honest empty state instead.
+Deterministic CODE, not prompts — corrects whatever the LLM returns and records every change: sunscreen always in AM, pregnancy/allergy removals, retinoid frequency ramp, one strong irritant per session, sensitivity caps, cleanser/moisturizer baseline, no clinician-only actives. When touching routine output anywhere, the safety engine is the enforcement point; don't re-implement its rules in prompts or UI.
 
-The route also exports an `OPTIONS` handler. Mobile calls it cross-origin with
-`content-type: application/json`, which is not CORS-simple, so the browser preflights — without it
-the preflight 405s and the request never happens.
+### Scan quality system
 
-## Architecture: guided capture (the other half)
+`packages/shared/src/scan` is the single source of truth: capture state machine, independent quality checks, guidance prioritization, and three-pose session validation. Platform adapters feed it evidence:
+- `apps/web/lib/scan` — browser camera + MediaPipe face landmarker (self-hosted assets).
+- `apps/mobile/src/lib/scan` — native VisionCamera/MLKit live guidance plus `.web.ts` fallbacks; content digests bind captures to the analysis request.
 
-`packages/shared/src/vision/quality.ts` + `apps/mobile/src/lib/photoQuality.ts` +
-`apps/mobile/src/app/onboarding/photo.tsx`. The camera is treated as an instrument: every frame is
-measured before it is allowed to become an assessment, and what was measured travels with the photo
-so the model can lower its own confidence instead of guessing confidently.
+Preview-quality results are never copied onto the final frame — the final image is independently re-validated.
 
-- `scoreFrame(px, w, h, tone)` is pure maths over an RGBA buffer, returning a 0..1 composite,
-  `PhotoQualityFlag[]` (`dark` | `bright` | `blurry` | `uneven_light` | `color_cast` | `too_far`),
-  the raw metrics, and a gray-world `illuminant` estimate. `captureHint(flags)` returns **one**
-  fixable instruction, never a list.
-- **Exposure floors are per skin tone** (`TONE_PROFILE`), and skin detection has deliberately **no
-  luma gate**. A single fixed exposure floor tells darker-skinned users their perfectly good photo is
-  "too dark", over and over — that's the documented bias shape in this category, and
-  `quality.test.ts` locks in the regression (a correctly exposed deep-skin capture must not be
-  flagged `dark`). Do not add a luma gate or collapse the tone profile to one row.
-- Tone-independent thresholds live in one exported `CAPTURE_TUNING` object on purpose. They are
-  seeded from theory, **not** from this product's camera, and must be tuned on real device captures
-  across the full tone range before launch (see `TODOS.md`).
-- The mobile side crops a centre region at near-native resolution **before** downscaling to 256px.
-  Resizing a 12MP frame straight down destroys the high-frequency detail that sharpness is measured
-  from, and every photo would score blurry. Keep crop-then-resize.
-- Delivery photos are resized to 1280px / 0.75 JPEG: Claude downsamples vision inputs to a ~1568px
-  max edge, so anything larger is bytes burned for no resolution gain.
-- After two rejected attempts on the same angle there's an escape hatch that forces the photo
-  through — the flags still travel with it, so the model lowers its own confidence rather than the
-  app pretending the shot was fine.
+### Mobile app structure
 
-### On-device photo storage (`apps/mobile/src/lib/photos.ts`)
+expo-router file-based routing in `apps/mobile/src/app`: onboarding funnel (`onboarding/`), main tabs (`(tabs)/` — Home/Routine/Scan/Progress/Shelf), `scan-flow/`, `check-in/`, paywall. Pure logic lives in `src/lib` (plan, gate, shelf, skin-status, trends, results…); React context providers in `src/state`; screens stay thin.
 
-Photos live in the app's document directory and are **never uploaded to storage**; the base64 copy
-exists only for the duration of one `/api/plan` request. Layout:
+Premium gating: `src/lib/gate.ts` — one free analyzed scan; routine is shown free and the paywall is skippable.
 
-```
-<documents>/skin-photos/
-  sessions.json                 # { version: 1, sessions: [{ id, capturedAt }] }  — append-only index
-  <sessionId>/                  # sessionId = ISO timestamp with : and . replaced by -
-    front.jpg  left.jpg  right.jpg
-    manifest.json               # { version, id, capturedAt, photos: [{ angle, capturedAt, quality }] }
-```
+### Mobile visual system
 
-Each session gets its own folder so an earlier visit survives a later one — that history is what the
-comparison view and the ghost-alignment overlay need. **Do not change this schema without accounting
-for `compare.tsx`, `sessionPhotoUri`, `listSessions`, `storedPhotoCount` and `deleteStoredPhotos`.**
-All storage writes are best-effort: a failure degrades to "not kept for later", never to a failed
-capture.
+`@pore/shared` design tokens → `src/theme/ui.tsx` primitives → `src/theme/patterns.tsx` composed patterns → `src/components/FunnelScreen.tsx` for onboarding layout. The "calm premium" rules: serif (Fraunces) for brand moments only, pill shape for the single primary CTA only, at most ~2 white cards per screen — content sits on the cream canvas under `SectionHeader`s, notes are tinted `Callout`s. Build new screens from patterns/primitives rather than ad-hoc styles.
 
-## Architecture: the cadence engine
+## Docs worth reading before deeper changes
 
-`packages/shared/src/schedule/engine.ts` is the second deterministic layer, and it runs *after*
-the safety engine. The safety engine decides what belongs in a routine and how often; this one
-decides **which of those steps happen on a given day**, which is the question the user actually
-faces. It is the difference between shipping a report and shipping a routine, and — like the
-safety engine — it is code, not a prompt:
-
-- Each step's weekly frequency is spread evenly over a 7-day cycle (`spreadDays`), so a 3x/week
-  active never lands on consecutive days.
-- **At most one strong active per calendar day.** The safety engine caps per *session*; AM acid
-  plus PM retinoid still passes that cap and still over-exfoliates. Conflicts are resolved by
-  walking the active to the next free day, or dropping it for the cycle if there is none.
-- Strong actives **ramp** from a single weekly use to their target frequency over `RAMP_WEEKS`
-  (6). Gentle steps and SPF run at full frequency from day one.
-- A week only advances the ramp if the user reported nothing worse than `calm` during it. A week
-  with no check-ins at all counts as calm — the product asks for feedback, it doesn't punish
-  silence.
-- A `stinging` report **deloads** the routine for 3 days (two `tight` reports inside 5 days for 2
-  days): strong actives are pulled, barrier steps stay.
-
-Every departure from the nominal plan is a `ScheduleNote` with user-facing copy, the same audit
-contract as `SafetyAdjustment` — so `/today` can always say *why* tonight looks like this. A
-session that renames itself (a "Recovery night") must always carry a note explaining it; a
-headline the user can't account for is worse than no headline. Extend
-`packages/shared/src/schedule/engine.test.ts` when changing any of this.
-
-State lives in two on-device JSON files, same shape and same promise — synchronous reads,
-best-effort writes, nothing uploaded, both disclosed in the privacy content
-(`packages/shared/src/legal/content.ts`) and both erasable from `/plan`, which must keep offering
-that:
-
-- `apps/mobile/src/lib/journal.ts` — the routine start date, per-session tick-offs, the one-tap
-  skin check-ins, the baseline/latest assessments and the adapted routine.
-- `apps/mobile/src/lib/profile.ts` — the intake answers and the generated plan.
-  **This one is load-bearing for safety.** Sensitivity, the pregnancy flag, declared allergies and
-  skin tone are collected once and needed on every launch after that; when they lived in React
-  state, a cold start silently re-ran the whole app against `buildIntake({})` defaults, so
-  `applySafetyRules` was doing exactly the right thing to the wrong answers and a pregnant user
-  could be shown a retinoid. `OnboardingProvider` hydrates from it synchronously before anything
-  renders. Base64 photo payloads are never written to it — they exist for one `/api/plan` request.
-
-`apps/mobile/src/lib/reminder.ts` owns the single local daily notification (one per day, hour
-chosen by the user, off switch on `/plan`). Its body deliberately never names tonight's active: a
-`DAILY` trigger fires unchanged, and a check-in can deload the routine and rename the session
-between scheduling and firing, so the banner could contradict the app. `feedback.ts` wraps
-`expo-haptics` for the tick/complete/select moments — best-effort, no-ops off-device.
-
-`apps/mobile/src/app/today.tsx` is the primary surface and shows **one session at a time**;
-`/plan` holds the full assessment and routine as a reference document. Keep it that way — the
-whole point is that the user makes no decisions except the single "how does your skin feel?" tap.
-
-The week strip is the navigation: tapping a day shows it, tapping the day already open flips
-morning/evening. **Only today can be written to.** Journal entries are keyed by calendar date and
-both `adherenceRate` and `rampWeekFor` read back from them, so ticking a future day off would
-advance the ramp on a claim that had not happened. Four things prevent it — `onToggle`/`onFeel`
-return early unless the viewed day is today, the step rows are `disabled`, the check-in card is
-not rendered, and both writes target today's date rather than the viewed one. Preserve all four
-if you touch that screen; any one of them alone is a guard someone can refactor away.
-
-## Architecture: the progress engine
-
-`packages/shared/src/progress/engine.ts` is the third deterministic layer, and it answers the
-question that decides retention: **is any of this working?**
-
-The load-bearing decision is what it does *not* do. **Never show a model the before and after and
-ask whether the skin improved.** A model handed a before-and-after will always find a story, and a
-skincare app that confabulates progress is worse than one that says nothing. Instead each capture
-session gets its own blind `Assessment` from the ordinary `/api/plan` call — which has no idea a
-previous session exists — and `compareAssessments` subtracts the two in code. Preserve that
-blindness; it is the whole credibility of the feature.
-
-- **Comparability gate.** A photo only counts if the capture gate passed it *and* its illuminant
-  came back `screen_flash`. Ambient light is not repeatable, so an ambient set can be displayed but
-  never subtracted. With no measurable angle in common the engine reports nothing and says why. The
-  refusal is the feature — this is why capture was built as an instrument.
-
-  **That label is measured, not declared** (`classifyIlluminant` in `vision/quality.ts`). Capture
-  takes an ambient reference frame before applying any of its own light and compares mean luma; the
-  label says whether our light actually dominated, not whether we asked for it. Those come apart in
-  daylight, where a screen flash contributes nothing measurable. It used to be a compile-time
-  constant that this gate trusted completely — do not reintroduce anything that sets the illuminant
-  without measuring it, and keep the bias toward `ambient`: a wrong `ambient` costs a comparison, a
-  wrong `screen_flash` invents one.
-- `AppearanceLevel` is ordinal, so bands subtract. A concern either assessment was unsure about
-  (confidence < 0.6) is returned as `not_comparable`, never folded into the result.
-- `adaptRoutine` turns the measurement into a routine change, and **always returns through
-  `applySafetyRules`** (see `finish()` — every path goes through it). Adaptation proposes, the
-  safety engine disposes, exactly like the LLM. It cannot raise a frequency past a cap or survive
-  a pregnancy filter.
-- Ordering is the safety argument: **worsening acts first and only ever reduces**; escalation sits
-  behind two gates (`ESCALATE_AFTER_WEEKS`, and an adherence floor). "It isn't working" usually
-  means "it isn't being done", and answering that with a stronger acid is how people damage their
-  barrier. Improvement holds steady — adding more to a working routine is how progress gets undone.
-
-`adaptRoutine` is a *proposal against a routine*, so running it on its own output steps the same
-active up twice. It runs **once**, when a measurement lands (`runReassessment` in `compare.tsx`),
-and the result is persisted via `saveAdaptation`. Never call it during render.
-
-The baseline is recorded at signup (`onboarding/intake.tsx`) and never replaced — a moving zero
-would let slow drift vanish. `/compare` is the verdict surface and the one place the app uses a
-dark surface: measured concerns sit on the deep-green card, and anything the engine declined to
-call is listed separately below so a refusal can never be skimmed as a result.
-
-## Mobile app
-
-Expo Router, file-based under `apps/mobile/src/app`. `@/*` maps to `src/*`, `@/assets/*` to
-`assets/*`.
-
-```
-index.tsx              splash animation -> landing -> sign-up / sign-in
-(auth)/sign-up|sign-in  STUB: no backend. Any valid-looking input routes on. Real auth is a later increment.
-onboarding/age         age gate; <16 blocked, <=17 detours through consent
-onboarding/consent     parental-consent email capture (records the address; does not yet verify)
-onboarding/photo       guided 3-angle capture (the big one — ~420 lines, single screen, shared camera mount)
-onboarding/intake      questionnaire; calls fetchPlan at the end, records the progress baseline
-today.tsx              THE primary surface: one session at a time, from planDay. One check-in tap.
-                       The week strip navigates days; only today is writable (see above).
-plan.tsx               the reference document — full assessment, routine, safety adjustments, privacy rows
-compare.tsx            the verdict — compareAssessments on two blind assessments, or an honest refusal
-legal/privacy|terms    render the shared LegalDocument
-```
-
-Flow ordering is **photo-first**: capture comes before the questionnaire (it's the moment someone
-decides the product is real), but plan generation waits until the end of intake so the assessment
-runs on real answers rather than defaults. Skin tone is asked during capture, where it visibly
-calibrates the camera, not as one more anonymous questionnaire step.
-
-- **Styling: no NativeWind.** Despite the name, mobile uses React Native `StyleSheet` plus the small
-  UI kit in `apps/mobile/src/theme/ui.tsx` (`AppText`, `Screen`, `Card`, `PrimaryButton`,
-  `GhostButton`, `Chip`, `ProgressDots`, `TextField`, `Divider`, `Disclosure`). `apps/mobile/src/theme/index.ts`
-  re-exports the shared tokens alongside it, so `import { AppText, colors, spacing } from "@/theme"`
-  is the one import for both. `src/global.css` is a leftover CSS-variable file, not a Tailwind entry.
-- **Fonts**: React Native can't synthesize weights from one custom family, so `theme/fonts.ts` loads
-  8 weight-specific `@expo-google-fonts` faces (deep imports, so Metro bundles only those) and
-  `resolveFontFamily(family, weight)` picks the right face. The root layout holds the native splash
-  up until fonts are ready.
-- **State**: `src/state/onboarding.tsx` is a React context (`OnboardingProvider` / `useOnboarding`)
-  carrying `Partial<IntakeResponse>` + `parentEmail` + `photos` + the generated `plan`. It is
-  **not** in-memory only — it hydrates from `src/lib/profile.ts` synchronously on mount and writes
-  back on every `update`. See the cadence-engine section above for why that is a safety property
-  and not a convenience; do not "simplify" it back to `useState({})`.
-- **Durable on-device state is three stores, all plain JSON in the app's document directory, all
-  best-effort on write, and none ever uploaded**: `src/lib/photos.ts` (capture sessions, above),
-  `src/lib/journal.ts` (`journal.json` — routine start date, per-session tick-offs, skin check-ins,
-  stored assessments and the persisted adaptation) and `src/lib/profile.ts` (`profile.json` — the
-  intake answers and the generated plan). The journal is what makes the cadence engine reactive
-  rather than static; the profile is what keeps the safety engine running against real answers. All
-  three are disclosed in the privacy content and all three must keep offering erasure —
-  `deleteJournal()`, `deleteStoredPhotos()` and `deleteProfile()`, surfaced on `/plan`.
-- `src/lib/intake.ts` (`buildIntake`) fills an `IntakeResponse` from partial onboarding answers with
-  sensible defaults, including defaulting `darkMarkProne` from skin tone rather than assuming it of
-  everyone.
-- `app.json` config worth knowing: `expo-updates` is enabled with a fingerprint runtime version (JS
-  changes can ship without a store review), the camera permission string is user-facing copy, and the
-  app is `userInterfaceStyle: "light"` only.
-
-## Web app
-
-Next.js App Router with three route groups:
-
-- `(site)` — marketing: home, features, pricing, blog (+ `[slug]`), contact, privacy, terms.
-- `(auth)` — login / signup. **Also stubs**: they show a "launching soon, waitlist members first"
-  notice and open the waitlist. Minimal chrome (logo + disclaimer + legal links).
-- `api/plan` — the pipeline endpoint above.
-- `waitlist/confirmed` — the post-submit landing page.
-
-Content is authored as **typed data, not MDX/CMS**: `lib/blog.ts` (articles as `Block[]`, rendered
-by `components/blog/RichText.tsx`), `lib/updates.ts` (the "built in public" feed), `lib/pricing.ts`,
-`lib/nav.ts`. This keeps things reliable on Next 16 / Turbopack and maps trivially to a CMS later.
-
-Waitlist is a **Tally** popup: `lib/tally.ts` exposes `openWaitlist()` + the form id; the widget
-script is loaded once in `app/layout.tsx`, and the post-submit redirect to `/waitlist/confirmed` is
-configured in the Tally dashboard, not in code. There is no waitlist API route in this repo.
-
-## Conventions
-
-- **Structured LLM output** is enforced with Zod schemas via the Anthropic SDK's
-  `zodOutputFormat` / `messages.parse` helper, never manual JSON parsing — see `apps/web/lib/schemas.ts`.
-  `thinking` is intentionally omitted (see the comment in `pipeline.ts`): `output_config.format`
-  already constrains the response to schema-valid JSON, which is the most reliable path for the parse
-  helper. The enum members in `schemas.ts` mirror `@pore/shared/types` by hand — **keep them in
-  sync** when you add an active, category, concern or flag.
-- **Design tokens live only in `packages/shared/src/design/tokens.ts`.** Never hardcode a hex or size
-  anywhere else. Mobile imports them directly through `@/theme`. Web is the exception to know about:
-  `apps/web/app/globals.css` restates the same values in a Tailwind v4 `@theme` block, so a token
-  change means editing **both files**. `tailwindPreset` (`design/tailwind-preset.ts`) is exported but
-  imported by nothing, and it is v3-shaped while web runs Tailwind v4 — so editing it changes neither
-  client today. Whether it is groundwork for a future setup or simply dead is not recorded anywhere:
-  don't delete it assuming it's dead, and don't expect an edit to it to take effect.
-- **Legal copy is legal text.** `packages/shared/src/legal/content.ts` reproduces the pre-launch
-  wording verbatim; sentences marked "Disclosure" state facts about how the deployed site actually
-  behaves, verified against the code. Restructure freely, **reword never**, and bump
-  `LEGAL_LAST_UPDATED` whenever any string changes. If the data flow changes, the text must change
-  with it — that includes anything new written to the device (the journal disclosure exists because
-  `journal.ts` does), analytics, a second form provider, or a real waitlist endpoint.
-- `packages/shared` type modules (`types/*.ts`) export types only (`export type *` from the barrel).
-  Keep new domain types type-only unless they need runtime values; `safety/`, `vision/`, `design/`
-  and `legal/` are where runtime values belong.
-- `tsconfig.base.json` is strict and then some: `noUncheckedIndexedAccess`, `noUnusedLocals`,
-  `noUnusedParameters`, `noFallthroughCasesInSwitch`, `isolatedModules`. Expect `!` or explicit
-  guards on array indexing in the shared package. Mobile and web extend their own bases
-  (`expo/tsconfig.base` and Next's), so shared code is the strictest of the three.
-- **Env config**: `apps/web/.env.example` documents `ANTHROPIC_API_KEY` — leave it unset locally to
-  exercise the mock pipeline path instead of burning API calls. Mobile reads `EXPO_PUBLIC_API_URL`.
-- **Non-diagnostic language is a product invariant, not a style preference.** `AppearanceLevel` tops
-  out at `"noticeable"`, concern keys are phrased cosmetically (`acne_like_breakouts`,
-  `dark_spot_appearance`), `MEDICAL_DISCLAIMER` ships with every assessment, and
-  `escalation.recommendProfessional` is the escape hatch. Don't introduce clinical severity words or
-  condition names in copy, prompts, types, or test fixtures.
+- `docs/scan-quality-architecture.md` — scan invariants and module ownership.
+- `apps/mobile/docs/` — native scan guidance, scan analysis wiring, QA protocol, product search.

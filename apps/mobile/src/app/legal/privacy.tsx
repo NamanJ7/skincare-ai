@@ -1,7 +1,7 @@
-import { PRIVACY_POLICY } from "@pore/shared";
+import { PRIVACY_NOTICE } from "@pore/shared/legal";
 
-import { LegalScreen } from "@/components/legal/LegalScreen";
+import { LegalDocumentScreen } from "@/components/LegalDocumentScreen";
 
-export default function PrivacyPolicyRoute() {
-  return <LegalScreen doc={PRIVACY_POLICY} />;
+export default function PrivacyNoticeScreen() {
+  return <LegalDocumentScreen document={PRIVACY_NOTICE} />;
 }

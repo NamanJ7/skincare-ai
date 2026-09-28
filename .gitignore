@@ -15,10 +15,17 @@ out/
 # expo / react-native
 .expo/
 .expo-shared/
+.expo-mobile-web/
 apps/mobile/ios/
 apps/mobile/android/
+apps/mobile/.expo-live-preview/
+apps/mobile/dist-web-preview/
 *.orig.*
 web-build/
+
+# local mobile preview captures
+/ios-app-*.png
+/pore-phone-*.png
 
 # env / secrets
 .env

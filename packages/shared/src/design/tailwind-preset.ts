@@ -4,7 +4,7 @@
  * map to the exact token values. Web (Tailwind v4) references the same hexes
  * from ./tokens when its config is wired up.
  */
-import { colors, fontFamily, radius, spacing } from "./tokens";
+import { colors, fontFamily, motion, radius, spacing } from "./tokens";
 
 export const tailwindPreset = {
   theme: {
@@ -28,6 +28,12 @@ export const tailwindPreset = {
         improving: colors.improving,
         caution: colors.caution,
         escalate: colors.escalate,
+        "guide-positive": colors.guidePositive,
+        "camera-surface": colors.cameraSurface,
+        "camera-scrim": colors.cameraScrim,
+        "guide-active": colors.guideActive,
+        "guide-idle": colors.guideIdle,
+        "surface-fade": colors.surfaceFade,
       },
       borderRadius: {
         sm: `${radius.sm}px`,
@@ -49,6 +55,13 @@ export const tailwindPreset = {
       fontFamily: {
         sans: [fontFamily.body, "system-ui", "sans-serif"],
         display: [fontFamily.display, "Georgia", "serif"],
+      },
+      transitionDuration: {
+        fast: `${motion.duration.fast}ms`,
+        base: `${motion.duration.base}ms`,
+        gentle: `${motion.duration.gentle}ms`,
+        celebrate: `${motion.duration.celebrate}ms`,
+        draw: `${motion.duration.draw}ms`,
       },
     },
   },

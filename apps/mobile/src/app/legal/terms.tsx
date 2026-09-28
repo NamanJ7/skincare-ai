@@ -1,7 +1,7 @@
-import { TERMS_OF_USE } from "@pore/shared";
+import { TERMS_OF_USE } from "@pore/shared/legal";
 
-import { LegalScreen } from "@/components/legal/LegalScreen";
+import { LegalDocumentScreen } from "@/components/LegalDocumentScreen";
 
-export default function TermsOfUseRoute() {
-  return <LegalScreen doc={TERMS_OF_USE} />;
+export default function TermsScreen() {
+  return <LegalDocumentScreen document={TERMS_OF_USE} />;
 }

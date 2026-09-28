@@ -3,7 +3,6 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { Logo } from "./Logo";
-import { Button } from "../ui/Button";
 import { WaitlistButton } from "../ui/WaitlistButton";
 import { NAV_LINKS } from "@/lib/nav";
 
@@ -51,9 +50,6 @@ export function SiteHeader() {
           </nav>
 
           <div className="hidden items-center gap-2 lg:flex">
-            <Button href="/login" variant="ghost" size="md">
-              Log in
-            </Button>
             <WaitlistButton size="md" />
           </div>
 
@@ -92,9 +88,6 @@ export function SiteHeader() {
             ))}
           </nav>
           <div className="mt-3 flex flex-col gap-2 border-t border-hairline pt-4">
-            <Button href="/login" variant="secondary" size="lg">
-              Log in
-            </Button>
             <WaitlistButton size="lg" className="w-full" />
           </div>
         </div>
