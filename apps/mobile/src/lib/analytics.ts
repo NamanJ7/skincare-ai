@@ -27,6 +27,7 @@ export type AnalyticsEvent =
   | "routine_adjustment_shown"
   | "routine_adjustment_accepted"
   | "routine_adjustment_dismissed"
+  | "routine_adjustment_undone"
   | "scan_started"
   | "scan_guidance_ready"
   | "scan_capture_verified"

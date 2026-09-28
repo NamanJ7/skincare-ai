@@ -67,5 +67,5 @@ For each item, test on an iPhone and one Android device:
 - Date attribution is calendar midnight app-wide (`todayKey`). A PM routine
   *started* after midnight is recorded on the new day. Only a session already
   open crosses midnight on its original date.
-- Coaching Apply/Undo (Session 3) is not in this branch yet. Its persistence and
-  deletion hardening lands with it.
+- Coaching Apply/Undo (Session 3, `docs/coaching-apply-undo.md`) persists
+  through the same awaited write path, and its history is erased with the log.

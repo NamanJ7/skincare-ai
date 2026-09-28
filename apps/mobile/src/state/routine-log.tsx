@@ -20,7 +20,9 @@ import {
   toggleStep,
   withRoutineReaction,
   withRoutineReactionDismissed,
-  withRoutineRevision,
+  canUndoRevision,
+  withAppliedRevision,
+  withUndoneRevision,
   withStepOwnership,
   type DateKey,
   type DayLog,
@@ -84,7 +86,13 @@ interface RoutineLogContextValue {
     today: DateKey,
     lookbackDays: number,
   ) => LatestRoutineReaction | undefined;
-  acceptRevision: (revision: RoutineRevision, revisedRoutine?: Routine) => void;
+  /** Resolves false when the change could not be saved; nothing is applied then. */
+  acceptRevision: (
+    revision: RoutineRevision,
+    revisedRoutine?: Routine,
+  ) => Promise<boolean>;
+  undoRevision: () => Promise<boolean>;
+  canUndoRevision: boolean;
   markStepNotOwned: (stepKey: string) => void;
   clearStepOwnership: (stepKey: string) => void;
   dayLog: (date: DateKey) => DayLog | undefined;
@@ -223,11 +231,15 @@ export function RoutineLogProvider({
         ),
       latestRoutineReaction: (date, lookbackDays) =>
         findLatestRoutineReaction(log, date, lookbackDays),
-      acceptRevision: (revision, revisedRoutine) => {
-        void commit((current) =>
-          withRoutineRevision(current, revision, revisedRoutine),
-        );
-      },
+      acceptRevision: (revision, revisedRoutine) =>
+        commit((current) =>
+          withAppliedRevision(current, revision, revisedRoutine),
+        ),
+      undoRevision: () =>
+        commit((current) =>
+          withUndoneRevision(current, new Date().toISOString()),
+        ),
+      canUndoRevision: canUndoRevision(log, today),
       markStepNotOwned: (key) => {
         void commit((current) => withStepOwnership(current, key, "not_owned"));
       },

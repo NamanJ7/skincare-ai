@@ -1,8 +1,8 @@
 /** One calm, dismissible suggestion driven by recent routine behavior. */
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { router } from "expo-router";
-import { useEffect, useRef } from "react";
-import { Pressable, View } from "react-native";
+import { useEffect, useRef, useState } from "react";
+import { AccessibilityInfo, Pressable, View } from "react-native";
 
 import { track } from "@/lib/analytics";
 import type { RoutineAdjustment } from "@/lib/adjustments";
@@ -31,7 +31,13 @@ export function AdjustmentCard({
     track("routine_adjustment_shown", { kind: adjustment.kind });
   }, [adjustment.kind]);
 
-  const accept = () => {
+  const [applying, setApplying] = useState(false);
+  const [saveError, setSaveError] = useState(false);
+
+  const accept = async () => {
+    if (applying) return;
+    setApplying(true);
+    setSaveError(false);
     const revision = {
       kind: adjustment.kind,
       acceptedAt: new Date().toISOString(),
@@ -40,7 +46,17 @@ export function AdjustmentCard({
       reason: adjustment.body,
     };
     const revisedRoutine = routineFor(data, revision, today).routine;
-    acceptRevision(revision, revisedRoutine);
+    // Wait for the write: navigating to a routine that was never saved would
+    // show a change the next launch silently reverts.
+    const persisted = await acceptRevision(revision, revisedRoutine);
+    setApplying(false);
+    if (!persisted) {
+      setSaveError(true);
+      AccessibilityInfo.announceForAccessibility(
+        "Pore couldn’t save this change. Try again.",
+      );
+      return;
+    }
     // Accepted suggestions should not immediately reappear on Home.
     dismissAdjustment(adjustment.kind, today);
     track("routine_adjustment_accepted", { kind: adjustment.kind });
@@ -62,8 +78,21 @@ export function AdjustmentCard({
         <AppText variant="body" color={colors.textPrimary}>
           {adjustment.body}
         </AppText>
+        {saveError ? (
+          <AppText
+            variant="caption"
+            color={colors.textPrimary}
+            accessibilityRole="alert"
+            accessibilityLiveRegion="assertive"
+          >
+            Pore couldn’t save this change. Try again.
+          </AppText>
+        ) : null}
         {adjustment.cta && adjustment.href ? (
-          <TextButton label={adjustment.cta} onPress={accept} />
+          <TextButton
+            label={applying ? "Saving…" : adjustment.cta}
+            onPress={() => void accept()}
+          />
         ) : null}
       </Callout>
       <Pressable

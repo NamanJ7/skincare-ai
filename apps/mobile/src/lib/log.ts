@@ -72,11 +72,36 @@ export interface RoutineRevision {
   reason: string;
 }
 
+/**
+ * What an applied coaching suggestion replaced, kept so it can be undone.
+ * One level only: applying a second suggestion replaces the snapshot.
+ */
+export interface RevisionUndo {
+  /** The revision in force before this one was applied (absent = none). */
+  previous?: RoutineRevision;
+  /** The effective date's day log before apply trimmed it to the new routine. */
+  date: DateKey;
+  day?: DayLog;
+  appliedAt: string;
+}
+
+/** One line of coaching history. Local only, erased with the rest of the log. */
+export interface CoachingEvent {
+  kind: RoutineRevisionKind;
+  date: DateKey;
+  appliedAt: string;
+  undoneAt?: string;
+}
+
+export const COACHING_HISTORY_LIMIT = 30;
+
 export type StepOwnership = "not_owned";
 
 export interface RoutineLog {
   days: Record<DateKey, DayLog>;
   revision?: RoutineRevision;
+  revisionUndo?: RevisionUndo;
+  coachingHistory?: CoachingEvent[];
   /** Stable routine step key -> explicit ownership answer. */
   stepOwnership?: Record<string, StepOwnership>;
   schedule?: RoutineSchedule;
@@ -251,6 +276,27 @@ export function normalizeLog(value: unknown): RoutineLog {
   if (stored.stepOwnership && typeof stored.stepOwnership === "object") {
     log.stepOwnership = stored.stepOwnership;
   }
+  const undo = stored.revisionUndo;
+  if (
+    undo &&
+    typeof undo === "object" &&
+    isDateKey(undo.date) &&
+    typeof undo.appliedAt === "string"
+  ) {
+    log.revisionUndo = undo;
+  }
+  if (Array.isArray(stored.coachingHistory)) {
+    const history = stored.coachingHistory.filter(
+      (event): event is CoachingEvent =>
+        !!event &&
+        typeof event === "object" &&
+        typeof event.kind === "string" &&
+        isDateKey(event.date) &&
+        typeof event.appliedAt === "string",
+    );
+    if (history.length > 0)
+      log.coachingHistory = history.slice(-COACHING_HISTORY_LIMIT);
+  }
   const schedule = normalizeSchedule(stored.schedule);
   if (schedule) log.schedule = schedule;
   const activeSession = normalizeActiveSession(stored.activeSession);
@@ -397,6 +443,90 @@ export function withRoutineRevision(
       },
     },
   };
+}
+
+/**
+ * Apply a coaching suggestion: the revision takes effect, the day log is
+ * reconciled to the lighter routine, and enough is kept to undo it exactly.
+ */
+export function withAppliedRevision(
+  log: RoutineLog,
+  revision: RoutineRevision,
+  revisedRoutine?: Routine,
+): RoutineLog {
+  const next = withRoutineRevision(log, revision, revisedRoutine);
+  const day = log.days[revision.effectiveDate];
+  return {
+    ...next,
+    revisionUndo: {
+      ...(log.revision ? { previous: log.revision } : {}),
+      date: revision.effectiveDate,
+      ...(day ? { day } : {}),
+      appliedAt: revision.acceptedAt,
+    },
+    coachingHistory: [
+      ...(log.coachingHistory ?? []),
+      {
+        kind: revision.kind,
+        date: revision.effectiveDate,
+        appliedAt: revision.acceptedAt,
+      },
+    ].slice(-COACHING_HISTORY_LIMIT),
+  };
+}
+
+/** Undo is offered only on the day the change took effect. */
+export function canUndoRevision(log: RoutineLog, today: DateKey): boolean {
+  return !!log.revisionUndo && !!log.revision && log.revisionUndo.date === today;
+}
+
+function mergePeriod(
+  before: PeriodLog | undefined,
+  after: PeriodLog | undefined,
+): PeriodLog | undefined {
+  if (!before) return after;
+  if (!after) return before;
+  const done = [...new Set([...before.done, ...after.done])];
+  const skipped = { ...(before.skipped ?? {}), ...(after.skipped ?? {}) };
+  for (const key of after.done) delete skipped[key];
+  return {
+    ...before,
+    ...after,
+    done,
+    total: before.total,
+    ...(before.scheduledStepKeys
+      ? { scheduledStepKeys: before.scheduledStepKeys }
+      : {}),
+    ...(Object.keys(skipped).length > 0 ? { skipped } : { skipped: undefined }),
+  };
+}
+
+/**
+ * Undo the last applied suggestion. The previous revision comes back, steps
+ * the lighter routine trimmed are restored, and anything recorded after apply
+ * is kept: undo never erases an outcome the user saved.
+ */
+export function withUndoneRevision(log: RoutineLog, undoneAt: string): RoutineLog {
+  const undo = log.revisionUndo;
+  if (!undo || !log.revision) return log;
+  const current = log.days[undo.date];
+  const am = mergePeriod(undo.day?.am, current?.am);
+  const pm = mergePeriod(undo.day?.pm, current?.pm);
+  const days = { ...log.days };
+  if (am || pm) days[undo.date] = { ...(am ? { am } : {}), ...(pm ? { pm } : {}) };
+  const history = [...(log.coachingHistory ?? [])];
+  for (let i = history.length - 1; i >= 0; i -= 1) {
+    const event = history[i];
+    if (event && event.appliedAt === undo.appliedAt && !event.undoneAt) {
+      history[i] = { ...event, undoneAt };
+      break;
+    }
+  }
+  const next: RoutineLog = { ...log, days, coachingHistory: history };
+  delete next.revisionUndo;
+  if (undo.previous) next.revision = undo.previous;
+  else delete next.revision;
+  return next;
 }
 
 export function withStepOwnership(

@@ -14,7 +14,8 @@ import { useRoutineLog } from "@/state/routine-log";
 /**
  * Applies a visible, persisted routine revision through the same safety-clamped
  * path used by behavioral suggestions. This is the single action behind
- * Minimum Mode and future user-requested one-day simplifications.
+ * Minimum Mode and future user-requested one-day simplifications. Resolves
+ * false when the change could not be saved, in which case nothing changed.
  */
 export function useAcceptRevision() {
   const { data } = useOnboarding();
@@ -33,7 +34,7 @@ export function useAcceptRevision() {
       reason: string;
       effectiveDate?: string;
       surface?: string;
-    }): RoutineRevision => {
+    }): Promise<boolean> => {
       const revision: RoutineRevision = {
         kind,
         acceptedAt: new Date().toISOString(),
@@ -42,9 +43,10 @@ export function useAcceptRevision() {
         reason,
       };
       const revisedRoutine = routineFor(data, revision, effectiveDate).routine;
-      acceptRevision(revision, revisedRoutine);
-      track("routine_adjustment_accepted", { kind, surface });
-      return revision;
+      return acceptRevision(revision, revisedRoutine).then((persisted) => {
+        if (persisted) track("routine_adjustment_accepted", { kind, surface });
+        return persisted;
+      });
     },
     [acceptRevision, data],
   );

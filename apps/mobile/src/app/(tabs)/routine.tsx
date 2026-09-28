@@ -2,7 +2,7 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { router, useLocalSearchParams } from "expo-router";
 import { useEffect, useMemo, useState } from "react";
-import { Pressable, StyleSheet, View } from "react-native";
+import { AccessibilityInfo, Pressable, StyleSheet, View } from "react-native";
 
 import type {
   ConcernKey,
@@ -79,8 +79,34 @@ export default function RoutineTab() {
   }>();
   const priority = isConcernKey(params.priority) ? params.priority : undefined;
   const { data } = useOnboarding();
-  const { toggle, dayLog, streak, log, markStepNotOwned, ensureSchedule } =
-    useRoutineLog();
+  const {
+    toggle,
+    dayLog,
+    streak,
+    log,
+    markStepNotOwned,
+    ensureSchedule,
+    undoRevision,
+    canUndoRevision,
+  } = useRoutineLog();
+  const [revisionSaveError, setRevisionSaveError] = useState(false);
+  const [revisionSaving, setRevisionSaving] = useState(false);
+
+  // Apply and Undo both wait for the write. A change the user saw but the
+  // device never stored would silently revert on the next launch.
+  const saveRevisionChange = async (change: () => Promise<boolean>) => {
+    if (revisionSaving) return;
+    setRevisionSaving(true);
+    setRevisionSaveError(false);
+    const persisted = await change();
+    setRevisionSaving(false);
+    if (!persisted) {
+      setRevisionSaveError(true);
+      AccessibilityInfo.announceForAccessibility(
+        "Pore couldn’t save this change. Try again.",
+      );
+    }
+  };
   const acceptRevision = useAcceptRevision();
 
   const defaultPeriod: RoutinePeriod = new Date().getHours() < 12 ? "am" : "pm";
@@ -233,6 +259,31 @@ export default function RoutineTab() {
               <AppText variant="caption" color={colors.textSecondary}>
                 Your saved routine is unchanged.
               </AppText>
+              {revision && canUndoRevision ? (
+                <TextButton
+                  label={revisionSaving ? "Saving…" : "Undo this change"}
+                  onPress={() => {
+                    void saveRevisionChange(async () => {
+                      const undone = await undoRevision();
+                      if (undone)
+                        track("routine_adjustment_undone", {
+                          kind: revision.kind,
+                        });
+                      return undone;
+                    });
+                  }}
+                />
+              ) : null}
+              {revisionSaveError ? (
+                <AppText
+                  variant="caption"
+                  color={colors.textPrimary}
+                  accessibilityRole="alert"
+                  accessibilityLiveRegion="assertive"
+                >
+                  Pore couldn’t save this change. Try again.
+                </AppText>
+              ) : null}
               {goodToKnow.map((note) => (
                 <AppText
                   key={note}
@@ -280,15 +331,17 @@ export default function RoutineTab() {
             ) : (
               <TextButton
                 label="Use today"
-                onPress={() =>
-                  acceptRevision({
-                    kind: "simplify_today",
-                    period,
-                    effectiveDate: today,
-                    reason:
-                      "Minimum Mode keeps today’s routine to the essentials.",
-                  })
-                }
+                onPress={() => {
+                  void saveRevisionChange(() =>
+                    acceptRevision({
+                      kind: "simplify_today",
+                      period,
+                      effectiveDate: today,
+                      reason:
+                        "Minimum Mode keeps today’s routine to the essentials.",
+                    }),
+                  );
+                }}
               />
             )}
           </View>
