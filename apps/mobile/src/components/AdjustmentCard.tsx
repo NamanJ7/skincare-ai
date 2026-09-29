@@ -97,14 +97,17 @@ export function AdjustmentCard({
       </Callout>
       <Pressable
         onPress={dismiss}
-        hitSlop={10}
         accessibilityRole="button"
         accessibilityLabel="Dismiss suggestion for today"
         style={{
           position: "absolute",
-          right: spacing.sm,
-          top: spacing.sm,
-          padding: spacing.xs,
+          right: 0,
+          top: 0,
+          // A real 44pt target, not hitSlop: the visible control is the target.
+          minWidth: 44,
+          minHeight: 44,
+          alignItems: "center",
+          justifyContent: "center",
         }}
       >
         <Ionicons name="close" size={18} color={colors.textSecondary} />

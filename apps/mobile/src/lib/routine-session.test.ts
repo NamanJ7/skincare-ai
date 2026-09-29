@@ -138,6 +138,48 @@ describe("guided routine session state", () => {
   });
 });
 
+describe("resume window across clock changes", () => {
+  // The window is elapsed time, not wall-clock time, so a DST jump or a
+  // timezone change neither shortens nor stretches it, and the session keeps
+  // the date it started on.
+  const session = (startedAt: string) =>
+    startRoutineSession(emptyLog(), {
+      id: "dst",
+      date: "2026-03-07",
+      period: "pm",
+      source: "reminder",
+      routineFingerprint: "routine-1",
+      stepKeys: ["cleanser:base"],
+      startedAt,
+    }).activeSession!;
+
+  it("gives a full six hours over a spring-forward night", () => {
+    // 23:30 EST on 2026-03-07; clocks jump 02:00 -> 03:00 overnight.
+    const started = session("2026-03-08T04:30:00.000Z");
+    expect(
+      routineSessionExpired(started, new Date("2026-03-08T10:30:00.000Z")),
+    ).toBe(false);
+    expect(
+      routineSessionExpired(started, new Date("2026-03-08T10:30:00.001Z")),
+    ).toBe(true);
+  });
+
+  it("keeps its original date when the device changes timezone", () => {
+    const started = session("2026-03-08T04:30:00.000Z");
+    expect(started.date).toBe("2026-03-07");
+    expect(
+      routineSessionEntry({
+        session: started,
+        requested: "pm",
+        explicit: true,
+        todayPeriod: undefined,
+        dueCount: 1,
+        now: new Date("2026-03-08T07:00:00.000Z"),
+      }),
+    ).toBe("resume");
+  });
+});
+
 describe("routineSessionEntry", () => {
   const live = () => started().activeSession!;
   const base = {

@@ -99,3 +99,45 @@ The run found two bugs, both fixed:
 This is a browser, not a phone. Notifications, haptics, VoiceOver/TalkBack,
 Dynamic Type, lock/unlock and a real process kill are still open in the manual
 matrix above.
+
+## Follow-up pass (2026-09-29)
+
+- **Tap targets and labels.** I measured every control on seven screens:
+  Home, Home with the Recovery suggestion card, the Routine tab, a guided step,
+  the skip sheet, the review screen, and completion with the reaction sheet.
+  All but one were at least 44pt and labelled. The card's dismiss control
+  (34×36, relying on `hitSlop`) is now a real 44×44 target.
+- **Colour.** Step status is always given as text next to an icon with its own
+  shape ("Done", "Skipped", "n completed · n skipped"). No meaning relies on
+  colour alone.
+- **Reading order.** Controls follow the visual order. The absolutely
+  positioned close and dismiss buttons come last, after the content they
+  belong to.
+- **Keyboard.** No text entry on these surfaces, so the keyboard cannot cover
+  a control.
+- **Recovery Mode applied from Home.** Tested with a seeded mild reaction after
+  a salicylic-acid routine: the suggestion shows, Apply saves and lands on the
+  Routine tab with Recovery on and Undo offered, and Undo clears it.
+- **Scheduled reminders after "Delete my data".** Deletion resets reminder
+  settings to opted out. `effectiveReminders` then returns nothing, and
+  `reconcileScheduled` cancels all four identifiers.
+- **Clock changes.** The resume window is elapsed time, so daylight saving and
+  timezone changes do not move it, and the session keeps its original date.
+  `routine-session.test.ts` covers both.
+- **Duplicate notification taps after a restart.** Deliberately not persisted.
+  The OS response is cleared once handled. If the app dies before the clear
+  lands, the replayed tap resolves through `routineSessionEntry` to resume or
+  completed, so it cannot create a duplicate session or record anything.
+- **Performance.** Reviewed; no change. The session screen's per-render work is
+  small pure functions over a handful of steps. The only new re-render is one
+  per return to the foreground.
+
+**Needs a real device (cannot be done from a cloud container):**
+
+- notification taps with the app in each state;
+- lock/unlock and incoming calls;
+- a true process kill and relaunch after an OTA update;
+- haptics feel;
+- VoiceOver and TalkBack;
+- largest Dynamic Type;
+- dark mode, increased contrast and Reduced Motion on the OS.
