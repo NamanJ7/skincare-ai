@@ -4,6 +4,8 @@ import type { Routine, RoutineStep } from "@pore/shared";
 import {
   isStrongActiveStep,
   missedPeriodCount,
+  repeatedNotNowStep,
+  lowCompletionHistory,
   routineAdjustment,
   type AdjustmentKind,
   type RoutineAdjustmentContext,
@@ -30,7 +32,7 @@ function step(active?: RoutineStep["active"]): RoutineStep {
 }
 
 const STRONG: Routine = { am: [step()], pm: [step("retinoid")], notes: [] };
-const GENTLE: Routine = { am: [step()], pm: [step("niacinamide")], notes: [] };
+const GENTLE: Routine = { am: [step()], pm: [step(), step("niacinamide")], notes: [] };
 
 function checkIn(signs: IrritationSign[], date = TODAY): CheckIn {
   return {
@@ -204,6 +206,39 @@ describe("routineAdjustment priority", () => {
 });
 
 describe("simplify_today", () => {
+  it("recognizes two not-now skips across three scheduled occurrences", () => {
+    const log = emptyLog();
+    for (const [date, skipped] of [["2026-07-07", false], ["2026-07-08", true], ["2026-07-09", true]] as const) {
+      log.days[date] = { pm: {
+        done: skipped ? [] : ["cleanser:base"], total: 1,
+        scheduledStepKeys: ["cleanser:base"],
+        ...(skipped ? { skipped: { "cleanser:base": { reason: "not_now" as const, recordedAt: `${date}T20:00:00Z` } } } : {}),
+      } };
+    }
+    expect(repeatedNotNowStep(log, TODAY, "pm", GENTLE)?.category).toBe("cleanser");
+    expect(routineAdjustment(context({ log, routine: GENTLE, period: "pm" }))?.kind).toBe("simplify_today");
+  });
+
+  it("does not treat ran-out products as adherence skips", () => {
+    const log = emptyLog();
+    for (const date of ["2026-07-07", "2026-07-08", "2026-07-09"]) {
+      log.days[date] = { pm: {
+        done: [], total: 1, scheduledStepKeys: ["cleanser:base"],
+        skipped: { "cleanser:base": { reason: "ran_out", recordedAt: `${date}T20:00:00Z` } },
+      } };
+    }
+    expect(repeatedNotNowStep(log, TODAY, "pm", GENTLE)).toBeUndefined();
+    expect(routineAdjustment(context({ log, routine: GENTLE, period: "pm" }))?.kind).toBe("product_maintenance");
+  });
+
+  it("requires three actually logged low-completion periods", () => {
+    const log = emptyLog();
+    for (const date of ["2026-07-07", "2026-07-08", "2026-07-09"]) {
+      log.days[date] = { pm: { done: [], total: 3, scheduledStepKeys: ["a", "b", "c"] } };
+    }
+    expect(lowCompletionHistory(log, TODAY)).toBe(true);
+    expect(lowCompletionHistory(emptyLog(), TODAY)).toBe(false);
+  });
   it("triggers at exactly two missed closed-day periods", () => {
     const log = completed(
       completed(emptyLog(), "2026-07-09", "am"),

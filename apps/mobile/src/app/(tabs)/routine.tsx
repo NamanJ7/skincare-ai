@@ -261,6 +261,7 @@ export default function RoutineTab() {
               </AppText>
               {revision && canUndoRevision ? (
                 <TextButton
+                  testID="daily-loop-undo-adjustment"
                   label={revisionSaving ? "Saving…" : "Undo this change"}
                   onPress={() => {
                     void saveRevisionChange(async () => {

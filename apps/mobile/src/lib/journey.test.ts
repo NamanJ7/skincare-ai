@@ -175,6 +175,20 @@ describe("deriveJourney", () => {
     });
   });
 
+  it("keeps Apply and Undo behavior events visible after the active revision is gone", () => {
+    const log = emptyLog();
+    log.coachingHistory = [{
+      kind: "simplify_today",
+      date: "2026-07-12",
+      appliedAt: "2026-07-12T09:00:00.000Z",
+      undoneAt: "2026-07-12T10:00:00.000Z",
+    }];
+    const events = derive({ log }).events;
+    expect(events.filter((event) => event.kind === "routine_revision")).toHaveLength(1);
+    expect(events.filter((event) => event.kind === "routine_undo")).toHaveLength(1);
+    expect(events.find((event) => event.kind === "routine_undo")?.lane).toBe("behavior");
+  });
+
   it("uses stable same-day ordering across event sources", () => {
     const log = completeDays("2026-07-12");
     log.revision = {

@@ -41,6 +41,7 @@ const EVENT_ICONS: Record<JourneyEventKind, keyof typeof Ionicons.glyphMap> = {
   scan: "camera-outline",
   check_in: "chatbubble-ellipses-outline",
   routine_revision: "options-outline",
+  routine_undo: "arrow-undo-outline",
   milestone: "checkmark",
 };
 

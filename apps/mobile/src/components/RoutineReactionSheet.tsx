@@ -135,6 +135,7 @@ export function RoutineReactionSheet({
             {REACTIONS.map((item) => (
               <Pressable
                 key={item.kind}
+                testID={`daily-loop-reaction-${item.kind}`}
                 accessibilityRole="button"
                 accessibilityLabel={item.label}
                 disabled={saving}

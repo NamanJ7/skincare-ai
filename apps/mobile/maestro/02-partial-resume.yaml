@@ -1,0 +1,33 @@
+appId: com.pore.mobile
+---
+- openLink: pore://internal/e2e-fixtures
+- tapOn:
+    id: e2e-fixture-mapped-products
+- stopApp
+- launchApp
+- tapOn:
+    id: daily-loop-start
+- tapOn:
+    id: daily-loop-done
+- pressKey: Home
+- killApp
+- launchApp:
+    stopApp: false
+- assertVisible: Resume routine
+- tapOn:
+    id: daily-loop-start
+- tapOn:
+    id: daily-loop-skip
+- tapOn:
+    id: daily-loop-skip-not_now
+- repeat:
+    times: 10
+    while:
+      visible:
+        id: daily-loop-done
+    commands:
+      - tapOn:
+          id: daily-loop-done
+- tapOn:
+    id: daily-loop-finish
+- assertVisible: "Routine saved"

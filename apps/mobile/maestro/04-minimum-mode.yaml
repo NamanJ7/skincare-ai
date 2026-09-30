@@ -1,0 +1,14 @@
+appId: com.pore.mobile
+---
+- openLink: pore://internal/e2e-fixtures
+- tapOn:
+    id: e2e-fixture-repeated-skips
+- stopApp
+- launchApp
+- assertVisible: "Keep your routine easier to finish"
+- tapOn:
+    id: daily-loop-apply-adjustment
+- assertVisible: "Minimum Mode is on"
+- tapOn:
+    id: daily-loop-undo-adjustment
+- assertNotVisible: "Minimum Mode is on"

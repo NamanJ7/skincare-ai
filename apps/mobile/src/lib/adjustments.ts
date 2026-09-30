@@ -2,10 +2,12 @@
 import { ACTIVES, type Routine, type RoutineStep } from "@pore/shared";
 
 import { daysBetween, hasRedFlags, type CheckIn } from "./check-in";
+import { stepLabel } from "./labels";
 import {
   completedDayCount,
   consistency,
   periodComplete,
+  routineStepInstances,
   shiftKey,
   type DateKey,
   type LatestRoutineReaction,
@@ -14,7 +16,7 @@ import {
   type RoutineRevisionKind,
 } from "./log";
 
-export type AdjustmentKind = RoutineRevisionKind;
+export type AdjustmentKind = RoutineRevisionKind | "product_maintenance";
 
 export interface RoutineAdjustment {
   kind: AdjustmentKind;
@@ -53,6 +55,53 @@ export function missedPeriodCount(log: RoutineLog, today: DateKey): number {
     if (!periodComplete(day?.pm)) missed += 1;
   }
   return missed;
+}
+
+/** Count a step's last three *scheduled* occurrences, not three calendar days. */
+export function repeatedSkipStep(
+  log: RoutineLog,
+  today: DateKey,
+  period: RoutinePeriod,
+  routine: Routine,
+  reason: "not_now" | "ran_out",
+): RoutineStep | undefined {
+  for (const { key } of routineStepInstances(routine[period])) {
+    let scheduled = 0;
+    let skipped = 0;
+    for (let offset = 1; offset <= 21 && scheduled < 3; offset += 1) {
+      const entry = log.days[shiftKey(today, -offset)]?.[period];
+      if (!entry?.scheduledStepKeys?.includes(key)) continue;
+      scheduled += 1;
+      if (entry.skipped?.[key]?.reason === reason) skipped += 1;
+    }
+    if (scheduled === 3 && skipped >= 2) {
+      return routineStepInstances(routine[period]).find((item) => item.key === key)?.step;
+    }
+  }
+  return undefined;
+}
+
+export function repeatedNotNowStep(
+  log: RoutineLog,
+  today: DateKey,
+  period: RoutinePeriod,
+  routine: Routine,
+): RoutineStep | undefined {
+  return repeatedSkipStep(log, today, period, routine, "not_now");
+}
+
+/** Three recent logged periods with less than half their steps done. */
+export function lowCompletionHistory(log: RoutineLog, today: DateKey): boolean {
+  const recent = [];
+  for (let offset = 1; offset <= 7 && recent.length < 3; offset += 1) {
+    const day = log.days[shiftKey(today, -offset)];
+    for (const period of ["am", "pm"] as const) {
+      const entry = day?.[period];
+      if (entry && entry.total > 0) recent.push(entry.done.length / entry.total);
+      if (recent.length === 3) break;
+    }
+  }
+  return recent.length === 3 && recent.every((fraction) => fraction < 0.5);
 }
 
 function hasLoggedDay(log: RoutineLog, today: DateKey, days = 7): boolean {
@@ -143,6 +192,59 @@ export function routineAdjustment(
       cta: "See tonight's routine",
       href: "/(tabs)/routine?period=pm",
       period: "pm",
+    };
+  }
+
+  const period = ctx.period ?? "pm";
+  const periods: RoutinePeriod[] = [period, period === "am" ? "pm" : "am"];
+  const ranOut = periods
+    .map((candidate) => ({
+      period: candidate,
+      step: repeatedSkipStep(ctx.log, ctx.today, candidate, ctx.routine, "ran_out"),
+    }))
+    .find((candidate) => candidate.step);
+  if (!dismissed.has("product_maintenance") && ranOut?.step) {
+    return {
+      kind: "product_maintenance",
+      headline: `Check your ${stepLabel(ranOut.step).toLowerCase()} supply`,
+      body: `You reported running out of your ${stepLabel(ranOut.step).toLowerCase()} twice in its last three scheduled appearances. Review your products when you are ready.`,
+      cta: "Review products",
+      href: "/(tabs)/shelf",
+    };
+  }
+
+  const notNow = periods
+    .map((candidate) => ({
+      period: candidate,
+      step: repeatedNotNowStep(ctx.log, ctx.today, candidate, ctx.routine),
+    }))
+    .find((candidate) => candidate.step);
+  if (
+    !dismissed.has("simplify_today") &&
+    notNow?.step
+  ) {
+    return {
+      kind: "simplify_today",
+      headline: "Keep your routine easier to finish",
+      body: `You passed on ${stepLabel(notNow.step).toLowerCase()} twice in its last three scheduled appearances. Minimum Mode can focus on the essentials today.`,
+      cta: "Review Minimum Mode",
+      href: `/(tabs)/routine?period=${notNow.period}&focus=essentials`,
+      period: notNow.period,
+    };
+  }
+
+  if (
+    !dismissed.has("simplify_today") &&
+    lowCompletionHistory(ctx.log, ctx.today)
+  ) {
+    const period = ctx.period ?? "pm";
+    return {
+      kind: "simplify_today",
+      headline: "Make today's routine lighter",
+      body: "A shorter routine may be easier to keep. Minimum Mode focuses on the essentials without changing your plan until you choose it.",
+      cta: "Review Minimum Mode",
+      href: `/(tabs)/routine?period=${period}&focus=essentials`,
+      period,
     };
   }
 

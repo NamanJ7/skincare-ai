@@ -17,18 +17,29 @@
     "preview": {
       "distribution": "internal",
       "channel": "preview",
-      "environment": "preview"
+      "environment": "preview",
+      "env": { "EXPO_PUBLIC_E2E_FIXTURES": "0" }
+    },
+    "e2e": {
+      "distribution": "internal",
+      "channel": "e2e",
+      "environment": "preview",
+      "env": { "EXPO_PUBLIC_E2E_FIXTURES": "1" },
+      "android": { "buildType": "apk" },
+      "ios": { "simulator": false }
     },
     "beta": {
       "distribution": "store",
       "autoIncrement": true,
       "channel": "beta",
-      "environment": "production"
+      "environment": "production",
+      "env": { "EXPO_PUBLIC_E2E_FIXTURES": "0" }
     },
     "production": {
       "autoIncrement": true,
       "channel": "production",
-      "environment": "production"
+      "environment": "production",
+      "env": { "EXPO_PUBLIC_E2E_FIXTURES": "0" }
     }
   },
   "submit": {

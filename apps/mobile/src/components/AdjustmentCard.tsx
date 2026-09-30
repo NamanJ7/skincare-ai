@@ -36,6 +36,11 @@ export function AdjustmentCard({
 
   const accept = async () => {
     if (applying) return;
+    if (adjustment.kind === "product_maintenance") {
+      track("routine_adjustment_accepted", { kind: adjustment.kind });
+      if (adjustment.href) router.push(adjustment.href);
+      return;
+    }
     setApplying(true);
     setSaveError(false);
     const revision = {
@@ -90,12 +95,14 @@ export function AdjustmentCard({
         ) : null}
         {adjustment.cta && adjustment.href ? (
           <TextButton
+            testID="daily-loop-apply-adjustment"
             label={applying ? "Saving…" : adjustment.cta}
             onPress={() => void accept()}
           />
         ) : null}
       </Callout>
       <Pressable
+        testID="daily-loop-dismiss-adjustment"
         onPress={dismiss}
         accessibilityRole="button"
         accessibilityLabel="Dismiss suggestion for today"

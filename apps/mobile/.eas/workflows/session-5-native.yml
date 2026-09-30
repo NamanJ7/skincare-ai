@@ -1,0 +1,26 @@
+name: Session 5 native validation
+
+# Run manually from apps/mobile with:
+# eas workflow:run .eas/workflows/session-5-native.yml
+# Native tests intentionally do not block every PR. Their results block beta.
+jobs:
+  build_android_e2e:
+    type: build
+    params:
+      platform: android
+      profile: e2e
+
+  maestro_android:
+    needs: [build_android_e2e]
+    type: maestro
+    runs_on: linux-large-nested-virtualization
+    params:
+      build_id: ${{ needs.build_android_e2e.outputs.build_id }}
+      flow_path: ./maestro
+      record_screen: true
+
+  build_ios_internal:
+    type: build
+    params:
+      platform: ios
+      profile: e2e

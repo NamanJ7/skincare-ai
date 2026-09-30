@@ -14,6 +14,7 @@ export type JourneyEventKind =
   | "scan"
   | "check_in"
   | "routine_revision"
+  | "routine_undo"
   | "milestone";
 
 export interface JourneyEvent {
@@ -49,7 +50,8 @@ const EVENT_ORDER: Record<JourneyEventKind, number> = {
   scan: 2,
   check_in: 3,
   routine_revision: 4,
-  milestone: 5,
+  routine_undo: 5,
+  milestone: 6,
 };
 
 function chronologicalScans(scans: ScanRecord[]): ScanRecord[] {
@@ -72,6 +74,7 @@ function firstDate(input: DeriveJourneyInput): DateKey | null {
     ...input.checkIns.entries.map((entry) => entry.date),
     ...input.scans.scans.map((scan) => scan.date),
     ...(input.log.revision ? [input.log.revision.effectiveDate] : []),
+    ...(input.log.coachingHistory ?? []).map((entry) => entry.date),
   ].sort();
   return dates[0] ?? null;
 }
@@ -168,7 +171,31 @@ export function deriveJourney(input: DeriveJourneyInput): JourneySummary {
     });
   }
 
-  if (input.log.revision) {
+  for (const entry of input.log.coachingHistory ?? []) {
+    events.push({
+      id: `routine-revision:${entry.appliedAt}`,
+      date: entry.date,
+      createdAt: entry.appliedAt,
+      kind: "routine_revision",
+      lane: "behavior",
+      title: "Routine adjusted",
+      detail: entry.kind === "pause_strong_actives" ? "Recovery Mode applied." : "A lighter routine was applied.",
+    });
+    if (entry.undoneAt) {
+      events.push({
+        id: `routine-undo:${entry.undoneAt}`,
+        date: entry.date,
+        createdAt: entry.undoneAt,
+        kind: "routine_undo",
+        lane: "behavior",
+        title: "Routine adjustment undone",
+      });
+    }
+  }
+
+  if (input.log.revision && !(input.log.coachingHistory ?? []).some(
+    (entry) => entry.appliedAt === input.log.revision?.acceptedAt,
+  )) {
     events.push({
       id: `routine-revision:${input.log.revision.acceptedAt}`,
       date: input.log.revision.effectiveDate,

@@ -35,6 +35,8 @@ web-build/
 
 # test / coverage
 coverage/
+playwright-report/
+test-results/
 
 # deploy
 .vercel/

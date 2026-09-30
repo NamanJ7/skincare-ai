@@ -16,6 +16,7 @@ import { RetentionEffects } from "@/components/RetentionEffects";
 import { AnalyticsLifecycle } from "@/components/AnalyticsLifecycle";
 import { AppErrorBoundary } from "@/components/AppErrorBoundary";
 import { pullMissingSnapshots } from "@/lib/backend/hydrate";
+import { fixtureRouteAllowed } from "@/lib/e2e-fixtures";
 import { BACKEND_CONFIGURED } from "@/lib/backend/supabase";
 import { profileAuthorizationHref } from "@/lib/nav";
 import { installScanPhotoDisposer } from "@/lib/photos";
@@ -100,6 +101,12 @@ function AppNavigator() {
     pathSegments[0] === "index" ||
     pathSegments[0] === "(auth)";
   const required = profileAuthorizationHref(data);
+
+  // Internal E2E builds can reset even an empty profile. The route itself
+  // independently redirects when the flag is absent.
+  if (fixtureRouteAllowed() && pathSegments[0] === "internal" && pathSegments[1] === "e2e-fixtures") {
+    return <Stack screenOptions={{ headerShown: false }} />;
+  }
 
   if (
     required &&

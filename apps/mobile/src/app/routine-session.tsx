@@ -521,6 +521,7 @@ export default function RoutineSessionScreen() {
         <ProgressBar value={1} />
         {saveError ? <SaveError /> : null}
         <PrimaryButton
+          testID="daily-loop-finish"
           label="Finish routine"
           loading={saving}
           onPress={finish}
@@ -651,8 +652,8 @@ export default function RoutineSessionScreen() {
       </Card>
 
       {saveError ? <SaveError /> : null}
-      <PrimaryButton label="Done" loading={saving} onPress={markDone} />
-      <GhostButton label="Skip" onPress={() => setSkipOpen(true)} />
+      <PrimaryButton testID="daily-loop-done" label="Done" loading={saving} onPress={markDone} />
+      <GhostButton testID="daily-loop-skip" label="Skip" onPress={() => setSkipOpen(true)} />
       {currentIndex > 0 ? (
         <TextButton
           label="Back"
@@ -680,6 +681,7 @@ export default function RoutineSessionScreen() {
             {SKIP_REASONS.map((item) => (
               <Pressable
                 key={item.reason}
+                testID={`daily-loop-skip-${item.reason}`}
                 accessibilityRole="button"
                 onPress={() => void chooseSkip(item.reason)}
                 style={({ pressed }) => [
