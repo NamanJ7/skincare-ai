@@ -159,15 +159,18 @@ export function PrimaryButton({
   onPress,
   disabled = false,
   loading = false,
+  testID,
 }: {
   label: string;
   onPress?: () => void;
   disabled?: boolean;
   loading?: boolean;
+  testID?: string;
 }) {
   const { colors, styles } = useUiTheme();
   return (
     <Pressable
+      testID={testID}
       onPress={onPress}
       disabled={disabled || loading}
       accessibilityRole="button"
@@ -201,13 +204,16 @@ export function PrimaryButton({
 export function GhostButton({
   label,
   onPress,
+  testID,
 }: {
   label: string;
   onPress?: () => void;
+  testID?: string;
 }) {
   const { colors, styles } = useUiTheme();
   return (
     <Pressable
+      testID={testID}
       onPress={onPress}
       accessibilityRole="button"
       accessibilityLabel={label}
@@ -229,14 +235,17 @@ export function TextButton({
   label,
   onPress,
   tone,
+  testID,
 }: {
   label: string;
   onPress?: () => void;
   tone?: string;
+  testID?: string;
 }) {
   const { colors, styles } = useUiTheme();
   return (
     <Pressable
+      testID={testID}
       onPress={onPress}
       accessibilityRole="button"
       accessibilityLabel={label}

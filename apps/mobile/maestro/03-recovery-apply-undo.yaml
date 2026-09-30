@@ -1,0 +1,14 @@
+appId: com.pore.mobile
+---
+- openLink: pore://internal/e2e-fixtures
+- tapOn:
+    id: e2e-fixture-recent-mild-irritation
+- stopApp
+- launchApp
+- assertVisible: "Give your skin a quieter few nights"
+- tapOn:
+    id: daily-loop-apply-adjustment
+- assertVisible: "Recovery mode is on"
+- tapOn:
+    id: daily-loop-undo-adjustment
+- assertNotVisible: "Recovery mode is on"

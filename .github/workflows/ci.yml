@@ -40,6 +40,9 @@ jobs:
       - name: Audit product claims
         run: pnpm audit:copy
 
+      - name: Audit mobile theme
+        run: pnpm audit:theme
+
       - name: Typecheck
         run: pnpm typecheck
 
@@ -48,6 +51,30 @@ jobs:
 
       - name: Build
         run: pnpm build
+
+      - name: Install browser
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Verify beta/production fixture gate
+        run: |
+          pnpm --filter @pore/mobile exec expo export --platform web --output-dir .expo-live-preview --clear
+          E2E_EXPECT_DISABLED=1 pnpm test:e2e
+
+      - name: Build internal E2E web preview
+        run: EXPO_PUBLIC_E2E_FIXTURES=1 pnpm --filter @pore/mobile exec expo export --platform web --output-dir .expo-live-preview --clear
+
+      - name: Browser daily-loop journey
+        run: pnpm test:e2e
+
+      - name: Upload browser evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mobile-playwright-results
+          path: |
+            playwright-report/
+            test-results/
+          if-no-files-found: ignore
 
   secrets:
     runs-on: ubuntu-latest

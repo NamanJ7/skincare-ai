@@ -129,7 +129,7 @@ export function TodayRoutineCard({
 
       <View style={styles.footer}>
         {!complete && steps.length > 0 ? (
-          <PrimaryButton label={startRoutineLabel} onPress={onStartRoutine} />
+          <PrimaryButton testID="daily-loop-start" label={startRoutineLabel} onPress={onStartRoutine} />
         ) : null}
         <TextButton label="View full routine" onPress={onViewRoutine} />
       </View>

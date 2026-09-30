@@ -90,6 +90,7 @@
       }
     },
     "android": {
+      "package": "com.pore.mobile",
       "permissions": [
         "android.permission.CAMERA"
       ],

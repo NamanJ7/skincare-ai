@@ -163,7 +163,7 @@ export default function TodayTab() {
   const dismissedKinds =
     reminderPrefs.dismissed?.date === today
       ? (reminderPrefs.dismissed.kinds.filter((kind) =>
-          ["pause_strong_actives", "simplify_today", "small_win"].includes(
+          ["pause_strong_actives", "simplify_today", "small_win", "product_maintenance"].includes(
             kind,
           ),
         ) as AdjustmentKind[])
